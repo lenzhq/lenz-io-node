@@ -1,0 +1,72 @@
+{
+  "name": "lenz-io",
+  "version": "1.0.0-rc.1",
+  "description": "Official Node SDK for the Lenz Hallucination Verification API",
+  "license": "MIT",
+  "author": "Lenz <support@lenz.io>",
+  "homepage": "https://lenz.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lenzhq/lenz-io-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lenzhq/lenz-io-node/issues"
+  },
+  "keywords": [
+    "lenz",
+    "fact-check",
+    "llm",
+    "hallucination",
+    "verification",
+    "api",
+    "sdk",
+    "ai"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:smoke": "vitest run test/smoke.test.ts",
+    "lint": "eslint . && prettier --check .",
+    "lint:fix": "eslint --fix . && prettier --write .",
+    "type": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "nock": "^13.5.0",
+    "prettier": "^3.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}
