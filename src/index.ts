@@ -57,6 +57,7 @@ export type {
   EntityRef,
   ExtractInput,
   ExtractedClaims,
+  ExtractedEntity,
   FollowupHistory,
   FollowupReply,
   LibraryItem,

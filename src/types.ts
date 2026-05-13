@@ -123,13 +123,20 @@ export interface LibraryList {
   page_size: number;
 }
 
+export interface ExtractedEntity {
+  /** Full formal entity name as identified by framing. */
+  name: string;
+  /** One of: `person` | `org` | `place` | `topic`. */
+  type: string;
+}
+
 export interface ExtractedClaims {
   status?: string;
   atomic_claim?: string;
   identified_claims?: string[];
   candidate_claims?: string[];
   domain?: string;
-  key_entities?: string[];
+  key_entities?: ExtractedEntity[];
   presumed_intent?: string;
   original_input?: string;
 }
