@@ -1,5 +1,5 @@
 /**
- * Official Node SDK for the Lenz Hallucination Verification API.
+ * Official Node SDK for the Lenz Claim Verification API for AI Product Teams.
  *
  *     npm install lenz-io
  *

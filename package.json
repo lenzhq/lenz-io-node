@@ -1,7 +1,7 @@
 {
   "name": "lenz-io",
   "version": "1.0.0-rc.1",
-  "description": "Official Node SDK for the Lenz Hallucination Verification API",
+  "description": "Official Node SDK for the Lenz Claim Verification API for AI Product Teams",
   "license": "MIT",
   "author": "Lenz <support@lenz.io>",
   "homepage": "https://lenz.io",
