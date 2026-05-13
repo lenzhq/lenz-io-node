@@ -236,7 +236,10 @@ export class Lenz {
         visibility: c.visibility ?? "",
       })),
     };
+    // Batch-wide defaults — per-item values (in the claims map above) override
+    // server-side when set.
     if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
+    if (input.visibility) body["visibility"] = input.visibility;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<BatchAccepted>({

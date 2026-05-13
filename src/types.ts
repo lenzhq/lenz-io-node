@@ -172,7 +172,10 @@ export interface VerifyInput {
 
 export interface VerifyBatchInput {
   claims: Array<{ text: string; sourceUrl?: string; webhookUrl?: string; visibility?: string }>;
+  /** Batch-wide webhook URL; per-item value (if set) overrides. */
   webhookUrl?: string;
+  /** Batch-wide visibility default ('public' | 'private'); per-item value overrides. */
+  visibility?: string;
   idempotencyKey?: string;
 }
 

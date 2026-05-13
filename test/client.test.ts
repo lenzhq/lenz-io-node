@@ -129,6 +129,27 @@ describe("Marquee verbs", () => {
     expect(headers.get("Idempotency-Key")).toBe("custom-key-1");
   });
 
+  it("verifyBatch sends batch-level visibility in the request body", async () => {
+    const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatch({
+      claims: [{ text: "a" }, { text: "b" }],
+      visibility: "public",
+    });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    // Batch-level visibility lands at the top of the body; per-item values
+    // can still override server-side.
+    expect(body.visibility).toBe("public");
+  });
+
+  it("verifyBatch omits visibility when not set", async () => {
+    const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatch({ claims: [{ text: "a" }] });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.visibility).toBeUndefined();
+  });
+
   it("verifyBatch returns batch_id and items", async () => {
     const { fetch } = makeFetch([
       {
