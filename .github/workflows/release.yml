@@ -41,9 +41,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
           cache: npm
+      # npm trusted publishers (OIDC) require npm >= 11.5.1; Node 22
+      # ships with npm 10.x, so upgrade explicitly before publishing.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
       - name: Publish (OIDC if configured, else NPM_TOKEN)
