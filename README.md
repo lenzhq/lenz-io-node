@@ -32,14 +32,11 @@ for (const claim of claims) {
 }
 ```
 
-## The 7-model panel — the work is the product
+## How verification works
 
-Frame → Debate (2 models, 2 rounds) → Adjudicate (3 models: sources, logic,
-context) → Conclude → Cite. ~90 seconds wall-clock per claim. You get a
-report with citations, not a similarity score.
-
-ChatGPT gives you an answer in 5 seconds that might be wrong. Lenz takes
-~90 seconds and gives you a report you can defend.
+Frame → Collect Evidence → Debate (2 models, 2 rounds) → Adjudicate
+(3 models: sources, logic, context) → Conclude. ~90 seconds wall-clock
+per claim.
 
 ## Magical-moment demo
 
