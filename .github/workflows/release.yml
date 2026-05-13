@@ -54,4 +54,12 @@ jobs:
       - name: Publish (OIDC if configured, else NPM_TOKEN)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        # npm 11 requires an explicit dist-tag for prerelease versions so they
+        # don't silently overwrite `latest`. Tags containing `-` (e.g. -rc.6)
+        # publish under `next`; clean semver tags promote to `latest`.
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            npm publish --access public --provenance --tag next
+          else
+            npm publish --access public --provenance
+          fi
