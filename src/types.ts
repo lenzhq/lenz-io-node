@@ -33,9 +33,12 @@ export interface Assessment {
   score?: number | null;
   confidence?: number | null;
   reasoning?: string;
-  weakest_sources?: string[];
-  logical_fallacies?: string[];
-  missing_context?: string[];
+  /**
+   * Per-panelist warnings. Each panelist emits exactly one category
+   * (logical fallacies, missing context, or weakest sources); the kind
+   * is implicit in `focus_area`.
+   */
+  warnings?: string[];
 }
 
 export interface Audit {
@@ -49,6 +52,16 @@ export interface Audit {
 export interface CandidateClaim {
   text?: string;
   domain?: string;
+}
+
+/**
+ * An entity (person, place, organization, concept) referenced in the
+ * claim. `qid` is the Wikidata Q identifier (e.g. `Q42`) when the entity
+ * was resolved against Lenz's internal catalog; `null` otherwise.
+ */
+export interface EntityRef {
+  name: string;
+  qid: string | null;
 }
 
 export interface SimilarVerification {
@@ -65,12 +78,11 @@ export interface Verification {
   url?: string;
   claim?: string;
   domain?: string;
-  entities?: string[];
+  entities?: EntityRef[];
   presumed_intent?: string;
   verdict?: Verdict;
   executive_summary?: string;
   warnings?: string[];
-  is_time_dependent?: boolean;
   sources?: Source[];
   audit?: Audit;
   created_at?: string | null;
@@ -114,7 +126,6 @@ export interface ExtractedClaims {
   domain?: string;
   key_entities?: string[];
   presumed_intent?: string;
-  is_time_dependent?: boolean;
   original_input?: string;
 }
 
@@ -181,8 +192,6 @@ export interface VerifyBatchInput {
 
 export interface ExtractInput {
   text: string;
-  country?: string;
-  city?: string;
 }
 
 export interface SelectInput {

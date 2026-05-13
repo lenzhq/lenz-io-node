@@ -54,6 +54,7 @@ export type {
   BatchAccepted,
   CandidateClaim,
   DebateSide,
+  EntityRef,
   ExtractInput,
   ExtractedClaims,
   FollowupHistory,

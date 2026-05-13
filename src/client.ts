@@ -254,7 +254,7 @@ export class Lenz {
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
-      json: { text: input.text, country: input.country ?? "", city: input.city ?? "" },
+      json: { text: input.text },
     });
   }
 
