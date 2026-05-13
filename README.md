@@ -2,15 +2,46 @@
 
 Official Node SDK for the [Lenz Hallucination Verification API](https://lenz.io).
 
-The fact-check API for your LLM features. Drop in `/verify` after your model
-generates an answer; get back a verdict with sources you can show your users
-and audit later.
+**Two API primitives for AI product teams.** `extract` pulls verifiable
+claims out of any text — free, 1000 calls/key/day. `verify` checks one
+with a 7-model panel and citations, ~90s. Use them together or alone.
+
+Built for teams whose AI output is async or document-shaped: legal-memo
+generators, deep-research products, due-diligence platforms, vertical
+agents producing structured deliverables. Not chat AI, not voice AI,
+not real-time copilots — 90 seconds is the wrong shape for those.
 
 ```bash
 npm install lenz-io
 ```
 
-## Quickstart
+## Quickstart — the canonical integration
+
+```ts
+import { Lenz } from "lenz-io";
+
+const client = new Lenz({ apiKey: "lenz_..." });
+
+// 1. Pull factual claims out of your model output (free, instant)
+const { claims } = await client.extract({ text: llmOutput });
+
+// 2. Verify the ones that matter (~90s each, 7-model panel)
+for (const claim of claims) {
+  const v = (await client.verifyAndWait({ claim })).verdict;
+  console.log(v?.label, v?.score, v?.confidence);
+}
+```
+
+## The 7-model panel — the work is the product
+
+Frame → Debate (2 models, 2 rounds) → Adjudicate (3 models: sources, logic,
+context) → Conclude → Cite. ~90 seconds wall-clock per claim. You get a
+report with citations, not a similarity score.
+
+ChatGPT gives you an answer in 5 seconds that might be wrong. Lenz takes
+~90 seconds and gives you a report you can defend.
+
+## Magical-moment demo
 
 ```ts
 import { Lenz } from "lenz-io";
@@ -26,7 +57,7 @@ for (const source of (v.sources ?? []).slice(0, 3)) {
 }
 ```
 
-The quickstart claim is pre-cached so this returns in ~1.5s. Your own claims
+The demo claim is pre-cached so this returns in ~1.5s. Your own claims
 hit the full pipeline (~60-90s) — use webhooks for production async flows.
 
 > **Get your webhook secret here →** [lenz.io/api-integration](https://lenz.io/api-integration)
