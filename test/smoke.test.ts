@@ -48,11 +48,19 @@ maybe("smoke", () => {
   });
 
   it("extract returns parseable claims", async () => {
+    // Same Einstein brief shown on /developers — keeps the smoke aligned
+    // with what callers see in the docs.
     // Framing returns either `atomic_claim` (one cohesive claim) OR
     // `identified_claims` (multiple). Either is success — the LLM picks
     // based on the input's coherence.
+    const brief =
+      "Albert Einstein won the 1921 Nobel Prize in Physics for his theory " +
+      "of general relativity. He developed the special theory of relativity " +
+      "in 1905 while working as a patent clerk in Bern. Born in Ulm in " +
+      "1879, he emigrated to the US in 1933 and joined the Institute for " +
+      "Advanced Study.";
     const client = makeClient();
-    const out = await client.extract({ text: "Earth is flat. Hormuz is open." });
+    const out = await client.extract({ text: brief });
     const hasAtomic = (out.atomic_claim ?? "").trim().length > 0;
     const hasIdentified =
       Array.isArray(out.identified_claims) &&
