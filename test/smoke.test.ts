@@ -46,4 +46,23 @@ maybe("smoke", () => {
     expect(typeof u.credits_total).toBe("number");
     expect(typeof u.credits_used).toBe("number");
   });
+
+  it("extract splits multi-claim text", async () => {
+    // Same Einstein brief shown on /developers — keeps the smoke aligned
+    // with what callers see in the docs.
+    const brief =
+      "Albert Einstein won the 1921 Nobel Prize in Physics for his theory " +
+      "of general relativity. He developed the special theory of relativity " +
+      "in 1905 while working as a patent clerk in Bern. Born in Ulm in " +
+      "1879, he emigrated to the US in 1933 and joined the Institute for " +
+      "Advanced Study.";
+    const client = makeClient();
+    const out = await client.extract({ text: brief });
+    expect(Array.isArray(out.identified_claims)).toBe(true);
+    expect(out.identified_claims?.length ?? 0).toBeGreaterThanOrEqual(2);
+    for (const c of out.identified_claims ?? []) {
+      expect(typeof c).toBe("string");
+      expect(c.trim().length).toBeGreaterThan(0);
+    }
+  });
 });
