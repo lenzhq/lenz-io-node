@@ -111,6 +111,11 @@ export interface VerificationList {
 
 export interface LibraryItem extends VerificationListItem {}
 
+/** Wrapper for `GET /verifications/{id}/related`. */
+export interface RelatedVerifications {
+  items: SimilarVerification[];
+}
+
 export interface LibraryList {
   items: LibraryItem[];
   total: number;

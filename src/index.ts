@@ -62,6 +62,7 @@ export type {
   LibraryItem,
   LibraryList,
   LibraryListInput,
+  RelatedVerifications,
   SelectInput,
   SimilarVerification,
   Source,

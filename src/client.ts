@@ -41,6 +41,7 @@ import type {
   LibraryItem,
   LibraryList,
   LibraryListInput,
+  RelatedVerifications,
   SelectInput,
   TaskAccepted,
   TaskStatus,
@@ -137,6 +138,23 @@ class VerificationsNamespace {
       method: "PATCH",
       path: `/verifications/${verificationId}/visibility`,
       json: { visibility },
+    });
+  }
+
+  /**
+   * Public verifications semantically related to this one (pgvector ANN).
+   * Server clamps `limit` to 10. Excludes the verification itself and
+   * editorially-hidden claims. Accessible for any verification the caller
+   * owns or any public library item.
+   */
+  related(
+    verificationId: string,
+    { limit = 5 }: { limit?: number } = {},
+  ): Promise<RelatedVerifications> {
+    return this.client.request<RelatedVerifications>({
+      method: "GET",
+      path: `/verifications/${verificationId}/related`,
+      query: { limit },
     });
   }
 }

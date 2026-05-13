@@ -331,6 +331,38 @@ describe("Resource namespaces", () => {
     expect(out["visibility"]).toBe("public");
   });
 
+  it("verifications.related returns typed items + sends limit param", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          items: [
+            {
+              verification_id: "rel00001",
+              claim: "A related claim",
+              verdict_label: "false",
+              score: 2.5,
+              url: "https://lenz.io/c/foo-rel00001",
+              distance: 0.31,
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const related = await client.verifications.related("vid_1", { limit: 5 });
+    expect(calls[0]!.url).toContain("limit=5");
+    expect(related.items).toHaveLength(1);
+    expect(related.items[0]!.verification_id).toBe("rel00001");
+    expect(related.items[0]!.distance).toBe(0.31);
+  });
+
+  it("verifications.related empty list", async () => {
+    const { fetch } = makeFetch([{ body: { items: [] } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const related = await client.verifications.related("vid_2");
+    expect(related.items).toEqual([]);
+  });
+
   it("followup.history", async () => {
     const { fetch } = makeFetch([
       { body: { messages: [], exchanges_used: 0, exchange_limit: 10, can_send: true } },
