@@ -50,6 +50,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: npm
       - run: npm ci
+      # Source the version from the git tag (`v1.2.3-rc.4` → `1.2.3-rc.4`)
+      # so package.json never has to be hand-bumped. --no-git-tag-version
+      # keeps it as a working-tree edit — we don't commit the bump.
+      - run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
       - run: npm run build
       - name: Publish (OIDC if configured, else NPM_TOKEN)
         env:
