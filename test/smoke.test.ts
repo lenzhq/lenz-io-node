@@ -46,4 +46,15 @@ maybe("smoke", () => {
     expect(typeof u.credits_total).toBe("number");
     expect(typeof u.credits_used).toBe("number");
   });
+
+  it("extract splits multi-claim text", async () => {
+    const client = makeClient();
+    const out = await client.extract({ text: "Earth is flat. Hormuz is open." });
+    expect(Array.isArray(out.identified_claims)).toBe(true);
+    expect(out.identified_claims?.length ?? 0).toBeGreaterThanOrEqual(2);
+    for (const c of out.identified_claims ?? []) {
+      expect(typeof c).toBe("string");
+      expect(c.trim().length).toBeGreaterThan(0);
+    }
+  });
 });
