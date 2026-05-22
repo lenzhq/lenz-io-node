@@ -3,13 +3,31 @@
  *
  *     npm install lenz-io
  *
+ * The fact-check API for AI products. Four primitives form a research-depth
+ * ladder — find claims, judge them fast, prove them deep, follow up:
+ *
  * ```ts
  * import { Lenz } from 'lenz-io';
- *
  * const client = new Lenz({ apiKey: 'lenz_...' });
- * const v = await client.verifyAndWait({ claim: "Sharks don't get cancer" });
- * console.log(v.verdict?.label, v.verdict?.score);
- * // false 2.0
+ *
+ * // 1. /extract — pull verifiable claims out of text (free, 1000/day)
+ * const out = await client.extract({ text: llmOutput });
+ *
+ * // 2. /assess — fast 3-model verdict on each (~5-10s, paid)
+ * const quick = await client.assess({ text: llmOutput });
+ *
+ * // 3. /verify — escalate low-confidence to the full pipeline (~90s, paid)
+ * for (const c of quick.claims) {
+ *   if (c.confidence === 'low') {
+ *     const deep = await client.verifyAndWait({ claim: c.claim! });
+ *     console.log(deep.verdict, deep.lenz_score);
+ *   }
+ * }
+ *
+ * // 4. /ask — follow-up questions grounded on a verification
+ * const reply = await client.ask.send(deep.verification_id!, {
+ *   message: 'Which source is strongest?',
+ * });
  * ```
  *
  * See https://lenz.io/api/v1/docs/ for the full API reference.
@@ -49,6 +67,12 @@ export type {
 } from "./webhooks.js";
 
 export type {
+  AskHistory,
+  AskMessage,
+  AskReply,
+  AssessClaim,
+  AssessInput,
+  AssessResponse,
   Assessment,
   Audit,
   BatchAccepted,
@@ -58,8 +82,6 @@ export type {
   ExtractInput,
   ExtractedClaims,
   ExtractedEntity,
-  FollowupHistory,
-  FollowupReply,
   LibraryItem,
   LibraryList,
   LibraryListInput,
@@ -70,7 +92,6 @@ export type {
   TaskAccepted,
   TaskStatus,
   Usage,
-  Verdict,
   Verification,
   VerificationList,
   VerificationListItem,

@@ -2,9 +2,12 @@
 
 Official Node SDK for the [Lenz Claim Verification API for AI Product Teams](https://lenz.io/developers).
 
-**Two API primitives for AI product teams.** `extract` pulls verifiable
-claims out of any text — free, 1000 calls/key/day. `verify` checks one
-with a 7-model panel and citations, ~90s. Use them together or alone.
+**Four API primitives, one research-depth ladder.**
+
+- `extract` — pull verifiable claims out of any text. Free, 1000 calls/key/day.
+- `assess` — fast 3-model panel verdict in ~5-10s. Sync, paid.
+- `verify` — full 7-model pipeline with citations in ~90s. Async, paid.
+- `ask` — follow-up questions grounded on a verification.
 
 Built for teams whose AI output is async or document-shaped: legal-memo
 generators, deep-research products, due-diligence platforms, vertical
@@ -22,21 +25,40 @@ import { Lenz } from "lenz-io";
 
 const client = new Lenz({ apiKey: "lenz_..." });
 
-// 1. Pull factual claims out of your model output (free, instant)
-const { claims } = await client.extract({ text: llmOutput });
+// 1. extract — pull verifiable claims out of any text (free)
+const out = await client.extract({ text: llmOutput });
 
-// 2. Verify the ones that matter (~90s each, 7-model panel)
-for (const claim of claims) {
-  const v = (await client.verifyAndWait({ claim })).verdict;
-  console.log(v?.label, v?.score, v?.confidence);
+// 2. assess — fast 3-model verdict on each (~5-10s, sync)
+const quick = await client.assess({ text: llmOutput });
+for (const c of quick.claims) {
+  console.log(c.verdict, c.confidence, c.claim);
 }
+
+// 3. verify — escalate low-confidence claims to the full panel + citations
+for (const c of quick.claims) {
+  if (c.confidence === "low") {
+    const v = await client.verifyAndWait({ claim: c.claim! });
+    console.log(v.verdict, v.lenz_score, v.executive_summary);
+  }
+}
+
+// 4. ask — follow-up grounded on a verification
+const reply = await client.ask.send(v.verification_id!, {
+  message: "Which source is strongest?",
+});
+console.log(reply.reply);
 ```
+
+`assess` and `verify` share a result cache server-side: if a claim
+already has a deep verification, `assess` returns it via
+`verification_url` and you can skip the escalation.
 
 ## How verification works
 
 Frame → Collect Evidence → Debate (2 models, 2 rounds) → Adjudicate
 (3 models: sources, logic, context) → Conclude. ~90 seconds wall-clock
-per claim.
+per claim. `assess` runs a leaner 3-model panel against the same
+framing for the ~5-10s pass.
 
 ## Magical-moment demo
 
@@ -46,8 +68,8 @@ import { Lenz } from "lenz-io";
 const client = new Lenz({ apiKey: "lenz_..." });
 
 const v = await client.verifyAndWait({ claim: "Sharks don't get cancer" });
-console.log(v.verdict?.label, v.verdict?.score);
-// false 2.0
+console.log(v.verdict, v.lenz_score);
+// False 2.0
 
 for (const source of (v.sources ?? []).slice(0, 3)) {
   console.log(" -", source.title, source.url);
@@ -59,16 +81,28 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 
 > **Get your webhook secret here →** [lenz.io/api-integration](https://lenz.io/api-integration)
 
-## What you get
+## What you get on the client
 
-- **`client.verifyAndWait({ claim, ... })`** — submit + poll until the pipeline lands. Returns a typed `Verification`.
-- **`client.verify({ claim })`** — async submit; returns a `task_id`. Use webhooks for the callback.
-- **`client.extract({ text })`** — pull verifiable claims out of any text (free, capped at 1000/key/day).
-- **`client.verifyBatch({ claims })`** — fan-out for multi-claim LLM outputs.
-- **`client.verifications.{list,get,delete,setVisibility}(...)`** — manage past verifications.
-- **`client.followup.{history,send,reset}(verificationId)`** — Q&A on a verification.
-- **`client.library.{list,get}(...)`** — browse the public catalog (no API key needed).
-- **`client.usage()`** — credits and rate-limit remaining.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/key/day.
+- **`client.assess({ text })`** → `AssessResponse`. Sync, ~5-10s, returns one entry per identified claim.
+- **`client.verify({ claim })`** → `TaskAccepted`. Async submit; pair with a webhook for the callback.
+- **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic).
+- **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
+- **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification.
+- **`client.verifications.{list,get,delete,setVisibility,related}(...)`** → manage past verifications. `get` accepts anon callers and returns any non-hidden public claim.
+- **`client.library.list(...)`** → browse the public catalog (no API key needed).
+- **`client.usage()`** → credits and rate-limit remaining.
+
+## Response shape — the unified vocabulary
+
+Every claim-shaped response shares these fields at top level:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `claim` | `string` | The framed claim text. |
+| `verdict` | `string` | `"True"` \| `"Mostly True"` \| `"Misleading"` \| `"False"` \| `"Error"`. |
+| `confidence` | `string` | Categorical: `"high"` \| `"medium"` \| `"low"`. |
+| `lenz_score` | `number \| null` | Integer 0–10 (deep verdicts and list endpoints; `assess` omits it). |
 
 ### Webhooks
 
@@ -84,8 +118,8 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
   switch (event.event) {
     case "verification.completed": {
       const completed = event as VerificationCompleted;
-      const verdict = completed.result?.["verdict"];
-      // …persist verdict + sources
+      const r = completed.result as Record<string, unknown>;
+      // r.verdict, r.lenz_score, r.confidence, ...
       break;
     }
     case "verification.needs_input": {
@@ -103,7 +137,7 @@ you and rejects tampered or replayed payloads.
 
 See [`examples/core/express-webhook.ts`](examples/core/express-webhook.ts)
 for a runnable receiver and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
-for the headline extract-and-verify pattern.
+for the headline assess-then-escalate pattern.
 
 ## Errors
 
@@ -155,7 +189,7 @@ try {
 // Later (different process / restart):
 const status = await client.getStatus("tsk_abc123");
 if (status.status === "completed") {
-  console.log(status.result?.verdict?.label);
+  console.log(status.result?.verdict, status.result?.lenz_score);
 }
 ```
 
