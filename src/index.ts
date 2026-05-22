@@ -13,7 +13,7 @@
  * // 1. /extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
  *
- * // 2. /assess — fast 3-model verdict on each (~10s, paid)
+ * // 2. /assess — fast 3-model verdict on each (~5-10s, paid)
  * const quick = await client.assess({ text: llmOutput });
  *
  * // 3. /verify — escalate low-confidence to the full pipeline (~90s, paid)

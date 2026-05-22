@@ -5,7 +5,7 @@ Official Node SDK for the [Lenz Claim Verification API for AI Product Teams](htt
 **Four API primitives, one research-depth ladder.**
 
 - `extract` — pull verifiable claims out of any text. Free, 1000 calls/key/day.
-- `assess` — fast 3-model panel verdict in ~10s. Sync, paid.
+- `assess` — fast 3-model panel verdict in ~5-10s. Sync, paid.
 - `verify` — full 7-model pipeline with citations in ~90s. Async, paid.
 - `ask` — follow-up questions grounded on a verification.
 
@@ -28,7 +28,7 @@ const client = new Lenz({ apiKey: "lenz_..." });
 // 1. extract — pull verifiable claims out of any text (free)
 const out = await client.extract({ text: llmOutput });
 
-// 2. assess — fast 3-model verdict on each (~10s, sync)
+// 2. assess — fast 3-model verdict on each (~5-10s, sync)
 const quick = await client.assess({ text: llmOutput });
 for (const c of quick.claims) {
   console.log(c.verdict, c.confidence, c.claim);
@@ -58,7 +58,7 @@ already has a deep verification, `assess` returns it via
 Frame → Collect Evidence → Debate (2 models, 2 rounds) → Adjudicate
 (3 models: sources, logic, context) → Conclude. ~90 seconds wall-clock
 per claim. `assess` runs a leaner 3-model panel against the same
-framing for the ~10s pass.
+framing for the ~5-10s pass.
 
 ## Magical-moment demo
 
@@ -84,7 +84,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 ## What you get on the client
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/key/day.
-- **`client.assess({ text })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim.
+- **`client.assess({ text })`** → `AssessResponse`. Sync, ~5-10s, returns one entry per identified claim.
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; pair with a webhook for the callback.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic).
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.

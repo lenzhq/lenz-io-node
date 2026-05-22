@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   for (const c of claims) console.log(`  - ${c}`);
   console.log("");
 
-  // 2. assess — fast 3-model verdict on each (~10s, sync)
+  // 2. assess — fast 3-model verdict on each (~5-10s, sync)
   const quick = await client.assess({ text: "Sharks don't get cancer" });
   for (const c of quick.claims) {
     console.log(`  ${(c.verdict ?? "").padEnd(12)}  conf=${(c.confidence ?? "").padEnd(7)}  ${c.claim}`);
