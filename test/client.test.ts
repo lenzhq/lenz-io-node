@@ -322,7 +322,6 @@ describe("verifyAndWait", () => {
             verification_id: "v",
             verdict: "True",
             confidence: "high",
-            confidence_score: 0.9,
             lenz_score: 9.0,
           },
         },
@@ -367,7 +366,6 @@ describe("verifyAndWait", () => {
             claim: "Sharks don't get cancer.",
             verdict: "False",
             confidence: "high",
-            confidence_score: 0.92,
             lenz_score: 2.0,
           },
         },
@@ -375,10 +373,9 @@ describe("verifyAndWait", () => {
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifyAndWait({ claim: "x", timeoutMs: 30_000 });
-    // Flat verdict block — no nested Verdict object
+    // Flat verdict block — categorical confidence only, no nested Verdict object
     expect(v.verdict).toBe("False");
     expect(v.confidence).toBe("high");
-    expect(v.confidence_score).toBe(0.92);
     expect(v.lenz_score).toBe(2.0);
   });
 

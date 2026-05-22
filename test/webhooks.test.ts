@@ -65,7 +65,6 @@ describe("LenzWebhooks", () => {
         claim: "Sample claim.",
         verdict: "False",
         confidence: "high",
-        confidence_score: 0.92,
         lenz_score: 1.5,
         created_at: "2026-05-22T12:00:00Z",
         modified_at: null,
@@ -76,9 +75,11 @@ describe("LenzWebhooks", () => {
     expect(event.event).toBe("verification.completed");
     expect(event.verificationId).toBe("vid_1");
     const result = event.result as Record<string, unknown>;
+    // Flat block — categorical confidence only; numeric confidence_score is gone.
     expect(result["verdict"]).toBe("False");
     expect(result["confidence"]).toBe("high");
     expect(result["lenz_score"]).toBe(1.5);
+    expect(result["confidence_score"]).toBeUndefined();
     // published_at is no longer part of the contract
     expect(result["published_at"]).toBeUndefined();
   });

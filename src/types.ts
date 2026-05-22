@@ -11,11 +11,10 @@
  * server addition doesn't break customer deserialisation.
  *
  * Vocabulary (applies across every claim-shaped response):
- *   - claim            : string         — the framed claim text
- *   - verdict          : string         — "True" | "Mostly True" | "Misleading" | "False" | "Error"
- *   - confidence       : string         — "high" | "medium" | "low" (categorical)
- *   - confidence_score : number | null  — 0–1 numeric (deep / audit only)
- *   - lenz_score       : number | null  — 0–10 (deep / list; /assess omits)
+ *   - claim       : string         — the framed claim text
+ *   - verdict     : string         — "True" | "Mostly True" | "Misleading" | "False" | "Error"
+ *   - confidence  : string         — "high" | "medium" | "low" (categorical)
+ *   - lenz_score  : number | null  — 0–10 (deep / list; /assess omits)
  */
 
 export interface Source {
@@ -37,7 +36,6 @@ export interface Assessment {
   panelist_name?: string;
   focus_area?: string;
   score?: number | null;
-  confidence_score?: number | null;
   reasoning?: string;
   /**
    * Per-panelist warnings. Each panelist emits exactly one category
@@ -104,7 +102,6 @@ export interface Verification {
   // Verdict block (flat)
   verdict?: string; // "True" | "Mostly True" | "Misleading" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
-  confidence_score?: number | null; // 0–1 numeric
   lenz_score?: number | null; // 0–10
   executive_summary?: string;
   warnings?: string[];
@@ -115,6 +112,13 @@ export interface Verification {
   visibility?: string | null;
 }
 
+/**
+ * Compact item for the verifications list endpoint and the public
+ * library list. Both `GET /api/v1/library` and `GET /api/v1/verifications`
+ * return the same per-item shape. `visibility` is the literal string
+ * `'public'` on /library (the only visibility surfaced there);
+ * /verifications carries the owner's actual visibility.
+ */
 export interface VerificationListItem {
   verification_id?: string;
   url?: string;
