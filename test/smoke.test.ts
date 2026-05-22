@@ -3,6 +3,8 @@
  *
  * Skipped unless LENZ_E2E_KEY is set; the release workflow runs this
  * file via `npm run test:smoke`.
+ *
+ * Exercises the four-primitive ladder + webhook signing + /me/usage.
  */
 
 import { createHmac } from "node:crypto";
@@ -27,8 +29,18 @@ maybe("smoke", () => {
   it("quickstart claim returns via cache", async () => {
     const client = makeClient();
     const v = await client.verifyAndWait({ claim: "Sharks don't get cancer", timeoutMs: 30_000 });
-    expect(v.verdict?.label).toBeTruthy();
+    expect(v.verdict).toBeTruthy();
   }, 35_000);
+
+  it("assess returns typed claims", async () => {
+    const client = makeClient();
+    const out = await client.assess({ text: "Sharks don't get cancer" });
+    expect(out.claims.length).toBeGreaterThan(0);
+    const first = out.claims[0]!;
+    expect(typeof first.claim).toBe("string");
+    expect(typeof first.verdict).toBe("string");
+    expect(["high", "medium", "low"]).toContain(first.confidence);
+  }, 20_000);
 
   it("webhook signature roundtrip", () => {
     const secret = "whsec_smoke_fixed";
@@ -48,9 +60,7 @@ maybe("smoke", () => {
   });
 
   it("extract returns parseable claims", async () => {
-    // Same Einstein brief shown on /developers — keeps the smoke aligned
-    // with what callers see in the docs.
-    // Framing returns either `atomic_claim` (one cohesive claim) OR
+    // Framing returns either `claim` (one cohesive claim) OR
     // `identified_claims` (multiple). Either is success — the LLM picks
     // based on the input's coherence.
     const brief =
@@ -61,7 +71,7 @@ maybe("smoke", () => {
       "Advanced Study.";
     const client = makeClient();
     const out = await client.extract({ text: brief });
-    const hasAtomic = (out.atomic_claim ?? "").trim().length > 0;
+    const hasAtomic = (out.claim ?? "").trim().length > 0;
     const hasIdentified =
       Array.isArray(out.identified_claims) &&
       out.identified_claims.length > 0 &&

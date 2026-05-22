@@ -137,8 +137,6 @@ describe("Marquee verbs", () => {
       visibility: "public",
     });
     const body = JSON.parse(String(calls[0]!.init.body));
-    // Batch-level visibility lands at the top of the body; per-item values
-    // can still override server-side.
     expect(body.visibility).toBe("public");
   });
 
@@ -184,6 +182,23 @@ describe("Marquee verbs", () => {
     expect(out.identified_claims).toEqual(["A", "B"]);
   });
 
+  it("extract surfaces claim (singular) on a cohesive input", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "Sharks don't get cancer.",
+          identified_claims: [],
+          domain: "Science",
+          original_input: "Sharks don't get cancer.",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "Sharks don't get cancer." });
+    expect(out.claim).toBe("Sharks don't get cancer.");
+  });
+
   it("getStatus returns typed status", async () => {
     const { fetch } = makeFetch([
       { body: { status: "processing", progress: { step: "Framing..." } } },
@@ -191,6 +206,24 @@ describe("Marquee verbs", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const s = await client.getStatus("tsk_001");
     expect(s.status).toBe("processing");
+  });
+
+  it("getStatus clarification uses candidates not candidate_claims", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "needs_input",
+          reason: "clarification",
+          candidates: ["What did you mean by X?", "Or did you mean Y?"],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const s = await client.getStatus("tsk_001");
+    expect(s.candidates).toEqual([
+      "What did you mean by X?",
+      "Or did you mean Y?",
+    ]);
   });
 
   it("select requires text or claimIndex", async () => {
@@ -206,14 +239,94 @@ describe("Marquee verbs", () => {
   });
 });
 
-describe("verifyAndWait", () => {
-  // First-poll terminal states need no fake timers: the loop returns or
-  // throws before any sleep call.
+describe("Assess", () => {
+  it("happy path returns typed AssessResponse", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          claims: [
+            {
+              claim: "The Earth is flat.",
+              verdict: "False",
+              confidence: "high",
+              verification_url: null,
+            },
+          ],
+          error: null,
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.assess({ text: "The Earth is flat." });
+    expect(calls[0]!.url).toContain("/assess");
+    expect(out.claims).toHaveLength(1);
+    expect(out.claims[0]!.verdict).toBe("False");
+    expect(out.claims[0]!.confidence).toBe("high");
+    expect(out.error).toBeNull();
+  });
 
+  it("multiclaim returns one entry per claim with optional verification_url", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          claims: [
+            {
+              claim: "Water boils at 100°C.",
+              verdict: "True",
+              confidence: "high",
+              verification_url: "https://lenz.io/api/v1/verifications/a1b2c3d4",
+            },
+            {
+              claim: "Coffee causes cancer.",
+              verdict: "Misleading",
+              confidence: "low",
+              verification_url: null,
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.assess({ text: "..." });
+    expect(out.claims).toHaveLength(2);
+    expect(out.claims[0]!.verification_url).toContain("/verifications/");
+    expect(out.claims[1]!.verification_url).toBeNull();
+  });
+
+  it("error response shape surfaces error string", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: { claims: [], error: "no_atomic_claim_identified" },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.assess({ text: "" });
+    expect(out.claims).toEqual([]);
+    expect(out.error).toBe("no_atomic_claim_identified");
+  });
+
+  it("requires api_key (auth-required)", async () => {
+    const client = new Lenz();
+    await expect(() => client.assess({ text: "x" })).rejects.toBeInstanceOf(LenzAuthError);
+  });
+});
+
+describe("verifyAndWait", () => {
   it("idempotency default true sends uuid header", async () => {
     const { fetch, calls } = makeFetch([
       { body: { task_id: "t", claim_text: "x" } },
-      { body: { status: "completed", result: { verification_id: "v", verdict: { label: "true" } } } },
+      {
+        body: {
+          status: "completed",
+          result: {
+            verification_id: "v",
+            verdict: "True",
+            confidence: "high",
+            confidence_score: 0.9,
+            lenz_score: 9.0,
+          },
+        },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.verifyAndWait({ claim: "x", timeoutMs: 5_000 });
@@ -226,7 +339,16 @@ describe("verifyAndWait", () => {
   it("idempotency=false omits the header", async () => {
     const { fetch, calls } = makeFetch([
       { body: { task_id: "t", claim_text: "x" } },
-      { body: { status: "completed", result: { verification_id: "v", verdict: { label: "true" } } } },
+      {
+        body: {
+          status: "completed",
+          result: {
+            verification_id: "v",
+            verdict: "True",
+            confidence: "high",
+          },
+        },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.verifyAndWait({ claim: "x", timeoutMs: 5_000, idempotency: false });
@@ -234,7 +356,7 @@ describe("verifyAndWait", () => {
     expect(headers.get("Idempotency-Key")).toBeNull();
   });
 
-  it("happy path returns Verification on first poll", async () => {
+  it("happy path returns Verification on first poll (flat verdict block)", async () => {
     const { fetch } = makeFetch([
       { body: { task_id: "tsk_001", claim_text: "x" } },
       {
@@ -242,14 +364,22 @@ describe("verifyAndWait", () => {
           status: "completed",
           result: {
             verification_id: "vid_1",
-            verdict: { label: "false", score: 2.0, confidence: 0.9 },
+            claim: "Sharks don't get cancer.",
+            verdict: "False",
+            confidence: "high",
+            confidence_score: 0.92,
+            lenz_score: 2.0,
           },
         },
       },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifyAndWait({ claim: "x", timeoutMs: 30_000 });
-    expect(v.verdict?.label).toBe("false");
+    // Flat verdict block — no nested Verdict object
+    expect(v.verdict).toBe("False");
+    expect(v.confidence).toBe("high");
+    expect(v.confidence_score).toBe(0.92);
+    expect(v.lenz_score).toBe(2.0);
   });
 
   it("needs_input raises with task_id + payload", async () => {
@@ -287,7 +417,6 @@ describe("verifyAndWait", () => {
       { body: { status: "processing", progress: {} } },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    // timeoutMs=1 forces the deadline check after the first poll to fire.
     let captured: unknown;
     try {
       await client.verifyAndWait({ claim: "x", timeoutMs: 1 });
@@ -309,13 +438,40 @@ describe("Resource namespaces", () => {
     expect(page.total).toBe(0);
   });
 
-  it("verifications.get", async () => {
+  it("verifications.get returns flat verdict block", async () => {
     const { fetch } = makeFetch([
-      { body: { verification_id: "vid_1", verdict: { label: "true" } } },
+      {
+        body: {
+          verification_id: "vid_1",
+          verdict: "True",
+          confidence: "high",
+          lenz_score: 9.5,
+        },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifications.get("vid_1");
     expect(v.verification_id).toBe("vid_1");
+    expect(v.verdict).toBe("True");
+    expect(v.confidence).toBe("high");
+    expect(v.lenz_score).toBe(9.5);
+  });
+
+  it("verifications.get works without api_key (anon → public claims)", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          verification_id: "vid_pub",
+          verdict: "True",
+          confidence: "high",
+        },
+      },
+    ]);
+    const client = new Lenz({ fetch });
+    const v = await client.verifications.get("vid_pub");
+    expect(v.verification_id).toBe("vid_pub");
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("Authorization")).toBeNull();
   });
 
   it("verifications.delete 404 returns true (idempotent)", async () => {
@@ -331,7 +487,7 @@ describe("Resource namespaces", () => {
     expect(out["visibility"]).toBe("public");
   });
 
-  it("verifications.related returns typed items + sends limit param", async () => {
+  it("verifications.related returns typed items with flat verdict + lenz_score", async () => {
     const { fetch, calls } = makeFetch([
       {
         body: {
@@ -339,8 +495,9 @@ describe("Resource namespaces", () => {
             {
               verification_id: "rel00001",
               claim: "A related claim",
-              verdict_label: "false",
-              score: 2.5,
+              verdict: "False",
+              confidence: "medium",
+              lenz_score: 2.5,
               url: "https://lenz.io/c/foo-rel00001",
               distance: 0.31,
             },
@@ -353,6 +510,8 @@ describe("Resource namespaces", () => {
     expect(calls[0]!.url).toContain("limit=5");
     expect(related.items).toHaveLength(1);
     expect(related.items[0]!.verification_id).toBe("rel00001");
+    expect(related.items[0]!.verdict).toBe("False");
+    expect(related.items[0]!.lenz_score).toBe(2.5);
     expect(related.items[0]!.distance).toBe(0.31);
   });
 
@@ -363,13 +522,44 @@ describe("Resource namespaces", () => {
     expect(related.items).toEqual([]);
   });
 
-  it("followup.history", async () => {
-    const { fetch } = makeFetch([
-      { body: { messages: [], exchanges_used: 0, exchange_limit: 10, can_send: true } },
+  it("ask.history hits /ask/{id} and returns typed messages", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          messages: [
+            { role: "user", content: "Which source is strongest?", created_at: "2026-05-22T12:00:00Z" },
+            { role: "expert", content: "The Nobel committee citation.", created_at: "2026-05-22T12:00:05Z" },
+          ],
+          exchanges_used: 1,
+          exchange_limit: 10,
+          can_send: true,
+        },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const h = await client.followup.history("vid_1");
+    const h = await client.ask.history("vid_1");
+    expect(calls[0]!.url).toContain("/ask/vid_1");
     expect(h.can_send).toBe(true);
+    expect(h.messages).toHaveLength(2);
+    expect(h.messages[0]!.role).toBe("user");
+  });
+
+  it("ask.send hits POST /ask/{id}", async () => {
+    const { fetch, calls } = makeFetch([{ body: { reply: "Because the Nobel citation says so." } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const reply = await client.ask.send("vid_1", { message: "Why?" });
+    expect(calls[0]!.url).toContain("/ask/vid_1");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(reply.reply).toContain("Nobel");
+  });
+
+  it("ask.reset hits DELETE /ask/{id}", async () => {
+    const { fetch, calls } = makeFetch([{ status: 204 }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const ok = await client.ask.reset("vid_1");
+    expect(ok).toBe(true);
+    expect(calls[0]!.url).toContain("/ask/vid_1");
+    expect(calls[0]!.init.method).toBe("DELETE");
   });
 
   it("library.list works without api_key", async () => {
@@ -381,12 +571,17 @@ describe("Resource namespaces", () => {
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Authorization")).toBeNull();
   });
+
+  it("library.get is removed (TypeScript surface)", () => {
+    const client = new Lenz();
+    // @ts-expect-error -- library.get was merged into verifications.get
+    const _ref = client.library.get;
+    expect(_ref).toBeUndefined();
+  });
 });
 
 describe("Auto-retry", () => {
   it("503-503-200 succeeds with retries", async () => {
-    // Short timeoutMs forces internal retry sleeps to be brief enough that
-    // the test completes within vitest's default 5s without fake timers.
     const { fetch } = makeFetch([
       { status: 503, body: { detail: "unavailable" } },
       { status: 503, body: { detail: "unavailable" } },

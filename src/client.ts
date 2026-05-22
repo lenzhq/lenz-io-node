@@ -1,23 +1,31 @@
 /**
  * Public Lenz client — the ergonomic top-level surface.
  *
+ * Four API primitives form a research-depth ladder — find claims, judge
+ * them fast, prove them deep, follow up:
+ *
  * ```ts
  * import { Lenz } from 'lenz-io';
  * const client = new Lenz({ apiKey: 'lenz_...' });
  *
- * // Marquee verbs — top-level
- * const v = await client.verifyAndWait({ claim: "Sharks don't get cancer" });
- * const t = await client.verify({ claim: '...' });
- * const out = await client.extract({ text: '...' });
- * const batch = await client.verifyBatch({ claims: [...] });
+ * // 1. extract — pull verifiable claims out of text (free, 1000/day)
+ * const out = await client.extract({ text: llmOutput });
  *
- * // Resource namespaces
- * await client.verifications.list();
- * await client.verifications.get(id);
- * await client.verifications.delete(id);
- * await client.followup.history(id);
- * await client.library.list();
- * await client.usage();
+ * // 2. assess — fast 3-model verdict on each (~10s, paid)
+ * const quick = await client.assess({ text: llmOutput });
+ *
+ * // 3. verify — escalate low-confidence to the full pipeline (~90s, paid)
+ * for (const c of quick.claims) {
+ *   if (c.confidence === 'low') {
+ *     const deep = await client.verifyAndWait({ claim: c.claim! });
+ *     console.log(deep.verdict, deep.lenz_score);
+ *   }
+ * }
+ *
+ * // 4. ask — follow-up grounded on a verification
+ * const reply = await client.ask.send(deep.verification_id!, {
+ *   message: 'Which source is strongest?',
+ * });
  * ```
  */
 
@@ -33,12 +41,13 @@ import {
   mapResponseToError,
 } from "./errors.js";
 import type {
+  AskHistory,
+  AskReply,
+  AssessInput,
+  AssessResponse,
   BatchAccepted,
   ExtractInput,
   ExtractedClaims,
-  FollowupHistory,
-  FollowupReply,
-  LibraryItem,
   LibraryList,
   LibraryListInput,
   RelatedVerifications,
@@ -109,10 +118,16 @@ class VerificationsNamespace {
     });
   }
 
+  /**
+   * Fetch a single verification. Accepts anon callers — any non-hidden
+   * public claim resolves without an API key (the old `library.get`
+   * endpoint merged into this one).
+   */
   get(verificationId: string): Promise<Verification> {
     return this.client.request<Verification>({
       method: "GET",
       path: `/verifications/${verificationId}`,
+      authRequired: false,
     });
   }
 
@@ -159,20 +174,20 @@ class VerificationsNamespace {
   }
 }
 
-class FollowupNamespace {
+class AskNamespace {
   constructor(private readonly client: Lenz) {}
 
-  history(verificationId: string): Promise<FollowupHistory> {
-    return this.client.request<FollowupHistory>({
+  history(verificationId: string): Promise<AskHistory> {
+    return this.client.request<AskHistory>({
       method: "GET",
-      path: `/verifications/${verificationId}/follow-up`,
+      path: `/ask/${verificationId}`,
     });
   }
 
-  send(verificationId: string, { message }: { message: string }): Promise<FollowupReply> {
-    return this.client.request<FollowupReply>({
+  send(verificationId: string, { message }: { message: string }): Promise<AskReply> {
+    return this.client.request<AskReply>({
       method: "POST",
-      path: `/verifications/${verificationId}/follow-up`,
+      path: `/ask/${verificationId}`,
       json: { message },
     });
   }
@@ -180,7 +195,7 @@ class FollowupNamespace {
   async reset(verificationId: string): Promise<boolean> {
     await this.client.request<unknown>({
       method: "DELETE",
-      path: `/verifications/${verificationId}/follow-up`,
+      path: `/ask/${verificationId}`,
     });
     return true;
   }
@@ -203,14 +218,6 @@ class LibraryNamespace {
       authRequired: false,
     });
   }
-
-  get(verificationId: string): Promise<LibraryItem> {
-    return this.client.request<LibraryItem>({
-      method: "GET",
-      path: `/library/${verificationId}`,
-      authRequired: false,
-    });
-  }
 }
 
 export class Lenz {
@@ -221,7 +228,7 @@ export class Lenz {
   private fetchImpl: typeof fetch;
 
   readonly verifications: VerificationsNamespace;
-  readonly followup: FollowupNamespace;
+  readonly ask: AskNamespace;
   readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
@@ -235,7 +242,7 @@ export class Lenz {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
 
     this.verifications = new VerificationsNamespace(this);
-    this.followup = new FollowupNamespace(this);
+    this.ask = new AskNamespace(this);
     this.library = new LibraryNamespace(this);
   }
 
@@ -272,6 +279,20 @@ export class Lenz {
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
+      json: { text: input.text },
+    });
+  }
+
+  /**
+   * Fast 3-model panel verdict on each identified claim in the input.
+   * Sync, ~10s. Returns one entry per atomic_claim. For deeper analysis
+   * (citations, full audit trail), escalate low-confidence claims to
+   * `verifyAndWait`; the two endpoints share a result cache server-side.
+   */
+  async assess(input: AssessInput): Promise<AssessResponse> {
+    return this.request<AssessResponse>({
+      method: "POST",
+      path: "/assess",
       json: { text: input.text },
     });
   }

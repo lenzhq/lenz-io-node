@@ -56,17 +56,31 @@ describe("LenzWebhooks", () => {
     expect(() => new LenzWebhooks({ secret: "" })).toThrow(/non-empty secret/);
   });
 
-  it("parses verification.completed", () => {
+  it("parses verification.completed with flat verdict block", () => {
     const body = payload("verification.completed", {
       verification_id: "vid_1",
       status: "completed",
-      result: { verification_id: "vid_1", verdict: { label: "false" } },
+      result: {
+        verification_id: "vid_1",
+        claim: "Sample claim.",
+        verdict: "False",
+        confidence: "high",
+        confidence_score: 0.92,
+        lenz_score: 1.5,
+        created_at: "2026-05-22T12:00:00Z",
+        modified_at: null,
+      },
     });
     const wh = new LenzWebhooks({ secret: SECRET });
     const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationCompleted;
     expect(event.event).toBe("verification.completed");
     expect(event.verificationId).toBe("vid_1");
-    expect((event.result as Record<string, unknown>)["verdict"]).toBeTruthy();
+    const result = event.result as Record<string, unknown>;
+    expect(result["verdict"]).toBe("False");
+    expect(result["confidence"]).toBe("high");
+    expect(result["lenz_score"]).toBe(1.5);
+    // published_at is no longer part of the contract
+    expect(result["published_at"]).toBeUndefined();
   });
 
   it("parses verification.failed", () => {

@@ -6,6 +6,44 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `client.assess({ text })` — new sync verb that returns a fast 3-model
+  panel verdict in ~10s. Mirrors the new `POST /api/v1/assess` server
+  endpoint.
+- `AssessClaim`, `AssessResponse`, `AssessInput` types for the assess
+  response shape.
+- `AskMessage` interface (`role`, `content`, `created_at`) —
+  `AskHistory.messages` is now `AskMessage[]` instead of
+  `Array<Record<string, unknown>>`.
+- `confidence` (categorical: `"high"` | `"medium"` | `"low"`) at the
+  top level of every claim-shaped response.
+- `confidence_score` (numeric 0–1) on deep verdicts.
+- `lenz_score` (numeric 0–10) flattened to the top level (was nested
+  under `verdict.score`).
+- Contract test (`test/contract.test.ts`) — re-validates 6 frozen
+  server-response fixtures with strict no-extra-keys walker, sharing
+  the same fixture JSON the Python SDK validates against.
+
+### Changed (breaking)
+- `client.followup.*` → `client.ask.*`; URL paths
+  `/verifications/{id}/follow-up` → `/ask/{id}`.
+- `FollowupHistory` → `AskHistory`, `FollowupReply` → `AskReply`.
+- `Verdict` block flattened — was `verification.verdict.label/.score/.confidence`,
+  now `verification.verdict` (string), `verification.confidence`,
+  `verification.confidence_score`, `verification.lenz_score`.
+- `ExtractedClaims.atomic_claim` → `ExtractedClaims.claim`.
+- `SimilarVerification.verdict_label` → `verdict`; `score` → `lenz_score`;
+  added `confidence`.
+- `TaskStatus.candidate_claims` → `candidates`.
+- `client.library.get(id)` removed — use `client.verifications.get(id)`,
+  which now accepts anon callers and returns the same `Verification`
+  shape for any non-hidden public claim.
+
+### Removed
+- `Verdict` interface (no consumers after the flatten).
+- `published_at` field — use `created_at` + `modified_at` instead.
+- `FollowupHistory` / `FollowupReply` / `Verdict` exports.
+
 ## [1.0.0-rc.1] — 2026-05-13
 
 First public release candidate. Targets Lenz Public API v1
