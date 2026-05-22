@@ -14,7 +14,7 @@
  *   - claim       : string         — the framed claim text
  *   - verdict     : string         — "True" | "Mostly True" | "Misleading" | "False" | "Error"
  *   - confidence  : string         — "high" | "medium" | "low" (categorical)
- *   - lenz_score  : number | null  — 0–10 (deep / list; /assess omits)
+ *   - lenz_score  : number | null  — integer 0–10 (deep / list; /assess omits)
  */
 
 export interface Source {
@@ -102,7 +102,7 @@ export interface Verification {
   // Verdict block (flat)
   verdict?: string; // "True" | "Mostly True" | "Misleading" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
-  lenz_score?: number | null; // 0–10
+  lenz_score?: number | null; // integer 0–10
   executive_summary?: string;
   warnings?: string[];
   sources?: Source[];

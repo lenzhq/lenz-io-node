@@ -322,7 +322,7 @@ describe("verifyAndWait", () => {
             verification_id: "v",
             verdict: "True",
             confidence: "high",
-            lenz_score: 9.0,
+            lenz_score: 9,
           },
         },
       },
@@ -366,7 +366,7 @@ describe("verifyAndWait", () => {
             claim: "Sharks don't get cancer.",
             verdict: "False",
             confidence: "high",
-            lenz_score: 2.0,
+            lenz_score: 2,
           },
         },
       },
@@ -376,7 +376,7 @@ describe("verifyAndWait", () => {
     // Flat verdict block — categorical confidence only, no nested Verdict object
     expect(v.verdict).toBe("False");
     expect(v.confidence).toBe("high");
-    expect(v.lenz_score).toBe(2.0);
+    expect(v.lenz_score).toBe(2);
   });
 
   it("needs_input raises with task_id + payload", async () => {
@@ -442,7 +442,7 @@ describe("Resource namespaces", () => {
           verification_id: "vid_1",
           verdict: "True",
           confidence: "high",
-          lenz_score: 9.5,
+          lenz_score: 10,
         },
       },
     ]);
@@ -451,7 +451,7 @@ describe("Resource namespaces", () => {
     expect(v.verification_id).toBe("vid_1");
     expect(v.verdict).toBe("True");
     expect(v.confidence).toBe("high");
-    expect(v.lenz_score).toBe(9.5);
+    expect(v.lenz_score).toBe(10);
   });
 
   it("verifications.get works without api_key (anon → public claims)", async () => {
@@ -494,7 +494,7 @@ describe("Resource namespaces", () => {
               claim: "A related claim",
               verdict: "False",
               confidence: "medium",
-              lenz_score: 2.5,
+              lenz_score: 2,
               url: "https://lenz.io/c/foo-rel00001",
               distance: 0.31,
             },
@@ -508,7 +508,7 @@ describe("Resource namespaces", () => {
     expect(related.items).toHaveLength(1);
     expect(related.items[0]!.verification_id).toBe("rel00001");
     expect(related.items[0]!.verdict).toBe("False");
-    expect(related.items[0]!.lenz_score).toBe(2.5);
+    expect(related.items[0]!.lenz_score).toBe(2);
     expect(related.items[0]!.distance).toBe(0.31);
   });
 

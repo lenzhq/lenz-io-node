@@ -19,8 +19,13 @@ All notable changes to this SDK are documented here. Format follows
   top level of every claim-shaped response. Replaces the numeric
   `verdict.confidence` (0–1) — the numeric form is no longer in the
   public API; the SDK exposes only the categorical label.
-- `lenz_score` (numeric 0–10) flattened to the top level (was nested
-  under `verdict.score`).
+- `lenz_score` (integer 0–10) flattened to the top level (was nested
+  under `verdict.score` as a float). The server-side DB column is now
+  `IntegerField` and OpenAPI declares `"type": "integer"`. TypeScript
+  `number | null` is unchanged (TS has no separate int type), but
+  consumers that branch on fractional values should update; the
+  conclusion-step LLM was already constrained to integers and no
+  fractional value ever existed in production.
 - Contract test (`test/contract.test.ts`) — re-validates 6 frozen
   server-response fixtures with strict no-extra-keys walker, sharing
   the same fixture JSON the Python SDK validates against.

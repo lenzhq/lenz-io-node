@@ -65,7 +65,7 @@ describe("LenzWebhooks", () => {
         claim: "Sample claim.",
         verdict: "False",
         confidence: "high",
-        lenz_score: 1.5,
+        lenz_score: 2,
         created_at: "2026-05-22T12:00:00Z",
         modified_at: null,
       },
@@ -78,7 +78,7 @@ describe("LenzWebhooks", () => {
     // Flat block — categorical confidence only; numeric confidence_score is gone.
     expect(result["verdict"]).toBe("False");
     expect(result["confidence"]).toBe("high");
-    expect(result["lenz_score"]).toBe(1.5);
+    expect(result["lenz_score"]).toBe(2);
     expect(result["confidence_score"]).toBeUndefined();
     // published_at is no longer part of the contract
     expect(result["published_at"]).toBeUndefined();
