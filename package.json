@@ -49,6 +49,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "prebuild": "node scripts/sync-version.mjs",
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",

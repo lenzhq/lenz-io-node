@@ -72,9 +72,10 @@ const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
 const POLL_BACKOFF_CAP_MS = 10_000;
 
-// Pulled in at runtime via JSON import; declared here to keep the User-Agent
-// fresh without circular imports.
-const SDK_VERSION = "1.0.0-rc.1";
+// Generated at build time from package.json#version — see
+// scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
+// published package.
+import { VERSION as SDK_VERSION } from "./_version.js";
 
 export interface LenzOptions {
   apiKey?: string;
