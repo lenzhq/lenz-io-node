@@ -97,12 +97,12 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 
 Every claim-shaped response shares these fields at top level:
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `claim` | `string` | The framed claim text. |
-| `verdict` | `string` | `"True"` \| `"Mostly True"` \| `"Misleading"` \| `"False"` \| `"Error"`. |
-| `confidence` | `string` | Categorical: `"high"` \| `"medium"` \| `"low"`. |
-| `lenz_score` | `number \| null` | Integer 0–10 (deep verdicts and list endpoints; `assess` omits it). |
+| Field        | Type             | Notes                                                                    |
+| ------------ | ---------------- | ------------------------------------------------------------------------ |
+| `claim`      | `string`         | The framed claim text.                                                   |
+| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Misleading"` \| `"False"` \| `"Error"`. |
+| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                          |
+| `lenz_score` | `number \| null` | Integer 0–10 (deep verdicts and list endpoints; `assess` omits it).      |
 
 ### Webhooks
 
@@ -204,11 +204,11 @@ specific key, or `idempotency: false` to opt out.
 
 ```ts
 new Lenz({
-  apiKey: "lenz_...",                 // or set LENZ_API_KEY env var
-  baseUrl: "https://lenz.io/api/v1",  // override for staging / local
+  apiKey: "lenz_...", // or set LENZ_API_KEY env var
+  baseUrl: "https://lenz.io/api/v1", // override for staging / local
   timeoutMs: 30000,
   maxRetries: 3,
-  fetch: customFetch,                  // inject for tests
+  fetch: customFetch, // inject for tests
 });
 ```
 
@@ -223,6 +223,18 @@ Environment variables:
 - ESM + CJS dual exports
 - TypeScript types included
 - Works in Cloudflare Workers / edge runtimes — pass a `fetch` polyfill if `globalThis.fetch` isn't available
+
+## Contributing
+
+```bash
+git clone https://github.com/lenzhq/lenz-io-node && cd lenz-io-node
+npm install
+git config core.hooksPath scripts/hooks   # one-time: enables pre-commit
+```
+
+The pre-commit hook mirrors CI exactly (`npm run lint`, `npm run type`,
+`npm test`, `npm run build`). Runs ~10s per commit on a warm cache. Skip
+once with `git commit --no-verify` when you must.
 
 ## Bug reports + feature requests
 

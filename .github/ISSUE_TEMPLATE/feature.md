@@ -1,7 +1,7 @@
 ---
 name: Feature request
 about: Suggest an addition or change to the SDK
-title: '[feature] '
+title: "[feature] "
 labels: enhancement
 ---
 

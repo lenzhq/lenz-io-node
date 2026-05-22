@@ -1,7 +1,7 @@
 ---
 name: Question
 about: Ask how something works or why something behaves this way
-title: '[question] '
+title: "[question] "
 labels: question
 ---
 

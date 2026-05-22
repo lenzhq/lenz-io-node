@@ -97,13 +97,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "debate_con",
     "panel_agreement",
   ]),
-  Assessment: new Set([
-    "panelist_name",
-    "focus_area",
-    "score",
-    "reasoning",
-    "warnings",
-  ]),
+  Assessment: new Set(["panelist_name", "focus_area", "score", "reasoning", "warnings"]),
   DebateSide: new Set(["role", "argument", "rebuttal"]),
 };
 
@@ -142,9 +136,7 @@ function walk(payload: unknown, ifaceName: string, path: string): string[] {
   const obj = payload as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
     if (!keyset.has(key)) {
-      errors.push(
-        `${path || ifaceName}: unknown server field '${key}' (interface=${ifaceName})`,
-      );
+      errors.push(`${path || ifaceName}: unknown server field '${key}' (interface=${ifaceName})`);
     }
   }
   const nested = NESTED[ifaceName] ?? {};

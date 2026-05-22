@@ -28,7 +28,9 @@ async function main(): Promise<void> {
   const quick = await client.assess({ text: LLM_OUTPUT });
   console.log(`Assessed ${quick.claims.length} claims:\n`);
   for (const c of quick.claims) {
-    console.log(`  ${(c.verdict ?? "").padEnd(12)}  conf=${(c.confidence ?? "").padEnd(7)}  ${c.claim}`);
+    console.log(
+      `  ${(c.verdict ?? "").padEnd(12)}  conf=${(c.confidence ?? "").padEnd(7)}  ${c.claim}`,
+    );
   }
   console.log("");
 

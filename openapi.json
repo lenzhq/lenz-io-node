@@ -1,4 +1,3 @@
-
 {
   "openapi": "3.1.0",
   "info": {
@@ -77,9 +76,7 @@
           }
         },
         "description": "Search and browse the public catalog of verified claims.\n\nReturns paginated results from the Lenz Library. Only publicly\npublished verifications are included.\n\n**Sort options:** `recent`, `popular`, `most_true`, `most_untrue`,\n`relevance` (only when `search` is provided).",
-        "tags": [
-          "Library"
-        ],
+        "tags": ["Library"],
         "x-codeSamples": [
           {
             "lang": "Python",
@@ -103,9 +100,7 @@
           }
         },
         "description": "Submit a claim for verification.\n\nReturns a ``task_id`` immediately. Poll ``GET /verify/status/{task_id}``\nor supply ``webhook_url`` in the body for an asynchronous callback when\nthe pipeline terminates.",
-        "tags": [
-          "Verify"
-        ],
+        "tags": ["Verify"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -144,9 +139,7 @@
           }
         },
         "description": "Fan-out wrapper around /verify for multi-claim LLM responses.\n\nBody: ``{claims: [{text, source_url?, webhook_url?, visibility?}, ...]}``\ncapped at 20 items. Server pre-checks total credits, then fans out N\nindependent pipelines \u2014 each with its own ``task_id`` and lifecycle.\nEach claim's webhook (per-item override, or batch ``webhook_url``, or\nper-key default) fires when its pipeline terminates. ``batch_id`` is\npurely for client-side correlation; the server doesn't gate anything\non it.\n\nOn a mid-fan-out enqueue error, the response includes the partial\n``items`` list and a ``partial: true`` flag. Per-claim credit spend\nhappens at each claim's normal persist time \u2014 claims that never\nenqueue are never charged.",
-        "tags": [
-          "Verify"
-        ],
+        "tags": ["Verify"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -185,9 +178,7 @@
           }
         },
         "description": "Submit text for fast verdict via 3-model panel (sync).\n\nReturns a per-atomic-claim verdict array in ~5-10 seconds. Cheaper\nand faster than ``POST /verify``; uses 3 frontier models in\nparallel and skips the research/debate/adjudication pipeline.\n\nSmart-routed: time-sensitive claims (events from the past ~6\nmonths) get a retrieval-grounded panel; evergreen claims get a\nparametric panel.\n\nCache lookup chain: existing Claim row first (deep /verify\nresult), then Assessment row (prior /assess verdict). Both honor a\n6h staleness rule for time-sensitive claims.",
-        "tags": [
-          "Assess"
-        ],
+        "tags": ["Assess"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -216,9 +207,7 @@
           }
         },
         "description": "Extract verifiable claims from arbitrary text.\n\nRuns only the framing step of the pipeline \u2014 no research, no debate,\nno credit charge. Returns the list of verifiable claims, candidate\ndisambiguations (if the input was ambiguous), domain, key entities,\nsearch queries, and presumed intent.\n\nFree for API-key holders, capped at 1000 calls per key per day\n(resets at 00:00 UTC). Keys with admin-set ``unlimited_extract=True``\nbypass the cap.",
-        "tags": [
-          "Extract"
-        ],
+        "tags": ["Extract"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -267,9 +256,7 @@
           }
         },
         "description": "Resolve a multi-claim interrupt \u2014 pick which claim to verify.",
-        "tags": [
-          "Verify"
-        ],
+        "tags": ["Verify"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -308,9 +295,7 @@
           }
         },
         "description": "Poll processing status for a submitted verification.",
-        "tags": [
-          "Verify"
-        ],
+        "tags": ["Verify"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -339,9 +324,7 @@
           }
         },
         "description": "Return the calling key's subscription credits and extract usage.\n\nShape::\n\n    {\n        \"plan\": \"free\" | \"plus\" | \"pro\",\n        \"credits_used\": int,\n        \"credits_total\": int,            # 0 if no monthly quota\n        \"credits_resets_at\": iso8601 | null,\n        \"extract_calls_today\": int,      # 0 for unlimited_extract keys\n        \"extract_daily_limit\": int,\n        \"unlimited_extract\": bool,\n    }\n\nSubscription credits track the per-claim quota that ``/verify`` and\n``/verify/batch`` consume. ``extract_calls_today`` tracks the\nper-key Redis counter that powers the daily ``/extract`` limit.",
-        "tags": [
-          "Account"
-        ],
+        "tags": ["Account"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -398,9 +381,7 @@
           }
         },
         "description": "List the authenticated key's verifications (all visibilities).",
-        "tags": [
-          "Verifications"
-        ],
+        "tags": ["Verifications"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -439,9 +420,7 @@
           }
         },
         "description": "Retrieve the full verification report for a single claim.\n\nReturns the verdict, citations, and (under ``audit``) the panel\nreasoning, debate transcript, and assessments. Same shape as the\n/verify webhook payload and the deprecated /library/{id} endpoint\nthis merger replaces.\n\nAuthorization model (optional Bearer):\n- Anon callers see any claim whose ``visibility != 'private'`` AND\n  ``status != 'hidden'`` \u2014 i.e. ``visibility='public'`` AND\n  ``status`` in {pending, published, discoverable}.\n- Authed callers additionally see their own claims regardless of\n  visibility or status.\n- Private / hidden claims owned by someone else return 404.",
-        "tags": [
-          "Verifications"
-        ]
+        "tags": ["Verifications"]
       },
       "delete": {
         "operationId": "deleteVerification",
@@ -463,9 +442,7 @@
           }
         },
         "description": "Delete an owned verification.",
-        "tags": [
-          "Verifications"
-        ],
+        "tags": ["Verifications"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -494,9 +471,7 @@
           }
         },
         "description": "Change the visibility of an owned verification.",
-        "tags": [
-          "Verifications"
-        ],
+        "tags": ["Verifications"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -552,9 +527,7 @@
           }
         },
         "description": "List public verifications semantically related to this one.\n\nReturns the closest public-library claims by pgvector ANN distance\n(cosine, 0 = identical). Excludes the verification itself, near-\nduplicates (distance < 0.2), and editorially-hidden claims. Empty\nlist when the verification has no embedding yet (early pipeline) or\nwhen no claim is close enough.\n\nAccess: any verification the caller owns OR any public library item.\n``limit`` is clamped to [1, 10].",
-        "tags": [
-          "Verifications"
-        ],
+        "tags": ["Verifications"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -593,9 +566,7 @@
           }
         },
         "description": "Get ask history and remaining quota for a verification.",
-        "tags": [
-          "Ask"
-        ],
+        "tags": ["Ask"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -622,9 +593,7 @@
           }
         },
         "description": "Delete all ask messages for this user on a verification.",
-        "tags": [
-          "Ask"
-        ],
+        "tags": ["Ask"],
         "security": [
           {
             "APIKeyBearerAuth": []
@@ -651,9 +620,7 @@
           }
         },
         "description": "Send a question and get an expert response.",
-        "tags": [
-          "Ask"
-        ],
+        "tags": ["Ask"],
         "requestBody": {
           "content": {
             "application/json": {
@@ -693,9 +660,7 @@
             "title": "Qid"
           }
         },
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "title": "EntityRef",
         "type": "object"
       },
@@ -781,11 +746,7 @@
             "title": "Visibility"
           }
         },
-        "required": [
-          "verification_id",
-          "claim",
-          "domain"
-        ],
+        "required": ["verification_id", "claim", "domain"],
         "title": "VerificationListItemOut",
         "type": "object"
       },
@@ -812,12 +773,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "items",
-          "total",
-          "page",
-          "page_size"
-        ],
+        "required": ["items", "total", "page", "page_size"],
         "title": "VerificationListOut",
         "type": "object"
       },
@@ -843,9 +799,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "VerifyIn",
         "type": "object"
       },
@@ -869,9 +823,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "claims"
-        ],
+        "required": ["claims"],
         "title": "VerifyBatchIn",
         "type": "object"
       },
@@ -897,9 +849,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "VerifyBatchItemIn",
         "type": "object"
       },
@@ -911,9 +861,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "AssessIn",
         "type": "object"
       },
@@ -924,9 +872,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "ExtractIn",
         "type": "object"
       },
@@ -937,9 +883,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "SelectIn",
         "type": "object"
       },
@@ -950,9 +894,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "visibility"
-        ],
+        "required": ["visibility"],
         "title": "VisibilityPatchIn",
         "type": "object"
       },
@@ -1013,11 +955,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "verification_id",
-          "claim",
-          "distance"
-        ],
+        "required": ["verification_id", "claim", "distance"],
         "title": "SimilarVerificationOut",
         "type": "object"
       },
@@ -1028,9 +966,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "message"
-        ],
+        "required": ["message"],
         "title": "AskIn",
         "type": "object"
       },
@@ -1130,9 +1066,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "CandidateClaimOut",
         "type": "object"
       },
@@ -1261,10 +1195,7 @@
             "title": "Visibility"
           }
         },
-        "required": [
-          "verification_id",
-          "claim"
-        ],
+        "required": ["verification_id", "claim"],
         "title": "ClaimDetailOut",
         "type": "object"
       },
@@ -1322,9 +1253,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "reason"
-        ],
+        "required": ["reason"],
         "title": "NeedsInputOut",
         "type": "object"
       },
@@ -1447,13 +1376,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "event",
-          "task_id",
-          "status",
-          "attempt",
-          "delivered_at"
-        ],
+        "required": ["event", "task_id", "status", "attempt", "delivered_at"],
         "title": "WebhookPayload",
         "type": "object"
       }

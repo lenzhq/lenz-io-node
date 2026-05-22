@@ -40,11 +40,7 @@ function sign(body: Buffer, secret: string): string {
   return `${SIGNATURE_PREFIX}${mac}`;
 }
 
-export function verifySignature(
-  rawBody: RawBody,
-  signature: string,
-  secret: string,
-): true {
+export function verifySignature(rawBody: RawBody, signature: string, secret: string): true {
   if (!signature) {
     throw new LenzWebhookSignatureError({
       message: "Missing webhook signature",
@@ -77,7 +73,11 @@ export type WebhookEventKind =
   | "verification.completed"
   | "verification.failed"
   | "verification.needs_input"
-  | (string & {}); // permit forward-compatible unknown events
+  // The `string & NonNullable<unknown>` trick preserves the autocomplete
+  // hints from the literal union while still permitting any future
+  // event-kind string the server adds. `(string & {})` reads cleaner but
+  // trips @typescript-eslint/ban-types.
+  | (string & NonNullable<unknown>);
 
 export interface WebhookEventBase {
   event: WebhookEventKind;

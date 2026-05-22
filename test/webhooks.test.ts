@@ -45,9 +45,7 @@ describe("verifySignature", () => {
   });
 
   it("throws on missing signature", () => {
-    expect(() => verifySignature(Buffer.from("{}"), "", SECRET)).toThrow(
-      LenzWebhookSignatureError,
-    );
+    expect(() => verifySignature(Buffer.from("{}"), "", SECRET)).toThrow(LenzWebhookSignatureError);
   });
 });
 
@@ -105,9 +103,9 @@ describe("LenzWebhooks", () => {
   it("rejects tampered body with mismatch message", () => {
     const body = payload("verification.completed");
     const wh = new LenzWebhooks({ secret: SECRET });
-    expect(() => wh.parse(Buffer.concat([body, Buffer.from("x")]), { "X-Lenz-Signature": sign(body) })).toThrow(
-      /mismatch/i,
-    );
+    expect(() =>
+      wh.parse(Buffer.concat([body, Buffer.from("x")]), { "X-Lenz-Signature": sign(body) }),
+    ).toThrow(/mismatch/i);
   });
 
   it("rejects missing signature header", () => {

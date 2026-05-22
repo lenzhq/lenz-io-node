@@ -143,9 +143,7 @@ function parseBody(raw: string | undefined | null): Record<string, unknown> {
 
 function getHeader(headers: Record<string, string>, name: string): string {
   // Try common header casings.
-  return (
-    headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()] ?? ""
-  );
+  return headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()] ?? "";
 }
 
 export function mapResponseToError(
@@ -176,7 +174,8 @@ export function mapResponseToError(
   const err = new entry.cls({
     message: detail,
     cause: detail,
-    fix: FIX_HINTS[statusCode] ?? "Retry; if the error persists, file an issue with the Request ID.",
+    fix:
+      FIX_HINTS[statusCode] ?? "Retry; if the error persists, file an issue with the Request ID.",
     docUrl: entry.docUrl,
     requestId,
     statusCode,
@@ -193,9 +192,7 @@ export function mapResponseToError(
       err.errors = parsed["errors"] as Array<Record<string, unknown>>;
     }
   } else if (err instanceof LenzRateLimitError) {
-    const ra =
-      getHeader(headers, "Retry-After") ||
-      String(parsed["retry_after"] ?? "");
+    const ra = getHeader(headers, "Retry-After") || String(parsed["retry_after"] ?? "");
     const parsedRa = Number(ra);
     err.retryAfter = Number.isFinite(parsedRa) ? parsedRa : 0;
   }

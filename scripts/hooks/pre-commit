@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook — mirrors .github/workflows/ci.yml exactly so a clean
+# commit can never push a red CI badge.
+#
+# Setup (one-time, per clone):
+#   git config core.hooksPath scripts/hooks
+#
+# Runs (~10s total on a warm cache):
+#   1. npm run lint   — eslint + prettier --check
+#   2. npm run type   — tsc --noEmit
+#   3. npm test       — vitest run (skips live-API smoke via env)
+#   4. npm run build  — tsup (catches packaging breakage)
+#
+# Skip on a specific commit with `git commit --no-verify`. Don't habituate.
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -t 1 ]; then
+  C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_DIM='\033[2m'; C_RESET='\033[0m'
+else
+  C_RED=''; C_GREEN=''; C_DIM=''; C_RESET=''
+fi
+
+step() { echo -e "${C_DIM}→${C_RESET} $1"; }
+fail() { echo -e "${C_RED}✗ pre-commit: $1 failed.${C_RESET} Fix and re-commit, or skip once with --no-verify."; exit 1; }
+done_ok() { echo -e "${C_GREEN}✓${C_RESET} $1"; }
+
+step "lint (eslint + prettier --check)"
+npm run --silent lint || fail "lint (run: npm run lint:fix)"
+done_ok "lint"
+
+step "type (tsc --noEmit)"
+npm run --silent type || fail "type"
+done_ok "type"
+
+step "test (vitest; skips live-API smoke)"
+LENZ_E2E_KEY="" npm test --silent -- --run || fail "test"
+done_ok "test"
+
+step "build (tsup)"
+npm run --silent build > /dev/null || fail "build"
+done_ok "build"
+
+echo -e "${C_GREEN}All pre-commit checks passed.${C_RESET}"
