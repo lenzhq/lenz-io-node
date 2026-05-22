@@ -100,4 +100,9 @@ export type {
   VerifyInput,
 } from "./types.js";
 
-export const VERSION = "1.0.0-rc.1";
+// VERSION is generated at build time from package.json#version by
+// scripts/sync-version.mjs (runs as `prebuild`). _version.ts is
+// gitignored; the release workflow updates package.json from the git
+// tag before `npm run build` fires, so the bundled VERSION matches the
+// published npm package exactly.
+export { VERSION } from "./_version.js";

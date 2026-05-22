@@ -49,12 +49,16 @@
     "node": ">=18"
   },
   "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
+    "prebuild": "npm run --silent sync-version",
     "build": "tsup",
+    "pretest": "npm run --silent sync-version",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "vitest run test/smoke.test.ts",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint --fix . && prettier --write .",
+    "pretype": "npm run --silent sync-version",
     "type": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
