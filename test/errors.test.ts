@@ -24,7 +24,9 @@ describe("mapResponseToError", () => {
   });
 
   it("403 → LenzAuthError", () => {
-    expect(mapResponseToError(403, body({ detail: "forbidden" }), {})).toBeInstanceOf(LenzAuthError);
+    expect(mapResponseToError(403, body({ detail: "forbidden" }), {})).toBeInstanceOf(
+      LenzAuthError,
+    );
   });
 
   it("402 → LenzQuotaExceededError with creditsRemaining", () => {

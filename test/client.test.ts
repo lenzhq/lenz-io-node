@@ -62,9 +62,7 @@ afterEach(() => {
 
 describe("Construction", () => {
   it("no api key permits library", async () => {
-    const { fetch } = makeFetch([
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-    ]);
+    const { fetch } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ fetch });
     const page = await client.library.list();
     expect(page.total).toBe(0);
@@ -83,9 +81,7 @@ describe("Construction", () => {
   });
 
   it("base url override routes through alternate base", async () => {
-    const { fetch, calls } = makeFetch([
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-    ]);
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ baseUrl: "http://localhost:8001/api/v1", fetch });
     await client.library.list();
     expect(calls[0]!.url).toContain("http://localhost:8001/api/v1/library");
@@ -220,10 +216,7 @@ describe("Marquee verbs", () => {
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const s = await client.getStatus("tsk_001");
-    expect(s.candidates).toEqual([
-      "What did you mean by X?",
-      "Or did you mean Y?",
-    ]);
+    expect(s.candidates).toEqual(["What did you mean by X?", "Or did you mean Y?"]);
   });
 
   it("select requires text or claimIndex", async () => {
@@ -386,7 +379,10 @@ describe("verifyAndWait", () => {
         body: {
           status: "needs_input",
           reason: "multi_claim",
-          claims: [{ text: "A", domain: "X" }, { text: "B", domain: "Y" }],
+          claims: [
+            { text: "A", domain: "X" },
+            { text: "B", domain: "Y" },
+          ],
         },
       },
     ]);
@@ -399,7 +395,9 @@ describe("verifyAndWait", () => {
   it("failed pipeline raises LenzPipelineError", async () => {
     const { fetch } = makeFetch([
       { body: { task_id: "t", claim_text: "x" } },
-      { body: { status: "failed", failure_reason: "research_empty", failure_detail: "no sources" } },
+      {
+        body: { status: "failed", failure_reason: "research_empty", failure_detail: "no sources" },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await expect(client.verifyAndWait({ claim: "x", timeoutMs: 5_000 })).rejects.toBeInstanceOf(
@@ -427,9 +425,7 @@ describe("verifyAndWait", () => {
 
 describe("Resource namespaces", () => {
   it("verifications.list", async () => {
-    const { fetch } = makeFetch([
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-    ]);
+    const { fetch } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const page = await client.verifications.list();
     expect(page.total).toBe(0);
@@ -524,8 +520,16 @@ describe("Resource namespaces", () => {
       {
         body: {
           messages: [
-            { role: "user", content: "Which source is strongest?", created_at: "2026-05-22T12:00:00Z" },
-            { role: "expert", content: "The Nobel committee citation.", created_at: "2026-05-22T12:00:05Z" },
+            {
+              role: "user",
+              content: "Which source is strongest?",
+              created_at: "2026-05-22T12:00:00Z",
+            },
+            {
+              role: "expert",
+              content: "The Nobel committee citation.",
+              created_at: "2026-05-22T12:00:05Z",
+            },
           ],
           exchanges_used: 1,
           exchange_limit: 10,
@@ -542,7 +546,9 @@ describe("Resource namespaces", () => {
   });
 
   it("ask.send hits POST /ask/{id}", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "Because the Nobel citation says so." } }]);
+    const { fetch, calls } = makeFetch([
+      { body: { reply: "Because the Nobel citation says so." } },
+    ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const reply = await client.ask.send("vid_1", { message: "Why?" });
     expect(calls[0]!.url).toContain("/ask/vid_1");
@@ -560,9 +566,7 @@ describe("Resource namespaces", () => {
   });
 
   it("library.list works without api_key", async () => {
-    const { fetch, calls } = makeFetch([
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-    ]);
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ fetch });
     await client.library.list({ page: 1, sort: "recent" });
     const headers = new Headers(calls[0]!.init.headers);

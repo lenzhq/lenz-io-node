@@ -7,6 +7,7 @@ All notable changes to this SDK are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+
 - `client.assess({ text })` — new sync verb that returns a fast 3-model
   panel verdict in ~5-10s. Mirrors the new `POST /api/v1/assess` server
   endpoint.
@@ -31,6 +32,7 @@ All notable changes to this SDK are documented here. Format follows
   the same fixture JSON the Python SDK validates against.
 
 ### Changed (breaking)
+
 - `client.followup.*` → `client.ask.*`; URL paths
   `/verifications/{id}/follow-up` → `/ask/{id}`.
 - `FollowupHistory` → `AskHistory`, `FollowupReply` → `AskReply`.
@@ -46,6 +48,7 @@ All notable changes to this SDK are documented here. Format follows
   shape for any non-hidden public claim.
 
 ### Removed
+
 - `Verdict` interface (no consumers after the flatten).
 - `published_at` field — use `created_at` + `modified_at` instead.
 - `FollowupHistory` / `FollowupReply` / `Verdict` exports.

@@ -44,7 +44,9 @@ maybe("smoke", () => {
 
   it("webhook signature roundtrip", () => {
     const secret = "whsec_smoke_fixed";
-    const body = Buffer.from(JSON.stringify({ event: "verification.completed", task_id: "tsk_smoke" }));
+    const body = Buffer.from(
+      JSON.stringify({ event: "verification.completed", task_id: "tsk_smoke" }),
+    );
     const sig = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
     expect(verifySignature(body, sig, secret)).toBe(true);
     const wh = new LenzWebhooks({ secret });

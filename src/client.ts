@@ -145,10 +145,7 @@ class VerificationsNamespace {
     }
   }
 
-  setVisibility(
-    verificationId: string,
-    visibility: string,
-  ): Promise<Record<string, unknown>> {
+  setVisibility(verificationId: string, visibility: string): Promise<Record<string, unknown>> {
     return this.client.request<Record<string, unknown>>({
       method: "PATCH",
       path: `/verifications/${verificationId}/visibility`,
@@ -343,6 +340,7 @@ export class Lenz {
 
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
+    // eslint-disable-next-line no-constant-condition -- intentional poll loop; exits via return / throw inside.
     while (true) {
       const status = await this.getStatus(taskId);
       if (status.status === "completed") {
@@ -486,10 +484,7 @@ export class Lenz {
       }
 
       // Error path. Retry on 5xx + 429; otherwise raise.
-      if (
-        attempt < this.maxRetries &&
-        (response.status >= 500 || response.status === 429)
-      ) {
+      if (attempt < this.maxRetries && (response.status >= 500 || response.status === 429)) {
         const ra = response.headers.get("Retry-After");
         let waitMs: number = retrySleepMs(attempt);
         if (ra) {

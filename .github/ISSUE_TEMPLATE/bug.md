@@ -1,7 +1,7 @@
 ---
 name: Bug report
 about: Report a defect in the SDK
-title: '[bug] '
+title: "[bug] "
 labels: bug
 ---
 
@@ -18,9 +18,10 @@ const client = new Lenz({ apiKey: "…" });
 ```
 
 **Environment**
-- SDK version (`npm ls lenz-io`): 
-- Node version (`node --version`): 
-- OS: 
+
+- SDK version (`npm ls lenz-io`):
+- Node version (`node --version`):
+- OS:
 
 **Request ID(s)**
 If you saw an error, paste the `X-Request-ID` value. Helps us look up the exact server-side log.
