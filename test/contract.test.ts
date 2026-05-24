@@ -89,7 +89,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "visibility",
   ]),
   EntityRef: new Set(["name", "qid"]),
-  Source: new Set(["source_name", "title", "url", "snippet", "stance", "date"]),
+  Source: new Set(["source_name", "title", "url", "snippet", "date"]),
   Audit: new Set([
     "adjudication_summary",
     "assessments",

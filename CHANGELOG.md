@@ -52,6 +52,10 @@ All notable changes to this SDK are documented here. Format follows
 - `Verdict` interface (no consumers after the flatten).
 - `published_at` field — use `created_at` + `modified_at` instead.
 - `FollowupHistory` / `FollowupReply` / `Verdict` exports.
+- `Source.stance` — the per-source SUPPORT/REFUTE/NEUTRAL label is gone
+  from the server response. Research is now purely evidence-gathering;
+  adjudication owns the verdict. See
+  `lenzhq/lenz@b9419e50` for the server-side change.
 
 ## [1.0.0-rc.1] — 2026-05-13
 
