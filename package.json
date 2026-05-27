@@ -1,6 +1,6 @@
 {
   "name": "lenz-io",
-  "version": "1.0.0-rc.8",
+  "version": "1.0.0",
   "description": "Official Node SDK for the Lenz Claim Verification API for AI Product Teams",
   "license": "MIT",
   "author": "Lenz <support@lenz.io>",
