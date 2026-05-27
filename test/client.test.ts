@@ -125,18 +125,7 @@ describe("Marquee verbs", () => {
     expect(headers.get("Idempotency-Key")).toBe("custom-key-1");
   });
 
-  it("verifyBatch sends batch-level visibility in the request body", async () => {
-    const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.verifyBatch({
-      claims: [{ text: "a" }, { text: "b" }],
-      visibility: "public",
-    });
-    const body = JSON.parse(String(calls[0]!.init.body));
-    expect(body.visibility).toBe("public");
-  });
-
-  it("verifyBatch omits visibility when not set", async () => {
+  it("verifyBatch does not send visibility (1.1.0: API claims are private)", async () => {
     const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.verifyBatch({ claims: [{ text: "a" }] });
@@ -473,11 +462,13 @@ describe("Resource namespaces", () => {
     expect(await client.verifications.delete("vid_1")).toBe(true);
   });
 
-  it("verifications.setVisibility", async () => {
-    const { fetch } = makeFetch([{ body: { ok: true, visibility: "public" } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const out = await client.verifications.setVisibility("vid_1", "public");
-    expect(out["visibility"]).toBe("public");
+  it("verifications.setVisibility removed in 1.1.0", () => {
+    const client = new Lenz({ apiKey: "lenz_t" });
+    // The method was removed; type system flags it but at runtime
+    // it's just `undefined`.
+    expect(
+      (client.verifications as unknown as { setVisibility?: unknown }).setVisibility,
+    ).toBeUndefined();
   });
 
   it("verifications.related returns typed items with flat verdict + lenz_score", async () => {

@@ -90,10 +90,14 @@ export interface SimilarVerification {
  * The verdict block is FLAT at top level (was nested `Verdict` object
  * pre-unify). `created_at` + `modified_at` are the only timestamp
  * fields on the API surface — editorial `published_at` is internal-only.
+ *
+ * 1.1.0: dropped `url` and `visibility`. API claims are private by
+ * default and referenced by `verification_id` only. Cache-hit on
+ * another customer's claim is transparent — the customer always sees
+ * their own `verification_id`.
  */
 export interface Verification {
   verification_id?: string;
-  url?: string;
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
@@ -108,7 +112,6 @@ export interface Verification {
   audit?: Audit;
   created_at?: string | null;
   modified_at?: string | null;
-  visibility?: string | null;
   /**
    * Output language (ISO 639-1). Always populated when the SDK is
    * current; `?` is kept for resilience against older / mocked payloads
@@ -120,14 +123,11 @@ export interface Verification {
 
 /**
  * Compact item for the verifications list endpoint and the public
- * library list. Both `GET /api/v1/library` and `GET /api/v1/verifications`
- * return the same per-item shape. `visibility` is the literal string
- * `'public'` on /library (the only visibility surfaced there);
- * /verifications carries the owner's actual visibility.
+ * library list. Slim shape — no `url` (reference by `verification_id`),
+ * no `visibility` (1.1.0).
  */
 export interface VerificationListItem {
   verification_id?: string;
-  url?: string;
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
@@ -137,7 +137,6 @@ export interface VerificationListItem {
   executive_summary?: string;
   created_at?: string | null;
   modified_at?: string | null;
-  visibility?: string;
   /** Output language (ISO 639-1). See `Verification.language`. */
   language?: string;
 }
@@ -280,7 +279,6 @@ export interface VerifyInput {
   claim: string;
   sourceUrl?: string;
   webhookUrl?: string;
-  visibility?: string;
   /**
    * Output language (ISO 639-1). Omit for English (default). Supported:
    * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Omitted from the
@@ -306,7 +304,6 @@ export interface VerifyBatchItem {
   language?: string;
   source_url?: string;
   webhook_url?: string;
-  visibility?: string;
   idempotency_key?: string;
 }
 
@@ -314,8 +311,6 @@ export interface VerifyBatchInput {
   claims: VerifyBatchItem[];
   /** Batch-wide webhook URL; per-item value (if set) overrides. */
   webhookUrl?: string;
-  /** Batch-wide visibility default ('public' | 'private'); per-item value overrides. */
-  visibility?: string;
   /** Batch-wide output-language default; per-item `language` overrides. */
   language?: string;
   idempotencyKey?: string;

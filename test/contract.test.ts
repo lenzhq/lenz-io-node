@@ -58,7 +58,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   CandidateClaim: new Set(["text", "domain"]),
   Verification: new Set([
     "verification_id",
-    "url",
     "claim",
     "domain",
     "entities",
@@ -72,11 +71,10 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "audit",
     "created_at",
     "modified_at",
-    "visibility",
+    "language",
   ]),
   VerificationListItem: new Set([
     "verification_id",
-    "url",
     "claim",
     "domain",
     "entities",
@@ -86,7 +84,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "executive_summary",
     "created_at",
     "modified_at",
-    "visibility",
   ]),
   EntityRef: new Set(["name", "qid"]),
   Source: new Set(["source_name", "title", "url", "snippet", "date"]),

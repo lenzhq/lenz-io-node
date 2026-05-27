@@ -163,14 +163,6 @@ class VerificationsNamespace {
     }
   }
 
-  setVisibility(verificationId: string, visibility: string): Promise<Record<string, unknown>> {
-    return this.client.request<Record<string, unknown>>({
-      method: "PATCH",
-      path: `/verifications/${verificationId}/visibility`,
-      json: { visibility },
-    });
-  }
-
   /**
    * Public verifications semantically related to this one (pgvector ANN).
    * Server clamps `limit` to 10. Excludes the verification itself and
@@ -278,7 +270,6 @@ export class Lenz {
           text: c.text,
           source_url: c.source_url ?? "",
           webhook_url: c.webhook_url ?? "",
-          visibility: c.visibility ?? "",
         };
         if (c.language) item.language = c.language;
         return item;
@@ -287,7 +278,6 @@ export class Lenz {
     // Batch-wide defaults — per-item values (in the claims map above) override
     // server-side when set.
     if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
-    if (input.visibility) body["visibility"] = input.visibility;
     if (input.language) body["language"] = input.language;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
@@ -434,7 +424,6 @@ export class Lenz {
     const body: Record<string, unknown> = {
       text: input.claim,
       source_url: input.sourceUrl ?? "",
-      visibility: input.visibility ?? "",
       webhook_url: input.webhookUrl ?? "",
     };
     // Omit-when-empty so existing English callers keep byte-identical
