@@ -6,6 +6,41 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-05-27
+
+### Fixed
+
+- `AskReply` interface now matches the server contract. Pre-1.0.2 it
+  declared a single `reply: string` field that **never matched the
+  wire** — `POST /ask/{verification_id}` returns
+  `{role, content, created_at}` (see `lenz/api/public_authed.py:1804-1811`
+  in the main repo). JS users could read `.content` at runtime (TS
+  interfaces are erased), but TypeScript autocomplete pointed at the
+  wrong field. 1.0.2 aligns the interface:
+
+  ```ts
+  interface AskReply {
+    role?: string; // 'expert' on every reply
+    content?: string; // the reply text
+    created_at?: string;
+  }
+  ```
+
+### Migration
+
+If your code reads `.reply`, switch to `.content` — it's the same data
+that was already coming over the wire, just now properly typed. Code
+that read `.reply` at runtime was always getting `undefined`, so
+functional impact is limited to "code that worked by accident now
+works on purpose."
+
+### Notes
+
+Skipping `1.0.1` to keep the Node and Python SDK version numbers
+aligned (Python had a 1.0.1 patch for a top-level re-export gap that
+the Node SDK didn't share; mirroring the version stream from this
+point keeps the docs simpler).
+
 ## [1.0.0] — 2026-05-27
 
 First stable release. The pre-1.0 RC series (`1.0.0-rc.1` … `1.0.0-rc.12`) is
