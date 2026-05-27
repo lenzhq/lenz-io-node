@@ -1,6 +1,22 @@
 /**
  * Public Lenz client — the ergonomic top-level surface.
  *
+ * Multi-language SDK convention (12 languages):
+ * - Request methods (verify, assess, extract, ask.send, …) take
+ *   `language?: string`. Omit the field (or pass empty string) for
+ *   English (default) — the SDK then omits the key from the request
+ *   body, preserving byte-identical wire format for existing English
+ *   callers. Set `language: "es"` (or any of the 12 supported codes)
+ *   to receive prose fields in that language.
+ * - Response shapes (Verification, VerificationListItem, AssessClaim)
+ *   expose `language?: string` populated by the server. Verdict /
+ *   domain / status enums stay English regardless of language; only
+ *   free-form prose follows the request.
+ * - Mixing the two (e.g. `language: "en"` on a request) would send
+ *   an extra `"language": "en"` key on every English call — breaks the
+ *   byte-identical English path. The omit-when-empty convention exists
+ *   precisely to avoid that.
+ *
  * Four API primitives form a research-depth ladder — find claims, judge
  * them fast, prove them deep, follow up:
  *
@@ -43,6 +59,7 @@ import {
 import type {
   AskHistory,
   AskReply,
+  AskSendInput,
   AssessInput,
   AssessResponse,
   BatchAccepted,
@@ -182,11 +199,13 @@ class AskNamespace {
     });
   }
 
-  send(verificationId: string, { message }: { message: string }): Promise<AskReply> {
+  send(verificationId: string, input: AskSendInput): Promise<AskReply> {
+    const body: Record<string, unknown> = { message: input.message };
+    if (input.language) body.language = input.language;
     return this.client.request<AskReply>({
       method: "POST",
       path: `/ask/${verificationId}`,
-      json: { message },
+      json: body,
     });
   }
 
@@ -252,17 +271,24 @@ export class Lenz {
 
   async verifyBatch(input: VerifyBatchInput): Promise<BatchAccepted> {
     const body: Record<string, unknown> = {
-      claims: input.claims.map((c) => ({
-        text: c.text,
-        source_url: c.sourceUrl ?? "",
-        webhook_url: c.webhookUrl ?? "",
-        visibility: c.visibility ?? "",
-      })),
+      // Per-item shape passes through verbatim — `VerifyBatchItem` allows
+      // any subset including a per-item `language` override.
+      claims: input.claims.map((c) => {
+        const item: Record<string, unknown> = {
+          text: c.text,
+          source_url: c.source_url ?? "",
+          webhook_url: c.webhook_url ?? "",
+          visibility: c.visibility ?? "",
+        };
+        if (c.language) item.language = c.language;
+        return item;
+      }),
     };
     // Batch-wide defaults — per-item values (in the claims map above) override
     // server-side when set.
     if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
     if (input.visibility) body["visibility"] = input.visibility;
+    if (input.language) body["language"] = input.language;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<BatchAccepted>({
@@ -274,10 +300,12 @@ export class Lenz {
   }
 
   async extract(input: ExtractInput): Promise<ExtractedClaims> {
+    const body: Record<string, unknown> = { text: input.text };
+    if (input.language) body.language = input.language;
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
-      json: { text: input.text },
+      json: body,
     });
   }
 
@@ -286,12 +314,17 @@ export class Lenz {
    * Sync, ~5-10s. Returns one entry per atomic_claim. For deeper analysis
    * (citations, full audit trail), escalate low-confidence claims to
    * `verifyAndWait`; the two endpoints share a result cache server-side.
+   *
+   * Pass `language: "es"` (or any of the 12 supported codes) to receive
+   * the claim text in that language. Verdict labels stay English.
    */
   async assess(input: AssessInput): Promise<AssessResponse> {
+    const body: Record<string, unknown> = { text: input.text };
+    if (input.language) body.language = input.language;
     return this.request<AssessResponse>({
       method: "POST",
       path: "/assess",
-      json: { text: input.text },
+      json: body,
     });
   }
 
@@ -398,12 +431,15 @@ export class Lenz {
   // ── internal helpers ──
 
   private async submit(input: VerifyInput): Promise<TaskAccepted> {
-    const body = {
+    const body: Record<string, unknown> = {
       text: input.claim,
       source_url: input.sourceUrl ?? "",
       visibility: input.visibility ?? "",
       webhook_url: input.webhookUrl ?? "",
     };
+    // Omit-when-empty so existing English callers keep byte-identical
+    // request bodies (no extra "language": "" key on the wire).
+    if (input.language) body.language = input.language;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<TaskAccepted>({

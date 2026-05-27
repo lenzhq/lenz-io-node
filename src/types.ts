@@ -109,6 +109,13 @@ export interface Verification {
   created_at?: string | null;
   modified_at?: string | null;
   visibility?: string | null;
+  /**
+   * Output language (ISO 639-1). Always populated when the SDK is
+   * current; `?` is kept for resilience against older / mocked payloads
+   * that may omit the field. Verdict / domain / status enums stay
+   * English regardless of language.
+   */
+  language?: string;
 }
 
 /**
@@ -131,6 +138,8 @@ export interface VerificationListItem {
   created_at?: string | null;
   modified_at?: string | null;
   visibility?: string;
+  /** Output language (ISO 639-1). See `Verification.language`. */
+  language?: string;
 }
 
 export interface VerificationList {
@@ -183,6 +192,8 @@ export interface ExtractedClaims {
  */
 export interface AssessClaim {
   claim?: string;
+  /** Output language (ISO 639-1). Echoes the request's language. */
+  language?: string;
   verdict?: string; // "True" | "Mostly True" | "Misleading" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
   verification_url?: string | null;
@@ -258,24 +269,65 @@ export interface VerifyInput {
   sourceUrl?: string;
   webhookUrl?: string;
   visibility?: string;
+  /**
+   * Output language (ISO 639-1). Omit for English (default). Supported:
+   * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Omitted from the
+   * request body when empty so existing English callers keep
+   * byte-identical wire format.
+   */
+  language?: string;
   idempotencyKey?: string;
 }
 
+/**
+ * Per-item shape for `verifyBatch`. All fields optional; the SDK accepts
+ * plain objects at runtime — this interface exists purely for IDE
+ * autocompletion (mirrors Python's `VerifyBatchItem` TypedDict).
+ *
+ * Precedence on conflicting language: per-item `language` overrides the
+ * batch-wide `language` on `VerifyBatchInput`, which overrides the
+ * implicit English default. SDK forwards both verbatim; server is
+ * authoritative on the merge.
+ */
+export interface VerifyBatchItem {
+  text?: string;
+  language?: string;
+  source_url?: string;
+  webhook_url?: string;
+  visibility?: string;
+  idempotency_key?: string;
+}
+
 export interface VerifyBatchInput {
-  claims: Array<{ text: string; sourceUrl?: string; webhookUrl?: string; visibility?: string }>;
+  claims: VerifyBatchItem[];
   /** Batch-wide webhook URL; per-item value (if set) overrides. */
   webhookUrl?: string;
   /** Batch-wide visibility default ('public' | 'private'); per-item value overrides. */
   visibility?: string;
+  /** Batch-wide output-language default; per-item `language` overrides. */
+  language?: string;
   idempotencyKey?: string;
 }
 
 export interface ExtractInput {
   text: string;
+  /** Output language (ISO 639-1). See `VerifyInput.language`. */
+  language?: string;
 }
 
 export interface AssessInput {
   text: string;
+  /** Output language (ISO 639-1). See `VerifyInput.language`. */
+  language?: string;
+}
+
+export interface AskSendInput {
+  message: string;
+  /**
+   * Optional language override (ISO 639-1). When omitted, the server
+   * uses the claim's stored language as the default.
+   */
+  language?: string;
 }
 
 export interface SelectInput {

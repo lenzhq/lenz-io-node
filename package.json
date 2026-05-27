@@ -1,6 +1,6 @@
 {
   "name": "lenz-io",
-  "version": "1.0.0-rc.8",
+  "version": "1.0.0",
   "description": "Official Node SDK for the Lenz Claim Verification API for AI Product Teams",
   "license": "MIT",
   "author": "Lenz <support@lenz.io>",
@@ -60,6 +60,7 @@
     "lint:fix": "eslint --fix . && prettier --write .",
     "pretype": "npm run --silent sync-version",
     "type": "tsc --noEmit",
+    "regen": "if [ -z \"$LENZ_REPO\" ]; then echo 'Set LENZ_REPO=/path/to/Lenz' >&2; exit 1; fi && cd \"$LENZ_REPO\" && uv run python manage.py emit_openapi --output \"$OLDPWD/openapi.json\" --pretty && cd \"$OLDPWD\" && echo \"Refreshed openapi.json from $LENZ_REPO\"",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
