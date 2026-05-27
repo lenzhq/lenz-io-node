@@ -1,0 +1,7 @@
+# Upstream snapshot — formatted by Django Ninja's `emit_openapi --pretty`.
+# Prettier reformatting would break byte-identity with the Python SDK
+# sibling (see CONTRIBUTING.md → OpenAPI snapshot).
+openapi.json
+
+# Generated bundle
+dist/

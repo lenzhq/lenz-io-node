@@ -40,6 +40,25 @@ npm run type        # tsc --noEmit
 npm run lint        # eslint + prettier
 ```
 
+## OpenAPI snapshot
+
+This SDK is **hand-written**, not generated. The committed `openapi.json`
+is a documentation snapshot — useful for inspecting the typed API
+surface, but no code is generated from it. Refresh it after any
+server-side schema change:
+
+```bash
+LENZ_REPO=/path/to/Lenz npm run regen
+git diff openapi.json   # confirm additive
+```
+
+**Cross-SDK invariant**: the Node SDK and the Python SDK both keep a
+local copy of `openapi.json`. When you refresh one, regen the sibling
+SDK in the same commit / PR so the two snapshots stay byte-identical
+(both are copies of the same upstream Ninja-emitted spec). Drift
+between the two will silently confuse customers comparing typed
+shapes across languages.
+
 ## Compatibility promise
 
 [SemVer](https://semver.org/). Breaking changes to the public surface

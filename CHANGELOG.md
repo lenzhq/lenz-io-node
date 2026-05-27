@@ -8,6 +8,21 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
+- **Multi-language API support** (12 languages). Optional `language?: string`
+  field on the six request shapes: `VerifyInput`, `VerifyBatchInput`,
+  `VerifyBatchItem` (per-item), `AssessInput`, `ExtractInput`, `AskSendInput`.
+  Supported codes: `en` (default), `es`, `de`, `fr`, `it`, `pt`, `nl`, `sv`,
+  `da`, `no`, `fi`, `bg`. Verdict / domain / status enum values stay English
+  regardless of language; only free-form prose follows the request. Omit
+  the field for byte-identical wire format with prior English callers.
+- `VerifyBatchItem` interface — type-only shape for `verifyBatch` items,
+  enabling IDE autocompletion on per-item `language` and other fields.
+  Runtime still accepts plain objects.
+- `AskSendInput` interface for `client.ask.send(...)` — gains optional
+  `language` to override the claim's stored language on a single reply.
+- `language?: string` on `Verification`, `VerificationListItem`,
+  `LibraryItem`, and `AssessClaim` response shapes. Always populated by
+  the server when the SDK is current; kept optional for resilience.
 - `client.assess({ text })` — new sync verb that returns a fast 3-model
   panel verdict in ~5-10s. Mirrors the new `POST /api/v1/assess` server
   endpoint.
