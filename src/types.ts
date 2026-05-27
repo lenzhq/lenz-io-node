@@ -257,9 +257,21 @@ export interface AskHistory {
   can_send: boolean;
 }
 
-/** Returned by `POST /ask/{verification_id}`. */
+/**
+ * Returned by `POST /ask/{verification_id}`.
+ *
+ * Server returns `{role, content, created_at}` — see
+ * `lenz/api/public_authed.py:1804-1811`. Pre-1.0.2 this interface
+ * declared a single `reply: string` field that never matched the wire;
+ * the server's `content` came through at runtime (JS doesn't enforce
+ * the type, just like Pydantic's `extra="allow"` in the sibling Python
+ * SDK), but TypeScript users got the wrong autocomplete. 1.0.2 aligns
+ * the interface with reality.
+ */
 export interface AskReply {
-  reply: string;
+  role?: string; // 'expert' on every reply (the assistant turn)
+  content?: string; // the reply text
+  created_at?: string;
 }
 
 // ── Input shapes ──

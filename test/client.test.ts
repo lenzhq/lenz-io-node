@@ -545,15 +545,28 @@ describe("Resource namespaces", () => {
     expect(h.messages[0]!.role).toBe("user");
   });
 
-  it("ask.send hits POST /ask/{id}", async () => {
+  it("ask.send hits POST /ask/{id} and surfaces the server's {role, content, created_at}", async () => {
+    // Server returns {role, content, created_at} — see
+    // lenz/api/public_authed.py:1804. Pre-1.0.2 the mock used `{reply: ...}`
+    // and the interface declared `.reply`; both were drift away from the
+    // wire format. Test passed because mock + interface matched (each
+    // other, not the server).
     const { fetch, calls } = makeFetch([
-      { body: { reply: "Because the Nobel citation says so." } },
+      {
+        body: {
+          role: "expert",
+          content: "Because the Nobel citation says so.",
+          created_at: "2026-05-27T12:00:05Z",
+        },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const reply = await client.ask.send("vid_1", { message: "Why?" });
     expect(calls[0]!.url).toContain("/ask/vid_1");
     expect(calls[0]!.init.method).toBe("POST");
-    expect(reply.reply).toContain("Nobel");
+    expect(reply.role).toBe("expert");
+    expect(reply.content).toContain("Nobel");
+    expect(reply.created_at).toBe("2026-05-27T12:00:05Z");
   });
 
   it("ask.reset hits DELETE /ask/{id}", async () => {
