@@ -259,17 +259,27 @@ export interface AskHistory {
 /**
  * Returned by `POST /ask/{verification_id}`.
  *
- * Server returns `{role, content, created_at}` — see
- * `lenz/api/public_authed.py:1804-1811`. Pre-1.0.2 this interface
- * declared a single `reply: string` field that never matched the wire;
- * the server's `content` came through at runtime (JS doesn't enforce
- * the type, just like Pydantic's `extra="allow"` in the sibling Python
- * SDK), but TypeScript users got the wrong autocomplete. 1.0.2 aligns
- * the interface with reality.
+ * `content` is the assistant's reply text. It uses a small markdown
+ * subset that the chat model produces consistently:
+ *
+ * - `**bold**` and `*italic*`
+ * - `- ` or `* ` bullet lists
+ * - Blank-line paragraph breaks; single newlines inside a paragraph
+ *   mean line break
+ *
+ * If you're rendering to a UI, either pass it through a minimal
+ * markdown renderer (the subset above is enough) or display it
+ * verbatim. Anything beyond the subset surfaces as literal text
+ * rather than malformed HTML. See
+ * https://lenz.io/docs/quickstart#ask-reply-format.
+ *
+ * Pre-1.0.2 this interface declared a single `reply: string` field
+ * that never matched the wire — the server has always returned
+ * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
  */
 export interface AskReply {
   role?: string; // 'expert' on every reply (the assistant turn)
-  content?: string; // the reply text
+  content?: string; // markdown-subset prose (see interface docstring)
   created_at?: string;
 }
 

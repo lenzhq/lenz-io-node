@@ -88,7 +88,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; pair with a webhook for the callback.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic).
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
-- **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification.
+- **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
 - **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed).
 - **`client.usage()`** → credits and rate-limit remaining.
