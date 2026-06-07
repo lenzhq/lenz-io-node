@@ -403,7 +403,7 @@ describe("verifyAndWait", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     let captured: unknown;
     try {
-      await client.verifyAndWait({ claim: "x", timeoutMs: 1 });
+      await client.verifyAndWait({ claim: "x", timeoutMs: 0 });
     } catch (e) {
       captured = e;
     }
@@ -483,7 +483,7 @@ describe("wait", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     let captured: unknown;
     try {
-      await client.wait("tsk_slow", { timeoutMs: 1 });
+      await client.wait("tsk_slow", { timeoutMs: 0 });
     } catch (e) {
       captured = e;
     }
@@ -560,7 +560,7 @@ describe("verifyBatchAndWait", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const results = await client.verifyBatchAndWait({
       claims: [{ text: "a" }, { text: "b" }],
-      timeoutMs: 1,
+      timeoutMs: 0,
     });
     const byId = Object.fromEntries(results.map((r) => [r.task_id, r]));
     expect(byId["t1"]!.status).toBe("completed");
