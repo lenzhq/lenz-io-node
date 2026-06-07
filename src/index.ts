@@ -76,6 +76,7 @@ export type {
   Assessment,
   Audit,
   BatchAccepted,
+  BatchItemResult,
   CandidateClaim,
   DebateSide,
   EntityRef,
@@ -96,8 +97,10 @@ export type {
   VerificationList,
   VerificationListItem,
   VerifyAndWaitInput,
+  VerifyBatchAndWaitInput,
   VerifyBatchInput,
   VerifyInput,
+  WaitOptions,
 } from "./types.js";
 
 // VERSION is generated at build time from package.json#version by

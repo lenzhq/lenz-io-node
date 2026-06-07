@@ -6,6 +6,66 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-06-07
+
+Polling ergonomics. The async path (`verify()` → poll) is now first-class and
+discoverable, not just a webhook fallback. Parallel verification (unlocked by the
+server dropping its per-user single-flight lock) gets a dedicated batch-and-wait
+helper.
+
+### Added
+
+- `client.wait(task)` → `Verification`. Blocks on an already-submitted task until
+  it terminates. Accepts a `task_id` string **or** a `TaskAccepted`, so
+  `client.wait(await client.verify({ claim }))` reads naturally. `verifyAndWait` is
+  now `wait(verify(...))` internally (behavior unchanged).
+- `client.verifyBatchAndWait({ claims })` → `BatchItemResult[]`. Fans out a batch
+  and polls every item to completion, one result per claim in input order. Never
+  throws on a per-item outcome — inspect each `BatchItemResult.status`
+  (`completed` | `needs_input` | `failed` | `timeout`). Per-item poll failures use
+  `Promise.allSettled` so one transport error doesn't abort the batch.
+- `BatchItemResult` type (`task_id`, `claim_text`, `status`, `verification`,
+  `status_detail`).
+- `TaskStatus.error` — the server's failed-status responses carry the diagnostic
+  under `error`; it's now a typed field.
+
+### Fixed
+
+- Failed verifications now surface the real diagnostic. The server sends
+  `{"status": "failed", "error": "..."}`, but the SDK only read
+  `failure_reason`/`failure_detail`, so `LenzPipelineError` reported "unknown". The
+  failed path now reads `error || failure_detail || failure_reason`.
+
+## [1.1.0] — 2026-05-28
+
+API privacy redesign. The server now treats every API claim as private
+by default and never leaks another customer's verification_id back on
+a cache-hit. SDK changes align the typed surface with the new server
+contract.
+
+### Removed
+
+- `Verification.url`, `Verification.visibility` — API claims are
+  private and referenced by `verification_id` only. Cache-hit on
+  someone else's claim is transparent: the customer always sees their
+  own `verification_id`.
+- `VerificationListItem.url`, `VerificationListItem.visibility` —
+  same reasoning at the list-item layer.
+- `client.verifications.setVisibility(...)` method — the underlying
+  endpoint is gone. The property is `undefined` at runtime.
+- `visibility` field from `VerifyInput`, `VerifyBatchInput`, and
+  per-item `VerifyBatchItem` — server rejects it as unknown.
+
+### Migration
+
+If you were reading `verification.url`, the URL is no longer part of
+the API surface. Reference verifications by `verification_id`.
+`verification.visibility` was always `'private'` for any API-created
+claim — the field had zero information value and is now removed.
+
+If you were calling `client.verifications.setVisibility(...)`,
+remove those calls.
+
 ## [1.0.2] — 2026-05-27
 
 ### Fixed

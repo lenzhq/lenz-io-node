@@ -52,13 +52,13 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "claims",
     "candidates",
     "similar_claims",
+    "error",
     "failure_reason",
     "failure_detail",
   ]),
   CandidateClaim: new Set(["text", "domain"]),
   Verification: new Set([
     "verification_id",
-    "url",
     "claim",
     "domain",
     "entities",
@@ -72,11 +72,10 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "audit",
     "created_at",
     "modified_at",
-    "visibility",
+    "language",
   ]),
   VerificationListItem: new Set([
     "verification_id",
-    "url",
     "claim",
     "domain",
     "entities",
@@ -86,7 +85,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "executive_summary",
     "created_at",
     "modified_at",
-    "visibility",
   ]),
   EntityRef: new Set(["name", "qid"]),
   Source: new Set(["source_name", "title", "url", "snippet", "date"]),
@@ -162,6 +160,7 @@ describe("contract", () => {
     ["assess_single_claim.json", "AssessResponse"],
     ["assess_multiclaim.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
+    ["verify_status_failed.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
   ];
 
