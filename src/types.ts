@@ -90,10 +90,14 @@ export interface SimilarVerification {
  * The verdict block is FLAT at top level (was nested `Verdict` object
  * pre-unify). `created_at` + `modified_at` are the only timestamp
  * fields on the API surface — editorial `published_at` is internal-only.
+ *
+ * 1.1.0: dropped `url` and `visibility`. API claims are private by
+ * default and referenced by `verification_id` only. Cache-hit on
+ * another customer's claim is transparent — the customer always sees
+ * their own `verification_id`.
  */
 export interface Verification {
   verification_id?: string;
-  url?: string;
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
@@ -108,7 +112,6 @@ export interface Verification {
   audit?: Audit;
   created_at?: string | null;
   modified_at?: string | null;
-  visibility?: string | null;
   /**
    * Output language (ISO 639-1). Always populated when the SDK is
    * current; `?` is kept for resilience against older / mocked payloads
@@ -120,14 +123,11 @@ export interface Verification {
 
 /**
  * Compact item for the verifications list endpoint and the public
- * library list. Both `GET /api/v1/library` and `GET /api/v1/verifications`
- * return the same per-item shape. `visibility` is the literal string
- * `'public'` on /library (the only visibility surfaced there);
- * /verifications carries the owner's actual visibility.
+ * library list. Slim shape — no `url` (reference by `verification_id`),
+ * no `visibility` (1.1.0).
  */
 export interface VerificationListItem {
   verification_id?: string;
-  url?: string;
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
@@ -137,7 +137,6 @@ export interface VerificationListItem {
   executive_summary?: string;
   created_at?: string | null;
   modified_at?: string | null;
-  visibility?: string;
   /** Output language (ISO 639-1). See `Verification.language`. */
   language?: string;
 }
@@ -229,8 +228,37 @@ export interface TaskStatus {
   claims?: CandidateClaim[];
   candidates?: string[];
   similar_claims?: SimilarVerification[];
+  /**
+   * Diagnostic on a `failed` status. The server's failed response is
+   * `{"status": "failed", "error": "..."}` — `error` is the live wire field.
+   * `failure_reason` / `failure_detail` are kept for forward/back compat;
+   * read precedence is `error || failure_detail || failure_reason`.
+   */
+  error?: string;
   failure_reason?: string;
   failure_detail?: string;
+}
+
+/**
+ * Per-item outcome from `verifyBatchAndWait`.
+ *
+ * A client-side composition type — NOT a wire shape (the server never emits
+ * it, so it has no contract fixture). One entry per task that
+ * `POST /verify/batch` returned, in input order. Field names stay snake_case
+ * to match the wire-shaped models (`TaskAccepted`, `Verification`).
+ *
+ * `status` is a client-side rollup:
+ * - `completed`   — `verification` is set (and `status_detail` carries the raw poll).
+ * - `needs_input` — paused for caller input; inspect `status_detail`.
+ * - `failed`      — terminal failure (or completed-without-result); `status_detail` carries the diagnostic.
+ * - `timeout`     — the deadline elapsed before this task reached a terminal state; `status_detail` is `undefined`.
+ */
+export interface BatchItemResult {
+  task_id: string;
+  claim_text?: string;
+  status: "completed" | "needs_input" | "failed" | "timeout";
+  verification?: Verification;
+  status_detail?: TaskStatus;
 }
 
 export interface Usage {
@@ -260,17 +288,24 @@ export interface AskHistory {
 /**
  * Returned by `POST /ask/{verification_id}`.
  *
- * Server returns `{role, content, created_at}` — see
- * `lenz/api/public_authed.py:1804-1811`. Pre-1.0.2 this interface
- * declared a single `reply: string` field that never matched the wire;
- * the server's `content` came through at runtime (JS doesn't enforce
- * the type, just like Pydantic's `extra="allow"` in the sibling Python
- * SDK), but TypeScript users got the wrong autocomplete. 1.0.2 aligns
- * the interface with reality.
+ * `content` is the assistant's reply text in a small markdown subset:
+ *
+ * - `**bold**` and `*italic*`
+ * - `- ` or `* ` bullet lists
+ * - Blank-line paragraph breaks; single newlines inside a paragraph
+ *   mean line break
+ *
+ * The model only produces these — no headings, no tables, no code
+ * blocks. Pass it through any markdown library or display it
+ * verbatim. See https://lenz.io/docs/quickstart#ask-reply-format.
+ *
+ * Pre-1.0.2 this interface declared a single `reply: string` field
+ * that never matched the wire — the server has always returned
+ * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
  */
 export interface AskReply {
   role?: string; // 'expert' on every reply (the assistant turn)
-  content?: string; // the reply text
+  content?: string; // markdown-subset prose (see interface docstring)
   created_at?: string;
 }
 
@@ -280,7 +315,6 @@ export interface VerifyInput {
   claim: string;
   sourceUrl?: string;
   webhookUrl?: string;
-  visibility?: string;
   /**
    * Output language (ISO 639-1). Omit for English (default). Supported:
    * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Omitted from the
@@ -306,7 +340,6 @@ export interface VerifyBatchItem {
   language?: string;
   source_url?: string;
   webhook_url?: string;
-  visibility?: string;
   idempotency_key?: string;
 }
 
@@ -314,8 +347,6 @@ export interface VerifyBatchInput {
   claims: VerifyBatchItem[];
   /** Batch-wide webhook URL; per-item value (if set) overrides. */
   webhookUrl?: string;
-  /** Batch-wide visibility default ('public' | 'private'); per-item value overrides. */
-  visibility?: string;
   /** Batch-wide output-language default; per-item `language` overrides. */
   language?: string;
   idempotencyKey?: string;
@@ -358,4 +389,15 @@ export interface LibraryListInput {
 export interface VerifyAndWaitInput extends VerifyInput {
   timeoutMs?: number;
   idempotency?: boolean;
+}
+
+export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
+  /** Overall deadline for polling every item to a terminal state. Default 180s. */
+  timeoutMs?: number;
+}
+
+/** Options for `wait()`. */
+export interface WaitOptions {
+  /** Deadline before raising `LenzTimeoutError`. Default 120s. */
+  timeoutMs?: number;
 }

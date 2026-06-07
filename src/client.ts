@@ -42,6 +42,13 @@
  * const reply = await client.ask.send(deep.verification_id!, {
  *   message: 'Which source is strongest?',
  * });
+ *
+ * // Async / parallel verify-family verbs:
+ * const task = await client.verify({ claim: '...' });   // returns task_id
+ * const v = await client.wait(task);                     // block until it lands
+ * const results = await client.verifyBatchAndWait({      // fan out + poll all
+ *   claims: [{ text: '...' }, { text: '...' }],
+ * });
  * ```
  */
 
@@ -63,6 +70,7 @@ import type {
   AssessInput,
   AssessResponse,
   BatchAccepted,
+  BatchItemResult,
   ExtractInput,
   ExtractedClaims,
   LibraryList,
@@ -75,8 +83,10 @@ import type {
   Verification,
   VerificationList,
   VerifyAndWaitInput,
+  VerifyBatchAndWaitInput,
   VerifyBatchInput,
   VerifyInput,
+  WaitOptions,
 } from "./types.js";
 
 // Pin the API version the SDK was built against. The server logs it on
@@ -161,14 +171,6 @@ class VerificationsNamespace {
       if (exc instanceof LenzError && exc.statusCode === 404) return true;
       throw exc;
     }
-  }
-
-  setVisibility(verificationId: string, visibility: string): Promise<Record<string, unknown>> {
-    return this.client.request<Record<string, unknown>>({
-      method: "PATCH",
-      path: `/verifications/${verificationId}/visibility`,
-      json: { visibility },
-    });
   }
 
   /**
@@ -278,7 +280,6 @@ export class Lenz {
           text: c.text,
           source_url: c.source_url ?? "",
           webhook_url: c.webhook_url ?? "",
-          visibility: c.visibility ?? "",
         };
         if (c.language) item.language = c.language;
         return item;
@@ -287,7 +288,6 @@ export class Lenz {
     // Batch-wide defaults — per-item values (in the claims map above) override
     // server-side when set.
     if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
-    if (input.visibility) body["visibility"] = input.visibility;
     if (input.language) body["language"] = input.language;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
@@ -368,64 +368,178 @@ export class Lenz {
       (input.idempotency !== false ? randomUUID().replace(/-/g, "") : undefined);
 
     const accepted = await this.submit({ ...input, idempotencyKey });
-    const taskId = accepted.task_id;
     // eslint-disable-next-line no-console
-    console.info(`[lenz-io] Submitted task: ${taskId}`);
+    console.info(`[lenz-io] Submitted task: ${accepted.task_id}`);
+    return this.wait(accepted, { timeoutMs });
+  }
 
-    const deadline = Date.now() + timeoutMs;
-    let backoffIdx = 0;
-    // eslint-disable-next-line no-constant-condition -- intentional poll loop; exits via return / throw inside.
-    while (true) {
-      const status = await this.getStatus(taskId);
-      if (status.status === "completed") {
-        if (!status.result) {
-          throw new LenzPipelineError({
-            message: "Pipeline completed but the result is empty.",
-            cause: "Server reported status=completed without a result block.",
-            fix: "File an issue at https://github.com/lenzhq/lenz-io-node/issues with the Request ID.",
-            docUrl: "https://lenz.io/docs/errors",
-          });
-        }
-        return status.result;
+  /**
+   * Block on an already-submitted task until it terminates, then return its
+   * `Verification`. `task` is a `task_id` string OR the `TaskAccepted` returned
+   * by `verify` / `select` — so `client.wait(await client.verify({claim}))`
+   * reads naturally. Throws for an empty id, `LenzNeedsInputError` /
+   * `LenzPipelineError` on terminal non-success, and `LenzTimeoutError` on
+   * deadline.
+   */
+  async wait(task: string | TaskAccepted, opts: WaitOptions = {}): Promise<Verification> {
+    const taskId = typeof task === "string" ? task : task.task_id;
+    if (!taskId) {
+      throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
+    }
+    const timeoutMs = opts.timeoutMs ?? 120_000;
+    const { terminal, timedOut } = await this._pollToTerminal([taskId], timeoutMs);
+    if (timedOut.has(taskId)) {
+      const err = new LenzTimeoutError({
+        message: `wait timed out after ${timeoutMs}ms`,
+        cause: "Pipeline still running server-side.",
+        fix: `Resume via client.getStatus('${taskId}') later.`,
+        docUrl: "https://lenz.io/docs/verify#timeout",
+      });
+      err.taskId = taskId;
+      throw err;
+    }
+    return this._verificationFromTerminal(terminal.get(taskId)!, taskId);
+  }
+
+  /**
+   * Submit a batch and poll every item to a terminal state. Returns one
+   * `BatchItemResult` per task the batch accepted, in input order. Never throws
+   * on a per-item outcome — a claim that fails, pauses, or times out becomes a
+   * `BatchItemResult` with the matching `status`. (Transport/auth errors on the
+   * initial submit still throw.)
+   */
+  async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
+    const timeoutMs = input.timeoutMs ?? 180_000;
+    const accepted = await this.verifyBatch(input);
+    const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
+    const { terminal, timedOut } = await this._pollToTerminal(ids, timeoutMs);
+
+    return accepted.items.map((it): BatchItemResult => {
+      const status = terminal.get(it.task_id);
+      if (!it.task_id || timedOut.has(it.task_id) || !status) {
+        return { task_id: it.task_id, claim_text: it.claim_text, status: "timeout" };
+      }
+      if (status.status === "completed" && status.result) {
+        return {
+          task_id: it.task_id,
+          claim_text: it.claim_text,
+          status: "completed",
+          verification: status.result,
+          status_detail: status,
+        };
       }
       if (status.status === "needs_input") {
-        const err = new LenzNeedsInputError({
-          message: `Pipeline paused: ${status.reason ?? "needs input"}`,
-          cause: "The verification needs caller input to proceed.",
-          fix: "Inspect the payload, then call client.select(taskId, { text or claimIndex }).",
-          docUrl: "https://lenz.io/docs/verify#needs-input",
-        });
-        err.taskId = taskId;
-        err.kind = status.reason ?? "";
-        err.payload = status as unknown as Record<string, unknown>;
-        throw err;
+        return {
+          task_id: it.task_id,
+          claim_text: it.claim_text,
+          status: "needs_input",
+          status_detail: status,
+        };
       }
-      if (status.status === "failed") {
-        const err = new LenzPipelineError({
-          message: `Pipeline failed: ${status.failure_reason ?? "unknown"}`,
-          cause: status.failure_detail ?? status.failure_reason ?? "Unknown failure.",
-          fix: "Retry with a different claim, or check failure_reason for the diagnostic.",
-          docUrl: "https://lenz.io/docs/errors",
-        });
-        err.taskId = taskId;
-        err.failureReason = status.failure_reason ?? "";
-        throw err;
-      }
+      // failed, or completed-without-result (treated as failed).
+      return {
+        task_id: it.task_id,
+        claim_text: it.claim_text,
+        status: "failed",
+        status_detail: status,
+      };
+    });
+  }
 
+  // ── poll engine (shared by wait + verifyBatchAndWait) ──
+
+  /**
+   * Round-robin poll `taskIds` until each reaches a terminal state or the
+   * deadline elapses. Returns `{terminal, timedOut}`; a timed-out task has no
+   * `TaskStatus` (`"timeout"` is client-side, never a wire status).
+   *
+   * Each round polls every still-pending id once (via `Promise.allSettled`, so
+   * one poll's transport failure doesn't abort the batch — that id stays
+   * pending and retries next round) BEFORE the deadline check, preserving the
+   * legacy `verifyAndWait` behavior of polling once more after sleeping the
+   * remaining time. Timeout is therefore approximate. Backoff reuses the
+   * existing 2/4/8/8…ms sequence; the 10s cap is currently unreachable and kept
+   * only to preserve identical timing.
+   */
+  private async _pollToTerminal(
+    taskIds: string[],
+    timeoutMs: number,
+  ): Promise<{ terminal: Map<string, TaskStatus>; timedOut: Set<string> }> {
+    let pending = [...taskIds];
+    const terminal = new Map<string, TaskStatus>();
+    const timedOut = new Set<string>();
+    const deadline = Date.now() + timeoutMs;
+    let backoffIdx = 0;
+    while (pending.length > 0) {
+      const settled = await Promise.allSettled(pending.map((id) => this.getStatus(id)));
+      const stillPending: string[] = [];
+      settled.forEach((res, i) => {
+        const id = pending[i]!;
+        if (res.status === "fulfilled") {
+          const s = res.value;
+          if (s.status === "completed" || s.status === "needs_input" || s.status === "failed") {
+            terminal.set(id, s);
+          } else {
+            stillPending.push(id);
+          }
+        } else {
+          // Poll errored this round (after _request exhausted its retries) —
+          // keep pending and retry next round rather than aborting the batch.
+          stillPending.push(id);
+        }
+      });
+      pending = stillPending;
+      if (pending.length === 0) break;
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        const err = new LenzTimeoutError({
-          message: `verifyAndWait timed out after ${timeoutMs}ms`,
-          cause: "Pipeline still running server-side.",
-          fix: `Resume via client.getStatus('${taskId}') later.`,
-          docUrl: "https://lenz.io/docs/verify#timeout",
-        });
-        err.taskId = taskId;
-        throw err;
+        pending.forEach((id) => timedOut.add(id));
+        break;
       }
       await sleep(pollSleepMs(backoffIdx, remaining));
       backoffIdx += 1;
     }
+    return { terminal, timedOut };
+  }
+
+  /**
+   * Map a terminal `TaskStatus` to a `Verification` or throw the matching typed
+   * error. Shared by `wait` (and thus `verifyAndWait`).
+   */
+  private _verificationFromTerminal(status: TaskStatus, taskId: string): Verification {
+    if (status.status === "completed") {
+      if (!status.result) {
+        throw new LenzPipelineError({
+          message: "Pipeline completed but the result is empty.",
+          cause: "Server reported status=completed without a result block.",
+          fix: "File an issue at https://github.com/lenzhq/lenz-io-node/issues with the Request ID.",
+          docUrl: "https://lenz.io/docs/errors",
+        });
+      }
+      return status.result;
+    }
+    if (status.status === "needs_input") {
+      const err = new LenzNeedsInputError({
+        message: `Pipeline paused: ${status.reason ?? "needs input"}`,
+        cause: "The verification needs caller input to proceed.",
+        fix: "Inspect the payload, then call client.select(taskId, { text or claimIndex }).",
+        docUrl: "https://lenz.io/docs/verify#needs-input",
+      });
+      err.taskId = taskId;
+      err.kind = status.reason ?? "";
+      err.payload = status as unknown as Record<string, unknown>;
+      throw err;
+    }
+    // failed. Server sends the diagnostic under `error`; fall back to legacy fields.
+    const detail = status.error || status.failure_detail || status.failure_reason || "unknown";
+    const err = new LenzPipelineError({
+      message: `Pipeline failed: ${detail}`,
+      cause: detail,
+      fix: "Retry with a different claim, or check status.error for the diagnostic.",
+      docUrl: "https://lenz.io/docs/errors",
+    });
+    err.taskId = taskId;
+    err.failureReason = status.failure_reason ?? "";
+    throw err;
   }
 
   // ── internal helpers ──
@@ -434,7 +548,6 @@ export class Lenz {
     const body: Record<string, unknown> = {
       text: input.claim,
       source_url: input.sourceUrl ?? "",
-      visibility: input.visibility ?? "",
       webhook_url: input.webhookUrl ?? "",
     };
     // Omit-when-empty so existing English callers keep byte-identical
