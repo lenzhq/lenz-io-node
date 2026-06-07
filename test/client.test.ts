@@ -412,6 +412,178 @@ describe("verifyAndWait", () => {
   });
 });
 
+const COMPLETED_RESULT = {
+  verification_id: "v",
+  claim: "Sample claim",
+  verdict: "True",
+  confidence: "high",
+  lenz_score: 8,
+};
+
+describe("wait", () => {
+  it("accepts a task_id string", async () => {
+    const { fetch } = makeFetch([{ body: { status: "completed", result: COMPLETED_RESULT } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.wait("t", { timeoutMs: 5_000 });
+    expect(v.verdict).toBe("True");
+  });
+
+  it("accepts a TaskAccepted object", async () => {
+    const { fetch } = makeFetch([{ body: { status: "completed", result: COMPLETED_RESULT } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.wait({ task_id: "t", claim_text: "x" }, { timeoutMs: 5_000 });
+    expect(v.lenz_score).toBe(8);
+  });
+
+  it("throws on an empty task_id", async () => {
+    const { fetch } = makeFetch([]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.wait({ task_id: "" })).rejects.toThrow();
+  });
+
+  it("polls until completed", async () => {
+    const { fetch } = makeFetch([
+      { body: { status: "processing", progress: {} } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.wait("t", { timeoutMs: 10_000 });
+    expect(v.verdict).toBe("True");
+  });
+
+  it("needs_input rejects", async () => {
+    const { fetch } = makeFetch([
+      { body: { status: "needs_input", reason: "multi_claim", claims: [] } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.wait("t", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(
+      LenzNeedsInputError,
+    );
+  });
+
+  it("completed-without-result rejects", async () => {
+    const { fetch } = makeFetch([{ body: { status: "completed" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.wait("t", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(LenzPipelineError);
+  });
+
+  it("failed surfaces the error wire field", async () => {
+    const { fetch } = makeFetch([
+      { body: { status: "failed", error: "Pipeline stopped at: research_empty" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.wait("t", { timeoutMs: 5_000 })).rejects.toThrow(/research_empty/);
+  });
+
+  it("timeout rejects with task_id", async () => {
+    const { fetch } = makeFetch([
+      { body: { status: "processing", progress: {} } },
+      { body: { status: "processing", progress: {} } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    let captured: unknown;
+    try {
+      await client.wait("tsk_slow", { timeoutMs: 1 });
+    } catch (e) {
+      captured = e;
+    }
+    expect(captured).toBeInstanceOf(LenzTimeoutError);
+    expect((captured as LenzTimeoutError).taskId).toBe("tsk_slow");
+  });
+});
+
+describe("verifyBatchAndWait", () => {
+  it("returns all completed results in input order", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          batch_id: "b",
+          items: [
+            { task_id: "t1", claim_text: "a" },
+            { task_id: "t2", claim_text: "b" },
+          ],
+        },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const results = await client.verifyBatchAndWait({
+      claims: [{ text: "a" }, { text: "b" }],
+      timeoutMs: 5_000,
+    });
+    expect(results.map((r) => r.task_id)).toEqual(["t1", "t2"]);
+    expect(results.every((r) => r.status === "completed" && r.verification)).toBe(true);
+  });
+
+  it("captures mixed per-item outcomes", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          batch_id: "b",
+          items: [
+            { task_id: "t1", claim_text: "a" },
+            { task_id: "t2", claim_text: "b" },
+            { task_id: "t3", claim_text: "c" },
+          ],
+        },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+      { body: { status: "needs_input", reason: "multi_claim", claims: [] } },
+      { body: { status: "failed", error: "research_empty" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const results = await client.verifyBatchAndWait({
+      claims: [{ text: "a" }, { text: "b" }, { text: "c" }],
+      timeoutMs: 5_000,
+    });
+    expect(results.map((r) => r.status)).toEqual(["completed", "needs_input", "failed"]);
+    expect(results[1]!.status_detail?.reason).toBe("multi_claim");
+    expect(results[2]!.status_detail?.error).toBe("research_empty");
+  });
+
+  it("marks a still-pending item as timeout", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          batch_id: "b",
+          items: [
+            { task_id: "t1", claim_text: "a" },
+            { task_id: "t2", claim_text: "b" },
+          ],
+        },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+      { body: { status: "processing", progress: {} } },
+      { body: { status: "processing", progress: {} } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const results = await client.verifyBatchAndWait({
+      claims: [{ text: "a" }, { text: "b" }],
+      timeoutMs: 1,
+    });
+    const byId = Object.fromEntries(results.map((r) => [r.task_id, r]));
+    expect(byId["t1"]!.status).toBe("completed");
+    expect(byId["t2"]!.status).toBe("timeout");
+    expect(byId["t2"]!.status_detail).toBeUndefined();
+  });
+
+  it("forwards the idempotency key to /verify/batch", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { batch_id: "b", items: [{ task_id: "t1", claim_text: "a" }] } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatchAndWait({
+      claims: [{ text: "a" }],
+      idempotencyKey: "k1",
+      timeoutMs: 5_000,
+    });
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("Idempotency-Key")).toBe("k1");
+  });
+});
+
 describe("Resource namespaces", () => {
   it("verifications.list", async () => {
     const { fetch } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);

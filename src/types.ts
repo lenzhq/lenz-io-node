@@ -228,8 +228,37 @@ export interface TaskStatus {
   claims?: CandidateClaim[];
   candidates?: string[];
   similar_claims?: SimilarVerification[];
+  /**
+   * Diagnostic on a `failed` status. The server's failed response is
+   * `{"status": "failed", "error": "..."}` — `error` is the live wire field.
+   * `failure_reason` / `failure_detail` are kept for forward/back compat;
+   * read precedence is `error || failure_detail || failure_reason`.
+   */
+  error?: string;
   failure_reason?: string;
   failure_detail?: string;
+}
+
+/**
+ * Per-item outcome from `verifyBatchAndWait`.
+ *
+ * A client-side composition type — NOT a wire shape (the server never emits
+ * it, so it has no contract fixture). One entry per task that
+ * `POST /verify/batch` returned, in input order. Field names stay snake_case
+ * to match the wire-shaped models (`TaskAccepted`, `Verification`).
+ *
+ * `status` is a client-side rollup:
+ * - `completed`   — `verification` is set (and `status_detail` carries the raw poll).
+ * - `needs_input` — paused for caller input; inspect `status_detail`.
+ * - `failed`      — terminal failure (or completed-without-result); `status_detail` carries the diagnostic.
+ * - `timeout`     — the deadline elapsed before this task reached a terminal state; `status_detail` is `undefined`.
+ */
+export interface BatchItemResult {
+  task_id: string;
+  claim_text?: string;
+  status: "completed" | "needs_input" | "failed" | "timeout";
+  verification?: Verification;
+  status_detail?: TaskStatus;
 }
 
 export interface Usage {
@@ -360,4 +389,15 @@ export interface LibraryListInput {
 export interface VerifyAndWaitInput extends VerifyInput {
   timeoutMs?: number;
   idempotency?: boolean;
+}
+
+export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
+  /** Overall deadline for polling every item to a terminal state. Default 180s. */
+  timeoutMs?: number;
+}
+
+/** Options for `wait()`. */
+export interface WaitOptions {
+  /** Deadline before raising `LenzTimeoutError`. Default 120s. */
+  timeoutMs?: number;
 }
