@@ -38,8 +38,9 @@ export interface Assessment {
   reasoning?: string;
   /**
    * Per-panelist warnings. Each panelist emits exactly one category
-   * (logical fallacies, missing context, or weakest sources); the kind
-   * is implicit in `focus_area`.
+   * (logical fallacies, precision issues, or weakest sources; verifications
+   * from before 2026-06 carry missing context from the retired Context
+   * Analyst); the kind is implicit in `focus_area`.
    */
   warnings?: string[];
 }
