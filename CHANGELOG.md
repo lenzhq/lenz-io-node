@@ -6,7 +6,9 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
-Next release is **2.0.0** — both changes below are breaking vs `1.2.0`.
+## [2.0.0] — 2026-06-25
+
+Both changes below are breaking vs `1.2.0`.
 
 ### Changed
 
