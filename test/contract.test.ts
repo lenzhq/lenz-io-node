@@ -97,6 +97,9 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   Assessment: new Set(["panelist_name", "focus_area", "score", "reasoning", "warnings"]),
   DebateSide: new Set(["role", "argument", "rebuttal"]),
+  Usage: new Set(["plan", "quota_resets_at", "verify", "ask", "assess", "extract"]),
+  UsageCapacity: new Set(["quota_used", "quota_total", "quota_remaining", "credits", "remaining"]),
+  UsageExtract: new Set(["calls_today", "daily_limit", "unlimited"]),
 };
 
 // For each parent interface + field name, which child interface (if any)
@@ -119,6 +122,12 @@ const NESTED: Record<string, Record<string, string | null>> = {
     assessments: "Assessment",
     debate_pro: "DebateSide",
     debate_con: "DebateSide",
+  },
+  Usage: {
+    verify: "UsageCapacity",
+    ask: "UsageCapacity",
+    assess: "UsageCapacity",
+    extract: "UsageExtract",
   },
 };
 
@@ -162,6 +171,7 @@ describe("contract", () => {
     ["verify_status_completed.json", "TaskStatus"],
     ["verify_status_failed.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
+    ["usage.json", "Usage"],
   ];
 
   for (const [fixture, iface] of cases) {

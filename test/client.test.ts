@@ -42,6 +42,16 @@ function makeFetch(responses: Iterable<MockResponse>) {
   return { fetch: impl as unknown as typeof fetch, calls };
 }
 
+// New-shape `GET /me/usage` body (per-capability). Reused across usage tests.
+const USAGE_BODY = {
+  plan: "free",
+  quota_resets_at: "2026-07-01T00:00:00+00:00",
+  verify: { quota_used: 0, quota_total: 10, quota_remaining: 10, credits: 0, remaining: 10 },
+  ask: { quota_used: 0, quota_total: 5, quota_remaining: 5, credits: 0, remaining: 5 },
+  assess: { quota_used: 0, quota_total: 50, quota_remaining: 50, credits: 0, remaining: 50 },
+  extract: { calls_today: 0, daily_limit: 1000, unlimited: false },
+};
+
 let envSnapshot: Record<string, string | undefined>;
 
 beforeEach(() => {
@@ -88,9 +98,7 @@ describe("Construction", () => {
   });
 
   it("X-Lenz-API-Version header sent on every request", async () => {
-    const { fetch, calls } = makeFetch([
-      { body: { plan: "free", credits_used: 0, credits_total: 10 } },
-    ]);
+    const { fetch, calls } = makeFetch([{ body: USAGE_BODY }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.usage();
     const headers = new Headers(calls[0]!.init.headers);
@@ -99,9 +107,7 @@ describe("Construction", () => {
 
   it("LENZ_API_KEY env var picked up", async () => {
     process.env["LENZ_API_KEY"] = "lenz_env_key";
-    const { fetch, calls } = makeFetch([
-      { body: { plan: "free", credits_used: 0, credits_total: 10 } },
-    ]);
+    const { fetch, calls } = makeFetch([{ body: USAGE_BODY }]);
     const client = new Lenz({ fetch });
     await client.usage();
     const headers = new Headers(calls[0]!.init.headers);
@@ -208,16 +214,32 @@ describe("Marquee verbs", () => {
     expect(s.candidates).toEqual(["What did you mean by X?", "Or did you mean Y?"]);
   });
 
-  it("select requires text or claimIndex", async () => {
+  it("select requires a non-empty texts array", async () => {
     const client = new Lenz({ apiKey: "lenz_t" });
-    await expect(() => client.select("tsk", {})).rejects.toThrow(/text or claimIndex/);
+    await expect(() => client.select("tsk", { texts: [] })).rejects.toThrow(/non-empty texts/);
   });
 
-  it("select with text dispatches new task", async () => {
-    const { fetch } = makeFetch([{ body: { task_id: "tsk_002", claim_text: "x" } }]);
+  it("select fans out one task per claim and sends { texts }", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          batch_id: "bat_1",
+          items: [
+            { task_id: "tsk_002", claim_text: "Earth is flat." },
+            { task_id: "tsk_003", claim_text: "Coffee causes cancer." },
+          ],
+        },
+      },
+    ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const t = await client.select("tsk_001", { text: "Earth is flat." });
-    expect(t.task_id).toBe("tsk_002");
+    const b = await client.select("tsk_001", {
+      texts: ["Earth is flat.", "Coffee causes cancer."],
+    });
+    expect(b.batch_id).toBe("bat_1");
+    expect(b.items.map((i) => i.task_id)).toEqual(["tsk_002", "tsk_003"]);
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      texts: ["Earth is flat.", "Coffee causes cancer."],
+    });
   });
 });
 
@@ -762,10 +784,28 @@ describe("Auto-retry", () => {
     const { fetch } = makeFetch([
       { status: 503, body: { detail: "unavailable" } },
       { status: 503, body: { detail: "unavailable" } },
-      { body: { plan: "free", credits_used: 0, credits_total: 10 } },
+      { body: USAGE_BODY },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
     expect(u.plan).toBe("free");
   }, 10_000);
+});
+
+describe("usage", () => {
+  it("returns the per-capability shape", async () => {
+    const { fetch, calls } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(calls[0]!.url).toContain("/me/usage");
+    expect(u.plan).toBe("free");
+    expect(u.quota_resets_at).toBe("2026-07-01T00:00:00+00:00");
+    expect(u.verify.quota_total).toBe(10);
+    expect(u.verify.remaining).toBe(10);
+    // assess is quota-only — no one-off credit pool.
+    expect(u.assess.credits).toBe(0);
+    expect(u.assess.remaining).toBe(50);
+    expect(u.extract.daily_limit).toBe(1000);
+    expect(u.extract.unlimited).toBe(false);
+  });
 });

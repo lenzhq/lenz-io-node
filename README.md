@@ -1,6 +1,6 @@
 # lenz-io
 
-Official Node SDK for the [Lenz Claim Verification API for AI Product Teams](https://lenz.io/developers).
+Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://lenz.io/developers).
 
 **Four API primitives, one research-depth ladder.**
 
@@ -56,7 +56,7 @@ already has a deep verification, `assess` returns it via
 ## How verification works
 
 Frame → Collect Evidence → Debate (2 models, 2 rounds) → Adjudicate
-(3 models: sources, logic, context) → Conclude. ~90 seconds wall-clock
+(3 models: sources, logic, precision) → Conclude. ~90 seconds wall-clock
 per claim. `assess` runs a leaner 3-model panel against the same
 framing for the ~5-10s pass.
 
@@ -93,7 +93,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
 - **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed).
-- **`client.usage()`** → credits and rate-limit remaining.
+- **`client.usage()`** → remaining capacity per capability (`verify` / `ask` / `assess` quota + top-up credits, and the daily `extract` rate limit).
 
 ## Polling without webhooks
 

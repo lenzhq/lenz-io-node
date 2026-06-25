@@ -1,5 +1,5 @@
 /**
- * Official Node SDK for the Lenz Claim Verification API for AI Product Teams.
+ * Official Node SDK for the Lenz Fact Checking API for AI Product Teams.
  *
  *     npm install lenz-io
  *
@@ -93,6 +93,8 @@ export type {
   TaskAccepted,
   TaskStatus,
   Usage,
+  UsageCapacity,
+  UsageExtract,
   Verification,
   VerificationList,
   VerificationListItem,

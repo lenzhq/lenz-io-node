@@ -38,8 +38,9 @@ export interface Assessment {
   reasoning?: string;
   /**
    * Per-panelist warnings. Each panelist emits exactly one category
-   * (logical fallacies, missing context, or weakest sources); the kind
-   * is implicit in `focus_area`.
+   * (logical fallacies, precision issues, or weakest sources; verifications
+   * from before 2026-06 carry missing context from the retired Context
+   * Analyst); the kind is implicit in `focus_area`.
    */
   warnings?: string[];
 }
@@ -261,13 +262,49 @@ export interface BatchItemResult {
   status_detail?: TaskStatus;
 }
 
+/**
+ * Per-capability remaining capacity (`verify` / `ask` / `assess`).
+ *
+ * Two buckets, kept separate on purpose:
+ * - `quota_*`: the recurring monthly allowance for the current plan; resets
+ *   every period (see {@link Usage.quota_resets_at}). `quota_remaining` is
+ *   `quota_total - quota_used` (never negative).
+ * - `credits`: one-off top-up credits that do NOT reset monthly; spent only
+ *   after the monthly quota is exhausted.
+ *
+ * `remaining` is the true usable capacity: `quota_remaining + credits`.
+ */
+export interface UsageCapacity {
+  quota_used: number;
+  quota_total: number;
+  quota_remaining: number;
+  credits: number;
+  remaining: number;
+}
+
+/** Daily `/extract` usage — a per-day rate limit, not credit-based. */
+export interface UsageExtract {
+  calls_today: number;
+  daily_limit: number;
+  unlimited: boolean;
+}
+
+/**
+ * Returned by `GET /me/usage` — remaining capacity per capability.
+ *
+ * Monthly quota (resets at `quota_resets_at`) and one-off top-up credits are
+ * reported separately per capability so callers can tell a recurring allowance
+ * apart from a purchased balance. `assess` is quota-only — there is no one-off
+ * assess credit pool, so its `credits` is always 0 and `remaining` equals its
+ * `quota_remaining`.
+ */
 export interface Usage {
-  plan?: string;
-  credits_used: number;
-  credits_total: number;
-  credits_resets_at?: string | null;
-  extract_calls_today?: number;
-  extract_daily_limit?: number;
+  plan: string;
+  quota_resets_at: string | null;
+  verify: UsageCapacity;
+  ask: UsageCapacity;
+  assess: UsageCapacity;
+  extract: UsageExtract;
 }
 
 /** One message in an `/ask` conversation thread. */
@@ -374,8 +411,12 @@ export interface AskSendInput {
 }
 
 export interface SelectInput {
-  text?: string;
-  claimIndex?: number;
+  /**
+   * One or more claims chosen from a multi_claim / clarification interrupt.
+   * Each must match a claim that was offered in the prior status response.
+   * Each selected claim fans out into its own pipeline.
+   */
+  texts: string[];
 }
 
 export interface LibraryListInput {
