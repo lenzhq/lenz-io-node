@@ -57,8 +57,14 @@ maybe("smoke", () => {
   it("/me/usage returns populated structure", async () => {
     const client = makeClient();
     const u = await client.usage();
-    expect(typeof u.credits_total).toBe("number");
-    expect(typeof u.credits_used).toBe("number");
+    expect(typeof u.plan).toBe("string");
+    for (const cap of [u.verify, u.ask, u.assess]) {
+      expect(typeof cap.quota_remaining).toBe("number");
+      expect(typeof cap.remaining).toBe("number");
+    }
+    // assess is quota-only — no one-off credit pool.
+    expect(u.assess.credits).toBe(0);
+    expect(typeof u.extract.daily_limit).toBe("number");
   });
 
   it("extract returns parseable claims", async () => {

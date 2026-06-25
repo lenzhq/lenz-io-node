@@ -6,6 +6,29 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+Next release is **2.0.0** — both changes below are breaking vs `1.2.0`.
+
+### Changed
+
+- **BREAKING: `GET /me/usage` is now per-capability.** `client.usage()` returns
+  `plan`, `quota_resets_at`, and a `verify` / `ask` / `assess` / `extract` block
+  instead of the flat `credits_used` / `credits_total` / `credits_resets_at` /
+  `extract_*`. Each quota-backed capability (`UsageCapacity`) separates the
+  recurring monthly `quota_*` from one-off top-up `credits`, with
+  `remaining = quota_remaining + credits`. `assess` is quota-only (`credits`
+  always 0). New exported types: `UsageCapacity`, `UsageExtract` (and the
+  reshaped `Usage`). Migrate: `u.credits_total` → `u.verify.quota_total`,
+  `u.credits_used` → `u.verify.quota_used`, and read `u.verify.remaining` for
+  usable capacity.
+- **BREAKING: `client.select()` resolves a multi-claim interrupt with one or
+  more claims.** It now takes `{ texts: string[] }` (was `{ text }` /
+  `{ claimIndex }`) and returns a `BatchAccepted` — each selected claim fans out
+  into its own pipeline, so poll each `items[].task_id`. Every text must match a
+  claim offered in the prior status (server-validated). On a rare mid-fan-out
+  enqueue failure the server returns the partial set plus `partial: true` (still
+  HTTP 202); `partial` is not on the `BatchAccepted` type but is present on the
+  response object at runtime.
+
 ## [1.2.0] — 2026-06-07
 
 Polling ergonomics. The async path (`verify()` → poll) is now first-class and

@@ -328,17 +328,22 @@ export class Lenz {
     });
   }
 
-  async select(taskId: string, input: SelectInput): Promise<TaskAccepted> {
-    if (!input.text && input.claimIndex === undefined) {
-      throw new Error("select requires either text or claimIndex");
+  /**
+   * Resolve a needs-input interrupt by selecting one or more claims.
+   *
+   * Each selected claim fans out into its own pipeline; the returned
+   * `BatchAccepted` carries one `items` entry (each with its own `task_id`)
+   * per claim. Poll each via `getStatus` / `wait`. Every text must match a
+   * claim offered in the prior interrupt — the server rejects anything else.
+   */
+  async select(taskId: string, input: SelectInput): Promise<BatchAccepted> {
+    if (!input.texts || input.texts.length === 0) {
+      throw new Error("select requires a non-empty texts array");
     }
-    const body: Record<string, unknown> = {};
-    if (input.text) body["text"] = input.text;
-    if (input.claimIndex !== undefined) body["claim_index"] = input.claimIndex;
-    return this.request<TaskAccepted>({
+    return this.request<BatchAccepted>({
       method: "POST",
       path: `/verify/${taskId}/select`,
-      json: body,
+      json: { texts: input.texts },
     });
   }
 
@@ -521,7 +526,7 @@ export class Lenz {
       const err = new LenzNeedsInputError({
         message: `Pipeline paused: ${status.reason ?? "needs input"}`,
         cause: "The verification needs caller input to proceed.",
-        fix: "Inspect the payload, then call client.select(taskId, { text or claimIndex }).",
+        fix: "Inspect the payload, then call client.select(taskId, { texts: [...] }) with the chosen claim(s).",
         docUrl: "https://lenz.io/docs/verify#needs-input",
       });
       err.taskId = taskId;

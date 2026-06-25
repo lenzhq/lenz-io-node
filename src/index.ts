@@ -93,6 +93,8 @@ export type {
   TaskAccepted,
   TaskStatus,
   Usage,
+  UsageCapacity,
+  UsageExtract,
   Verification,
   VerificationList,
   VerificationListItem,
