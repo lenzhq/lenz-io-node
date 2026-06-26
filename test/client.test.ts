@@ -309,6 +309,28 @@ describe("Assess", () => {
     expect(out.error).toBe("no_atomic_claim_identified");
   });
 
+  it("ambiguous input returns error_code + candidate_claims", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          claims: [],
+          error: "Claim is ambiguous — pick a specific reading",
+          error_code: "ambiguous",
+          candidate_claims: [
+            "DDR4 desktop RAM prices doubled 2021-2026.",
+            "DRAM contract prices doubled 2021-2026.",
+          ],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.assess({ text: "RAM prices have more than doubled in recent years" });
+    expect(out.claims).toEqual([]);
+    expect(out.error_code).toBe("ambiguous");
+    expect(out.candidate_claims).toHaveLength(2);
+    expect(out.candidate_claims?.[0]).toContain("DDR4");
+  });
+
   it("requires api_key (auth-required)", async () => {
     const client = new Lenz();
     await expect(() => client.assess({ text: "x" })).rejects.toBeInstanceOf(LenzAuthError);
@@ -650,6 +672,16 @@ describe("Resource namespaces", () => {
     expect(headers.get("Authorization")).toBeNull();
   });
 
+  it("verifications.get sends bearer when keyed (optional-auth → owner sees private rows)", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { verification_id: "mine", verdict: "False", confidence: "high" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifications.get("mine");
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer lenz_t");
+  });
+
   it("verifications.delete 404 returns true (idempotent)", async () => {
     const { fetch } = makeFetch([{ status: 404, body: { detail: "not found" } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
@@ -766,6 +798,14 @@ describe("Resource namespaces", () => {
   it("library.list works without api_key", async () => {
     const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ fetch });
+    await client.library.list({ page: 1, sort: "recent" });
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("Authorization")).toBeNull();
+  });
+
+  it("library.list stays anonymous even when keyed (public content, no authOptional)", async () => {
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.library.list({ page: 1, sort: "recent" });
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Authorization")).toBeNull();
