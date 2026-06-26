@@ -120,6 +120,14 @@ interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   headers?: Record<string, string>;
   authRequired?: boolean;
+  /**
+   * Optional-auth endpoint: don't fail when no key, but DO send the key when
+   * we have one. The server returns a caller's own private/hidden rows only to
+   * the owning bearer, so `verifications.get` opts in (→ a fresh private claim
+   * is retrievable). Purely public reads (`library.list`) leave this off so a
+   * key never reaches an endpoint that doesn't need it.
+   */
+  authOptional?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -156,6 +164,7 @@ class VerificationsNamespace {
       method: "GET",
       path: `/verifications/${verificationId}`,
       authRequired: false,
+      authOptional: true, // send the key if we have one → owner sees private rows
     });
   }
 
@@ -596,7 +605,7 @@ export class Lenz {
       Accept: "application/json",
       ...(opts.headers ?? {}),
     };
-    if (authRequired && this.apiKey) {
+    if (this.apiKey && (authRequired || opts.authOptional)) {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
     if (opts.json !== undefined) {

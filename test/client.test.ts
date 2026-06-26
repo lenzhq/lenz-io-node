@@ -650,6 +650,16 @@ describe("Resource namespaces", () => {
     expect(headers.get("Authorization")).toBeNull();
   });
 
+  it("verifications.get sends bearer when keyed (optional-auth → owner sees private rows)", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { verification_id: "mine", verdict: "False", confidence: "high" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifications.get("mine");
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer lenz_t");
+  });
+
   it("verifications.delete 404 returns true (idempotent)", async () => {
     const { fetch } = makeFetch([{ status: 404, body: { detail: "not found" } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
@@ -766,6 +776,14 @@ describe("Resource namespaces", () => {
   it("library.list works without api_key", async () => {
     const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ fetch });
+    await client.library.list({ page: 1, sort: "recent" });
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("Authorization")).toBeNull();
+  });
+
+  it("library.list stays anonymous even when keyed (public content, no authOptional)", async () => {
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.library.list({ page: 1, sort: "recent" });
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Authorization")).toBeNull();
