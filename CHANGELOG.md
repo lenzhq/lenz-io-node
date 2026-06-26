@@ -6,6 +6,24 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-06-26
+
+### Added
+
+- **`AssessResponse.error_code` and `AssessResponse.candidate_claims`.** When
+  `claims` is empty, `error_code` disambiguates why: `'ambiguous'` (the input
+  was vague but framing produced specific readings, returned in
+  `candidate_claims`) vs `'no_claim'` (genuinely not a checkable claim). Both
+  fields are optional, so older servers that don't send them degrade to the
+  plain `error` message.
+
+### Fixed
+
+- **Bearer sent on optional-auth endpoints when keyed.** `verifications.get`
+  now opts into bearer auth so the owning caller can retrieve their own
+  private/hidden claims; purely public reads (`library.list`) stay anonymous so
+  a key never reaches an endpoint that doesn't need it.
+
 ## [2.0.0] — 2026-06-25
 
 Both changes below are breaking vs `1.2.0`.
