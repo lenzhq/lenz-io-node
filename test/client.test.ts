@@ -309,6 +309,28 @@ describe("Assess", () => {
     expect(out.error).toBe("no_atomic_claim_identified");
   });
 
+  it("ambiguous input returns error_code + candidate_claims", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          claims: [],
+          error: "Claim is ambiguous — pick a specific reading",
+          error_code: "ambiguous",
+          candidate_claims: [
+            "DDR4 desktop RAM prices doubled 2021-2026.",
+            "DRAM contract prices doubled 2021-2026.",
+          ],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.assess({ text: "RAM prices have more than doubled in recent years" });
+    expect(out.claims).toEqual([]);
+    expect(out.error_code).toBe("ambiguous");
+    expect(out.candidate_claims).toHaveLength(2);
+    expect(out.candidate_claims?.[0]).toContain("DDR4");
+  });
+
   it("requires api_key (auth-required)", async () => {
     const client = new Lenz();
     await expect(() => client.assess({ text: "x" })).rejects.toBeInstanceOf(LenzAuthError);
