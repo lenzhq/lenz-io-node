@@ -282,7 +282,7 @@ describe("Assess", () => {
             },
             {
               claim: "Coffee causes cancer.",
-              verdict: "Misleading",
+              verdict: "Mixed",
               confidence: "low",
               verification_url: null,
             },

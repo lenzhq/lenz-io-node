@@ -12,7 +12,7 @@
  *
  * Vocabulary (applies across every claim-shaped response):
  *   - claim       : string         — the framed claim text
- *   - verdict     : string         — "True" | "Mostly True" | "Misleading" | "False" | "Error"
+ *   - verdict     : string         — "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
  *   - confidence  : string         — "high" | "medium" | "low" (categorical)
  *   - lenz_score  : number | null  — integer 0–10 (deep / list; /assess omits)
  */
@@ -104,7 +104,7 @@ export interface Verification {
   entities?: EntityRef[];
   presumed_intent?: string;
   // Verdict block (flat)
-  verdict?: string; // "True" | "Mostly True" | "Misleading" | "False" | "Error"
+  verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
   lenz_score?: number | null; // integer 0–10
   executive_summary?: string;
@@ -194,7 +194,7 @@ export interface AssessClaim {
   claim?: string;
   /** Output language (ISO 639-1). Echoes the request's language. */
   language?: string;
-  verdict?: string; // "True" | "Mostly True" | "Misleading" | "False" | "Error"
+  verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
   verification_url?: string | null;
 }

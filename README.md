@@ -135,12 +135,12 @@ single non-blocking poll.
 
 Every claim-shaped response shares these fields at top level:
 
-| Field        | Type             | Notes                                                                    |
-| ------------ | ---------------- | ------------------------------------------------------------------------ |
-| `claim`      | `string`         | The framed claim text.                                                   |
-| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Misleading"` \| `"False"` \| `"Error"`. |
-| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                          |
-| `lenz_score` | `number \| null` | Integer 0–10 (deep verdicts and list endpoints; `assess` omits it).      |
+| Field        | Type             | Notes                                                                                   |
+| ------------ | ---------------- | --------------------------------------------------------------------------------------- |
+| `claim`      | `string`         | The framed claim text.                                                                  |
+| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Mixed"` \| `"Mostly False"` \| `"False"` \| `"Error"`. |
+| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                         |
+| `lenz_score` | `number \| null` | Integer 0–10 (deep verdicts and list endpoints; `assess` omits it).                     |
 
 ### Webhooks
 
