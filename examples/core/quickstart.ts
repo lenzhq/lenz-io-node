@@ -6,7 +6,7 @@
  *
  * The pattern: `extract` pulls claims out of any text, `assess` returns
  * a fast 3-model verdict on each, `verify` escalates the low-confidence
- * ones to the full 7-model panel with citations, and `ask` lets you
+ * ones to the full 8-model panel with citations, and `ask` lets you
  * follow up on a verification.
  *
  * The demo claim is pre-cached, so the verify call returns in ~1.5s.
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   }
   console.log("");
 
-  // 3. verify — escalate to the full 7-model panel for citations + audit
+  // 3. verify — escalate to the full 8-model panel for citations + audit
   const v = await client.verifyAndWait({ claim: "Sharks don't get cancer" });
   console.log(`Verdict: ${v.verdict} (lenz_score ${v.lenz_score}, confidence ${v.confidence})`);
   console.log(`Summary: ${v.executive_summary}`);
