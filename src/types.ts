@@ -313,6 +313,16 @@ export interface Usage {
   ask: UsageCapacity;
   assess: UsageCapacity;
   extract: UsageExtract;
+  /**
+   * Whether this key has a webhook signing secret provisioned. `POST /verify`
+   * with a `webhook_url` is rejected without one, so callers that rely on
+   * webhook delivery can check this up front. Reports existence only — the
+   * secret value is never exposed here (shown once at rotation, never again).
+   *
+   * Optional: absent on servers predating this field, in which case it reads
+   * as `undefined` (treat that as "unknown", not `false`).
+   */
+  has_webhook_secret?: boolean;
 }
 
 /** One message in an `/ask` conversation thread. */

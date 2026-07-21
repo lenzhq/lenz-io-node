@@ -97,7 +97,15 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   Assessment: new Set(["panelist_name", "focus_area", "score", "reasoning", "warnings"]),
   DebateSide: new Set(["role", "argument", "rebuttal"]),
-  Usage: new Set(["plan", "quota_resets_at", "verify", "ask", "assess", "extract"]),
+  Usage: new Set([
+    "plan",
+    "quota_resets_at",
+    "verify",
+    "ask",
+    "assess",
+    "extract",
+    "has_webhook_secret",
+  ]),
   UsageCapacity: new Set(["quota_used", "quota_total", "quota_remaining", "credits", "remaining"]),
   UsageExtract: new Set(["calls_today", "daily_limit", "unlimited"]),
 };
