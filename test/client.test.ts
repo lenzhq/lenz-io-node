@@ -834,8 +834,8 @@ describe("Resource namespaces", () => {
       { body: { items: [], total: 0, page: 1, page_size: 20 } },
     ]);
     const client = new Lenz({ fetch });
-    await client.library.list({ curated: ["trivia", "science"] });
-    expect(new URL(calls[0]!.url).searchParams.get("curated")).toBe("trivia,science");
+    await client.library.list({ curated: ["trivia", "featured"] });
+    expect(new URL(calls[0]!.url).searchParams.get("curated")).toBe("trivia,featured");
     await client.library.list({ curated: [] });
     expect(new URL(calls[1]!.url).searchParams.has("curated")).toBe(false);
   });
