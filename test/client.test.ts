@@ -821,19 +821,23 @@ describe("Resource namespaces", () => {
   it("library.list forwards curated / verdict / sort=random as query params", async () => {
     const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
     const client = new Lenz({ fetch });
-    await client.library.list({ curated: true, sort: "random", verdict: "True,False" });
+    await client.library.list({ curated: ["trivia"], sort: "random", verdict: "True,False" });
     const url = new URL(calls[0]!.url);
-    expect(url.searchParams.get("curated")).toBe("true");
+    expect(url.searchParams.get("curated")).toBe("trivia");
     expect(url.searchParams.get("sort")).toBe("random");
     expect(url.searchParams.get("verdict")).toBe("True,False");
   });
 
-  it("library.list omits curated when false (byte-identical to legacy calls)", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+  it("library.list joins multiple curated lists and omits when empty", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { items: [], total: 0, page: 1, page_size: 20 } },
+      { body: { items: [], total: 0, page: 1, page_size: 20 } },
+    ]);
     const client = new Lenz({ fetch });
-    await client.library.list({ curated: false });
-    const url = new URL(calls[0]!.url);
-    expect(url.searchParams.has("curated")).toBe(false);
+    await client.library.list({ curated: ["trivia", "science"] });
+    expect(new URL(calls[0]!.url).searchParams.get("curated")).toBe("trivia,science");
+    await client.library.list({ curated: [] });
+    expect(new URL(calls[1]!.url).searchParams.has("curated")).toBe(false);
   });
 });
 
