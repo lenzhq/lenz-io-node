@@ -52,8 +52,6 @@
  * ```
  */
 
-import { randomUUID } from "node:crypto";
-
 import {
   LenzAPIError,
   LenzAuthError,
@@ -103,6 +101,28 @@ const POLL_BACKOFF_CAP_MS = 10_000;
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
 // published package.
 import { VERSION as SDK_VERSION } from "./_version.js";
+
+/**
+ * Cross-runtime UUID. Prefers the WebCrypto global (browsers, Node ≥20, Deno,
+ * Workers); lazily falls back to node:crypto on Node 18 without global
+ * WebCrypto. The computed specifier keeps browser bundlers from statically
+ * resolving node:crypto — this branch is unreachable in a browser, which
+ * always exposes globalThis.crypto.
+ */
+async function generateUuid(): Promise<string> {
+  const webCrypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (webCrypto?.randomUUID) return webCrypto.randomUUID();
+  const nodeCryptoSpecifier: string = "node:crypto";
+  const mod = (await import(
+    /* @vite-ignore */ nodeCryptoSpecifier
+  )) as typeof import("node:crypto");
+  return mod.randomUUID();
+}
+
+/** Read an env var without assuming a Node `process` exists (browser-safe). */
+function envVar(name: string): string | undefined {
+  return typeof process !== "undefined" ? process.env?.[name] : undefined;
+}
 
 export interface LenzOptions {
   apiKey?: string;
@@ -242,6 +262,8 @@ class LibraryNamespace {
         search: input.search,
         domain: input.domain,
         entity: input.entity,
+        curated: input.curated || undefined,
+        verdict: input.verdict,
       },
       authRequired: false,
     });
@@ -260,11 +282,8 @@ export class Lenz {
   readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
-    this.apiKey = opts.apiKey ?? process.env["LENZ_API_KEY"] ?? "";
-    this.baseUrl = (opts.baseUrl ?? process.env["LENZ_BASE_URL"] ?? DEFAULT_BASE_URL).replace(
-      /\/$/,
-      "",
-    );
+    this.apiKey = opts.apiKey ?? envVar("LENZ_API_KEY") ?? "";
+    this.baseUrl = (opts.baseUrl ?? envVar("LENZ_BASE_URL") ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
@@ -379,7 +398,7 @@ export class Lenz {
     const timeoutMs = input.timeoutMs ?? 120_000;
     const idempotencyKey =
       input.idempotencyKey ??
-      (input.idempotency !== false ? randomUUID().replace(/-/g, "") : undefined);
+      (input.idempotency !== false ? (await generateUuid()).replace(/-/g, "") : undefined);
 
     const accepted = await this.submit({ ...input, idempotencyKey });
     // eslint-disable-next-line no-console

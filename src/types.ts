@@ -429,10 +429,14 @@ export interface SelectInput {
 
 export interface LibraryListInput {
   page?: number;
-  sort?: "recent" | "popular" | "most_true" | "most_untrue" | "relevance";
+  sort?: "recent" | "popular" | "most_true" | "most_untrue" | "relevance" | "random";
   search?: string;
   domain?: string;
   entity?: string;
+  /** Restrict to the LLM-curated, trivia-worthy public subset (the quiz-demo pool). */
+  curated?: boolean;
+  /** Comma-separated verdict labels, e.g. "True,False". Others: "Mostly True", "Mixed", "Mostly False". */
+  verdict?: string;
 }
 
 export interface VerifyAndWaitInput extends VerifyInput {

@@ -1,6 +1,6 @@
 {
   "name": "lenz-io",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Official Node SDK for the Lenz Fact Checking API for AI Product Teams",
   "license": "MIT",
   "author": "Lenz <support@lenz.io>",
@@ -28,6 +28,10 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "browser": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.browser.js"
+      },
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
