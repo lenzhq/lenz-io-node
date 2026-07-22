@@ -443,8 +443,8 @@ export interface LibraryListInput {
   search?: string;
   domain?: string;
   entity?: string;
-  /** Restrict to the LLM-curated, trivia-worthy public subset (the quiz-demo pool). */
-  curated?: boolean;
+  /** Restrict to one or more named curated collections, e.g. `["trivia"]`. */
+  curated?: string[];
   /** Comma-separated verdict labels, e.g. "True,False". Others: "Mostly True", "Mixed", "Mostly False". */
   verdict?: string;
 }

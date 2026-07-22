@@ -3,8 +3,8 @@
  * FactOrFiction quiz demo (https://play.lenz.io).
  *
  * `library.list` needs no API key, so this runs in Node, the browser, Deno,
- * or edge runtimes. `curated=true` returns the LLM-curated, trivia-worthy
- * subset; `verdict` filters by label; `sort: "random"` shuffles.
+ * or edge runtimes. `curated: ["trivia"]` restricts to the trivia collection;
+ * `verdict` filters by label; `sort: "random"` shuffles.
  *
  *   npx tsx examples/core/library-quiz.ts
  */
@@ -16,7 +16,7 @@ async function main() {
 
   // A round of true/false quiz claims, curated and shuffled.
   const round = await lenz.library.list({
-    curated: true,
+    curated: ["trivia"],
     sort: "random",
     verdict: "True,False",
   });

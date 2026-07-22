@@ -262,7 +262,7 @@ class LibraryNamespace {
         search: input.search,
         domain: input.domain,
         entity: input.entity,
-        curated: input.curated || undefined,
+        curated: input.curated?.length ? input.curated.join(",") : undefined,
         verdict: input.verdict,
       },
       authRequired: false,

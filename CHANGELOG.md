@@ -6,6 +6,23 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`library.list` filters.** `curated` — restrict to one or more named curated
+  collections (e.g. `["trivia"]`); `verdict` — comma-separated verdict labels
+  (e.g. `"True,False"`); and `sort: "random"` for a shuffled page.
+- **`usage()` now reports `has_webhook_secret`** — whether a webhook signing
+  secret is configured for the API key.
+
+### Changed
+
+- **Isomorphic / browser-safe build.** The SDK now bundles cleanly for browsers,
+  Deno, and edge runtimes. A `browser` export condition serves a webhooks-free
+  entry point; `randomUUID` uses the WebCrypto global with a lazy `node:crypto`
+  fallback (Node 18); the constructor's `process.env` reads are guarded.
+  Non-breaking — Node still imports `LenzWebhooks` / `verifySignature` from the
+  package root.
+
 ## [2.3.0] — 2026-07-06
 
 ### Changed

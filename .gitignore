@@ -14,3 +14,5 @@ src/_version.ts
 
 # npm pack artifacts
 *.tgz
+
+*.tgz
