@@ -817,6 +817,24 @@ describe("Resource namespaces", () => {
     const _ref = client.library.get;
     expect(_ref).toBeUndefined();
   });
+
+  it("library.list forwards curated / verdict / sort=random as query params", async () => {
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const client = new Lenz({ fetch });
+    await client.library.list({ curated: true, sort: "random", verdict: "True,False" });
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get("curated")).toBe("true");
+    expect(url.searchParams.get("sort")).toBe("random");
+    expect(url.searchParams.get("verdict")).toBe("True,False");
+  });
+
+  it("library.list omits curated when false (byte-identical to legacy calls)", async () => {
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const client = new Lenz({ fetch });
+    await client.library.list({ curated: false });
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.has("curated")).toBe(false);
+  });
 });
 
 describe("Auto-retry", () => {
