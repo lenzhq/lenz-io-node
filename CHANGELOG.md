@@ -4,7 +4,7 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
-## [2.4.0] - 2026-07-23
+## [2.5.0] - 2026-07-23
 
 ### Changed
 
