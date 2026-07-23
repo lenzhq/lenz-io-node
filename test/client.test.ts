@@ -131,7 +131,35 @@ describe("Marquee verbs", () => {
     expect(headers.get("Idempotency-Key")).toBe("custom-key-1");
   });
 
-  it("verifyBatch does not send visibility (1.1.0: API claims are private)", async () => {
+  it("verify omits visibility by default", async () => {
+    const { fetch, calls } = makeFetch([{ body: { task_id: "t", claim_text: "x" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "x" });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.visibility).toBeUndefined();
+  });
+
+  it("verify sends visibility when set", async () => {
+    const { fetch, calls } = makeFetch([{ body: { task_id: "t", claim_text: "x" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "x", visibility: "unlisted" });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.visibility).toBe("unlisted");
+  });
+
+  it("verifyBatch sends batch-wide visibility and per-item override", async () => {
+    const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatch({
+      claims: [{ text: "a" }, { text: "b", visibility: "private" }],
+      visibility: "unlisted",
+    });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.visibility).toBe("unlisted");
+    expect(body.claims[1].visibility).toBe("private");
+  });
+
+  it("verifyBatch omits visibility by default", async () => {
     const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.verifyBatch({ claims: [{ text: "a" }] });

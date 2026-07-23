@@ -8,6 +8,14 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
+- **Claim visibility on submit.** `verify` / `verifyAndWait` / `verifyBatch` /
+  `verifyBatchAndWait` accept `visibility: "private"` (default, owner-only) or
+  `"unlisted"` (readable by `verification_id` and at the `/c/` URL, but never
+  listed in the Library or search). Batch items may set per-item `visibility`
+  to override the batch-wide default. Omitted → private (byte-identical bodies
+  for existing callers). `Verification.visibility` returns
+  `"private" | "unlisted" | "public"` for read-back (`"public"` is read-only,
+  for genuinely listed claims).
 - **`library.list` filters.** `curated` — restrict to one or more named curated
   collections (e.g. `["trivia"]`); `verdict` — comma-separated verdict labels
   (e.g. `"True,False"`); and `sort: "random"` for a shuffled page.
