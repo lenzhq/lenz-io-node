@@ -205,8 +205,8 @@ class VerificationsNamespace {
   /**
    * Public verifications semantically related to this one (pgvector ANN).
    * Server clamps `limit` to 10. Excludes the verification itself and
-   * editorially-hidden claims. Accessible for any verification the caller
-   * owns or any public library item.
+   * editorially-hidden claims. Keyless like the library/detail reads; a
+   * key additionally unlocks the caller's own verifications.
    */
   related(
     verificationId: string,
@@ -216,6 +216,8 @@ class VerificationsNamespace {
       method: "GET",
       path: `/verifications/${verificationId}/related`,
       query: { limit },
+      authRequired: false,
+      authOptional: true, // send the key if we have one → owner sees own rows
     });
   }
 }
