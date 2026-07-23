@@ -96,10 +96,16 @@ export interface SimilarVerification {
  * default and referenced by `verification_id` only. Cache-hit on
  * another customer's claim is transparent — the customer always sees
  * their own `verification_id`.
+ *
+ * Later: `visibility` returns — "private" | "unlisted" | "public". It
+ * echoes what you set on submit ("private"/"unlisted" are settable;
+ * "public" can only be read, for listed claims). `url` stays dropped.
  */
 export interface Verification {
   verification_id?: string;
   claim?: string;
+  /** "private" | "unlisted" | "public". Read-back of the claim's visibility. */
+  visibility?: string;
   domain?: string;
   entities?: EntityRef[];
   presumed_intent?: string;
@@ -371,6 +377,13 @@ export interface VerifyInput {
   sourceUrl?: string;
   webhookUrl?: string;
   /**
+   * "private" (default, owner-only) or "unlisted" (readable by
+   * verification_id and at the /c/ URL, but never listed in the Library
+   * or search). Omitted from the request body when unset — the server
+   * applies its "private" default.
+   */
+  visibility?: "private" | "unlisted";
+  /**
    * Output language (ISO 639-1). Omit for English (default). Supported:
    * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Omitted from the
    * request body when empty so existing English callers keep
@@ -396,6 +409,8 @@ export interface VerifyBatchItem {
   source_url?: string;
   webhook_url?: string;
   idempotency_key?: string;
+  /** Per-item "private" | "unlisted"; overrides the batch-wide default. */
+  visibility?: "private" | "unlisted";
 }
 
 export interface VerifyBatchInput {
@@ -404,6 +419,8 @@ export interface VerifyBatchInput {
   webhookUrl?: string;
   /** Batch-wide output-language default; per-item `language` overrides. */
   language?: string;
+  /** Batch-wide "private" | "unlisted" default; per-item `visibility` overrides. */
+  visibility?: "private" | "unlisted";
   idempotencyKey?: string;
 }
 
