@@ -4,7 +4,14 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [2.4.0] - 2026-07-23
+
+### Changed
+
+- **`verifications.related()` is now keyless.** The server opened the endpoint
+  to anonymous callers (same optional-Bearer model as `verifications.get`);
+  the client-side auth guard is dropped accordingly. A configured key is still
+  sent, so owners keep seeing related lists for their own verifications.
 
 ### Added
 

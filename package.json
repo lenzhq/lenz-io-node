@@ -1,6 +1,6 @@
 {
   "name": "lenz-io",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Official Node SDK for the Lenz Fact Checking API for AI Product Teams",
   "license": "MIT",
   "author": "Lenz <support@lenz.io>",
