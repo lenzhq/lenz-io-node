@@ -4,6 +4,17 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.6.0] - 2026-08-05
+
+### Added
+
+- **`key_finding` on verdict payloads.** `Verification` and
+  `VerificationListItem` gain `key_finding?: string` — one declarative
+  sentence stating the most important fact the analysis established (e.g.
+  _"Water boils at 100°C at standard atmospheric pressure."_), written by the
+  verification pipeline's conclusion step. Empty string on legacy claims that
+  pre-date the field.
+
 ## [2.5.0] - 2026-07-23
 
 ### Changed

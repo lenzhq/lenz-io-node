@@ -113,6 +113,12 @@ export interface Verification {
   verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
   lenz_score?: number | null; // integer 1–10
+  /**
+   * The analysis's key finding: one declarative sentence stating the
+   * most important fact it established (2.6.0). "" on legacy claims
+   * that were never backfilled.
+   */
+  key_finding?: string;
   executive_summary?: string;
   warnings?: string[];
   sources?: Source[];
@@ -141,6 +147,8 @@ export interface VerificationListItem {
   verdict?: string;
   confidence?: string;
   lenz_score?: number | null;
+  /** The analysis's key finding (2.6.0). See `Verification.key_finding`. */
+  key_finding?: string;
   executive_summary?: string;
   created_at?: string | null;
   modified_at?: string | null;
