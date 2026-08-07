@@ -31,15 +31,16 @@
  * const quick = await client.assess({ text: llmOutput });
  *
  * // 3. verify — escalate low-confidence to the full pipeline (~90s, paid)
+ * let deep;
  * for (const c of quick.claims) {
  *   if (c.confidence === 'low') {
- *     const deep = await client.verifyAndWait({ claim: c.claim! });
+ *     deep = await client.verifyAndWait({ claim: c.claim! });
  *     console.log(deep.verdict, deep.lenz_score);
  *   }
  * }
  *
  * // 4. ask — follow-up grounded on a verification
- * const reply = await client.ask.send(deep.verification_id!, {
+ * const reply = await client.ask.send(deep!.verification_id!, {
  *   message: 'Which source is strongest?',
  * });
  *
