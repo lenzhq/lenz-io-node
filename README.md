@@ -35,18 +35,19 @@ for (const c of quick.claims) {
 }
 
 // 3. verify — escalate low-confidence claims to the full panel + citations
+let deep;
 for (const c of quick.claims) {
   if (c.confidence === "low") {
-    const v = await client.verifyAndWait({ claim: c.claim! });
-    console.log(v.verdict, v.lenz_score, v.executive_summary);
+    deep = await client.verifyAndWait({ claim: c.claim! });
+    console.log(deep.verdict, deep.lenz_score, deep.executive_summary);
   }
 }
 
 // 4. ask — follow-up grounded on a verification
-const reply = await client.ask.send(v.verification_id!, {
+const reply = await client.ask.send(deep!.verification_id!, {
   message: "Which source is strongest?",
 });
-console.log(reply.reply);
+console.log(reply.content);
 ```
 
 `assess` and `verify` share a result cache server-side: if a claim
