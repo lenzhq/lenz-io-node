@@ -11,7 +11,10 @@ import {
   LenzAuthError,
   LenzNeedsInputError,
   LenzPipelineError,
+  LenzQuotaExceededError,
+  LenzRateLimitError,
   LenzTimeoutError,
+  MAX_RETRY_AFTER_SLEEP,
 } from "../src/index.js";
 
 interface FetchCall {
@@ -879,6 +882,142 @@ describe("Auto-retry", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
     expect(u.plan).toBe("free");
+  }, 10_000);
+
+  it("429 with a long Retry-After throws instead of sleeping", async () => {
+    // The /extract daily cap sends seconds-until-UTC-midnight. Sleeping that
+    // would block the call for most of a day — and this sleep sits outside
+    // the AbortController, so `timeoutMs` would not bound it.
+    //
+    // Without the clamp this test does not fail, it HANGS for 24 hours.
+    const { fetch, calls } = makeFetch([
+      {
+        status: 429,
+        body: { detail: "Daily /extract limit of 1000 reached.", reset_in_seconds: 86_400 },
+        headers: { "Retry-After": "86400" },
+      },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+
+    const err = await client.usage().then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LenzRateLimitError);
+    // The true wait is surfaced so the caller can schedule the work.
+    expect((err as LenzRateLimitError).retryAfter).toBe(86_400);
+    // Must not burn retries on an unwinnable wait.
+    expect(calls).toHaveLength(1);
+  }, 10_000);
+
+  it("429 one second past the clamp throws after a single call", async () => {
+    // Pins MAX_RETRY_AFTER_SLEEP itself. A test using Retry-After: 0 stays
+    // green even if the constant or the comparison changes, so it pins
+    // nothing.
+    const { fetch, calls } = makeFetch([
+      {
+        status: 429,
+        body: { detail: "slow" },
+        headers: { "Retry-After": String(MAX_RETRY_AFTER_SLEEP + 1) },
+      },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+
+    const err = await client.usage().then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LenzRateLimitError);
+    expect((err as LenzRateLimitError).retryAfter).toBe(MAX_RETRY_AFTER_SLEEP + 1);
+    expect(calls).toHaveLength(1);
+  }, 10_000);
+
+  it("429 without a stated wait falls back to backoff", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 429, body: { detail: "slow" } },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.plan).toBe("free");
+    expect(calls).toHaveLength(2);
+  }, 10_000);
+
+  it("429 reads the wait from the body when no header — parity with Python", async () => {
+    // Python's client falls back to the body here. Node must too, or the same
+    // server response produces 1 call in Python and 4 in Node.
+    const { fetch, calls } = makeFetch([
+      { status: 429, body: { detail: "capped", reset_in_seconds: 86_400 } },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+
+    const err = await client.usage().then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LenzRateLimitError);
+    expect((err as LenzRateLimitError).retryAfter).toBe(86_400);
+    expect(calls).toHaveLength(1);
+  }, 10_000);
+
+  it("5xx still honors a short Retry-After", async () => {
+    // 2.6.0 honored Retry-After on 5xx; the clamp must not silently drop that
+    // for a status class the changelog never mentions.
+    const { fetch, calls } = makeFetch([
+      { status: 503, body: { detail: "down" }, headers: { "Retry-After": "0" } },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.plan).toBe("free");
+    expect(calls).toHaveLength(2);
+  }, 10_000);
+
+  it("5xx with a long Retry-After keeps retrying rather than aborting", async () => {
+    // Unlike 429, a 5xx is not the caller's fault and our own backoff may
+    // still satisfy it.
+    const { fetch, calls } = makeFetch([
+      { status: 503, body: { detail: "down" }, headers: { "Retry-After": "3600" } },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.plan).toBe("free");
+    expect(calls).toHaveLength(2);
+  }, 10_000);
+
+  it("402 surfaces as LenzQuotaExceededError and is never retried", async () => {
+    // The central promise of the release: an out-of-credits response reaches
+    // the caller as a quota error through request(), without burning three
+    // guaranteed-failing retries. That non-retry property is the whole reason
+    // the server chose 402 over 429.
+    const { fetch, calls } = makeFetch([
+      {
+        status: 402,
+        body: {
+          detail: "No remaining claim checks.",
+          code: "no_credits",
+          upgrade_url: "https://lenz.io/plans",
+          remaining: 0,
+          resets_at: "2026-09-01T00:00:00+00:00",
+        },
+      },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+
+    const err = await client.usage().then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LenzQuotaExceededError);
+    expect(err).not.toBeInstanceOf(LenzAuthError);
+    expect((err as LenzQuotaExceededError).remaining).toBe(0);
+    expect((err as LenzQuotaExceededError).upgradeUrl).toBe("https://lenz.io/plans");
+    expect(calls).toHaveLength(1);
   }, 10_000);
 });
 

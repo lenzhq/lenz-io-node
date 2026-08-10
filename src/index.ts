@@ -48,6 +48,7 @@ export {
   LenzTimeoutError,
   LenzValidationError,
   LenzWebhookSignatureError,
+  MAX_RETRY_AFTER_SLEEP,
   mapResponseToError,
 } from "./errors.js";
 

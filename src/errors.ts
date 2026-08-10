@@ -24,6 +24,8 @@ export interface LenzErrorContext {
   docUrl?: string;
   requestId?: string;
   statusCode?: number;
+  /** The server's machine-readable error code, e.g. `"no_credits"`. */
+  code?: string;
   body?: Record<string, unknown> | null;
 }
 
@@ -33,6 +35,12 @@ export class LenzError extends Error {
   docUrl: string;
   requestId: string;
   statusCode: number;
+  /**
+   * The server's machine-readable error code, e.g. `"no_credits"`. Present on
+   * 402, 403 and 429; `""` when the server sent none. Branch on this rather
+   * than on message text.
+   */
+  code: string;
   body: Record<string, unknown> | null;
 
   constructor(ctx: LenzErrorContext = {}) {
@@ -43,6 +51,7 @@ export class LenzError extends Error {
     this.docUrl = ctx.docUrl ?? "";
     this.requestId = ctx.requestId ?? "";
     this.statusCode = ctx.statusCode ?? 0;
+    this.code = ctx.code ?? "";
     this.body = ctx.body ?? null;
   }
 
@@ -56,18 +65,100 @@ export class LenzError extends Error {
   }
 }
 
+/**
+ * 401 / 403 — the API key is missing, invalid, or revoked.
+ *
+ * Note: an out-of-credits response is NOT this error. It used to be — the API
+ * returned 403 for quota, which landed here — but the API now returns 402 and
+ * that maps to {@link LenzQuotaExceededError}. If you were catching
+ * `LenzAuthError` to handle an empty balance, catch the quota error instead.
+ * The two do not share a parent on purpose: "fix your key" and "top up your
+ * account" are different actions.
+ */
 export class LenzAuthError extends LenzError {}
 
+/**
+ * 402 — you're out of balance, or your plan doesn't cover this call.
+ *
+ * `remaining` is **nullable**: `null` means the server didn't report a
+ * balance, `0` means it reported an empty one. The old `creditsRemaining = 0`
+ * could not tell those apart, which made it useless to branch on. The server
+ * omits these fields rather than sending `null`, so the distinction survives
+ * the wire.
+ */
 export class LenzQuotaExceededError extends LenzError {
-  creditsRemaining = 0;
+  /** Where the wall lifts — the plans page. */
+  upgradeUrl = "";
+  /** Usable capacity left for the capability, or `null` if unreported. */
+  remaining: number | null = null;
+  /** ISO-8601 timestamp of the next monthly reset, or `null`. */
+  resetsAt: string | null = null;
+  /** For a batch call, how many units were asked for. */
+  requested: number | null = null;
+
+  private static warnedCreditsRemaining = false;
+
+  /**
+   * @deprecated Use {@link remaining}. Removed in 3.0.
+   *
+   * Reports `0` when the balance is unknown — exactly the ambiguity
+   * `remaining` exists to fix. The server never sent the `credits_remaining`
+   * field this read, so it was always `0`.
+   */
+  get creditsRemaining(): number {
+    LenzQuotaExceededError.warnCreditsRemaining();
+    return this.remaining ?? 0;
+  }
+
+  /**
+   * Writes through to {@link remaining}.
+   *
+   * A getter with no setter would be a breaking change in a MINOR release:
+   * ESM is always strict, so `err.creditsRemaining = 5` throws `TypeError`,
+   * and a TypeScript consumer assigning it fails to compile (TS2540). Both
+   * break on a caret-range `npm update` inside 2.x.
+   */
+  set creditsRemaining(value: number | null) {
+    LenzQuotaExceededError.warnCreditsRemaining();
+    this.remaining = value;
+  }
+
+  private static warnCreditsRemaining(): void {
+    if (LenzQuotaExceededError.warnedCreditsRemaining) return;
+    LenzQuotaExceededError.warnedCreditsRemaining = true;
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[lenz-io] creditsRemaining is deprecated and will be removed in 3.0; " +
+        "use `remaining`, which is null when the server didn't report a " +
+        "balance (creditsRemaining reports that as 0).",
+    );
+  }
 }
 
 export class LenzValidationError extends LenzError {
   errors: Array<Record<string, unknown>> = [];
 }
 
+/**
+ * 429 — rate limited.
+ *
+ * Being thrown does not always mean the automatic retry ladder was exhausted:
+ * waits longer than {@link MAX_RETRY_AFTER_SLEEP} throw immediately so a call
+ * can't block for hours inside a sleeping retry.
+ */
 export class LenzRateLimitError extends LenzError {
+  /** Seconds until the next allowed call, from the header or the body. */
   retryAfter = 0;
+  /** The cap that was hit, when the server states it. */
+  limit: number | null = null;
+  /** The body's raw echo of the same wait. */
+  resetInSeconds: number | null = null;
+  /**
+   * Where the cap lifts. The server sends this on 429 as well as 402,
+   * deliberately — someone hitting the daily `/extract` cap also wants to
+   * know a paid plan raises it.
+   */
+  upgradeUrl = "";
 }
 
 export class LenzAPIError extends LenzError {}
@@ -126,10 +217,40 @@ const STATUS_MAP: Record<number, StatusEntry> = {
 const FIX_HINTS: Record<number, string> = {
   401: "Generate a new key at https://lenz.io/api-integration.",
   403: "This key doesn't have access to that resource.",
-  402: "Upgrade your plan or wait for the period reset.",
+  402: "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
   422: "Check the request body against the OpenAPI spec.",
   429: "Wait Retry-After seconds and retry.",
 };
+
+/**
+ * Longest `Retry-After` we'll sleep through inside the automatic retry ladder.
+ *
+ * The `/extract` daily cap sends seconds-until-UTC-midnight, so honoring the
+ * raw value could block a call for ~24h — three times over, once per retry.
+ * Above this we throw immediately with the true `retryAfter` so the caller can
+ * schedule the work.
+ */
+export const MAX_RETRY_AFTER_SLEEP = 60;
+
+/**
+ * Coerce to a number, or `null` when absent/unparseable.
+ *
+ * `Number("")` is `0` and `Number(null)` is `0` in JS, so a plain `Number()`
+ * turns "the server said nothing" into "the balance is zero" — the exact
+ * ambiguity the nullable fields exist to avoid.
+ */
+function optNumber(value: unknown): number | null {
+  if (typeof value === "string") value = value.trim();
+  if (value === null || value === undefined || value === "") return null;
+  // Booleans coerce to 0/1 in JS, which would read as a real balance.
+  if (typeof value === "boolean") return null;
+  const n = Number(value);
+  // Truncated so "42.7" and 42.7 agree, matching Python's _opt_int. Every
+  // field this parses (counts, seconds) is an integer on the wire; a float is
+  // malformed either way, and the two SDKs disagreeing is worse than either
+  // answer.
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
 
 function parseBody(raw: string | undefined | null): Record<string, unknown> {
   if (!raw) return {};
@@ -171,6 +292,9 @@ export function mapResponseToError(
         ? "Validation failed"
         : entry.message;
 
+  const codeRaw = parsed["code"];
+  const code = typeof codeRaw === "string" ? codeRaw : "";
+
   const err = new entry.cls({
     message: detail,
     cause: detail,
@@ -179,12 +303,18 @@ export function mapResponseToError(
     docUrl: entry.docUrl,
     requestId,
     statusCode,
+    code,
     body: parsed,
   });
 
   // Per-class enrichment
   if (err instanceof LenzQuotaExceededError) {
-    err.creditsRemaining = Number(parsed["credits_remaining"] ?? 0);
+    const upgradeUrl = parsed["upgrade_url"];
+    err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
+    err.remaining = optNumber(parsed["remaining"]);
+    err.requested = optNumber(parsed["requested"]);
+    const resetsAt = parsed["resets_at"];
+    err.resetsAt = typeof resetsAt === "string" && resetsAt ? resetsAt : null;
   } else if (err instanceof LenzValidationError) {
     if (Array.isArray(parsed["detail"])) {
       err.errors = parsed["detail"] as Array<Record<string, unknown>>;
@@ -192,9 +322,18 @@ export function mapResponseToError(
       err.errors = parsed["errors"] as Array<Record<string, unknown>>;
     }
   } else if (err instanceof LenzRateLimitError) {
-    const ra = getHeader(headers, "Retry-After") || String(parsed["retry_after"] ?? "");
-    const parsedRa = Number(ra);
-    err.retryAfter = Number.isFinite(parsedRa) ? parsedRa : 0;
+    err.limit = optNumber(parsed["limit"]);
+    err.resetInSeconds = optNumber(parsed["reset_in_seconds"]);
+    const rlUpgradeUrl = parsed["upgrade_url"];
+    err.upgradeUrl = typeof rlUpgradeUrl === "string" ? rlUpgradeUrl : "";
+    // Header first, then the body. `reset_in_seconds` is what the server
+    // actually sends; `retry_after` was an SDK-side invention the server has
+    // never emitted — kept last purely as a defensive read.
+    err.retryAfter =
+      optNumber(getHeader(headers, "Retry-After")) ??
+      optNumber(parsed["reset_in_seconds"]) ??
+      optNumber(parsed["retry_after"]) ??
+      0;
   }
 
   return err;

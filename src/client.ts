@@ -60,6 +60,7 @@ import {
   LenzNeedsInputError,
   LenzPipelineError,
   LenzTimeoutError,
+  MAX_RETRY_AFTER_SLEEP,
   mapResponseToError,
 } from "./errors.js";
 import type {
@@ -157,6 +158,42 @@ function sleep(ms: number): Promise<void> {
 
 function retrySleepMs(attempt: number): number {
   return RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)] ?? 4000;
+}
+
+/**
+ * Seconds the server says to wait, or `null` if it didn't say.
+ *
+ * Header first, then the body's `reset_in_seconds`. Returns `null` — not `0` —
+ * when neither states a wait, so the caller can tell "server stated no wait"
+ * from "server said wait 0 seconds" and fall back to its own backoff.
+ *
+ * Reads the body off a `clone()`: the original response is consumed once by
+ * `response.text()` on the throw path, and a `Response` body can only be read
+ * once. The clone keeps the Python SDK's body-fallback behavior available here
+ * without stealing it — parity between the two SDKs is a stated invariant, and
+ * every 429 carrying its wait only in the body (a proxy stripping the header,
+ * a future endpoint) would otherwise burn the whole retry ladder in Node while
+ * Python raised on the first call.
+ */
+async function statedRetryAfterSeconds(response: Response): Promise<number | null> {
+  let raw: unknown = response.headers.get("Retry-After");
+  if (raw === null || String(raw).trim() === "") {
+    try {
+      const body: unknown = await response.clone().json();
+      raw =
+        body && typeof body === "object"
+          ? (body as Record<string, unknown>)["reset_in_seconds"]
+          : null;
+    } catch {
+      // A non-JSON body is not exceptional — fall back to backoff.
+      return null;
+    }
+  }
+  if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+  const n = Number(raw);
+  // Floored at zero: `Retry-After: -5` is malformed, and a negative delay
+  // triggers a TimeoutNegativeWarning on stderr.
+  return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : null;
 }
 
 function pollSleepMs(idx: number, remainingMs: number): number {
@@ -674,15 +711,30 @@ export class Lenz {
       }
 
       // Error path. Retry on 5xx + 429; otherwise raise.
+      //
+      // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that
+      // the two statuses part ways, because the right answer differs:
+      //
+      //  * 429 — throw. The /extract daily cap sends seconds-until-UTC-
+      //    midnight, so sleeping it blocks the call for most of a day, and
+      //    this sleep sits OUTSIDE the AbortController so `timeoutMs` would
+      //    not bound it. The caller gets the true retryAfter and can schedule.
+      //  * 5xx — keep retrying on our own backoff. The server is down, not
+      //    rate-limiting us; a maintenance-window Retry-After of an hour
+      //    shouldn't become an hour-long sleep, but it also shouldn't abort a
+      //    request our backoff might still satisfy. (2.6.0 slept the raw
+      //    value here, so ignoring it outright would be a silent change to a
+      //    status class this release never set out to touch.)
       if (attempt < this.maxRetries && (response.status >= 500 || response.status === 429)) {
-        const ra = response.headers.get("Retry-After");
-        let waitMs: number = retrySleepMs(attempt);
-        if (ra) {
-          const parsed = Number(ra);
-          if (Number.isFinite(parsed)) waitMs = parsed * 1000;
+        const stated = await statedRetryAfterSeconds(response);
+        if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
+          await sleep(stated * 1000);
+          continue;
         }
-        await sleep(waitMs);
-        continue;
+        if (stated === null || response.status >= 500) {
+          await sleep(retrySleepMs(attempt));
+          continue;
+        }
       }
 
       const rawBody = await response.text();

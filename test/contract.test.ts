@@ -20,6 +20,8 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { LenzQuotaExceededError, LenzRateLimitError, mapResponseToError } from "../src/index.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures", "contract");
 
@@ -219,5 +221,61 @@ describe("contract", () => {
     expect(claims[0]!["verdict"]).toBe("True");
     expect(claims[0]!["confidence"]).toBe("high");
     expect(claims[0]!["verification_url"]).toBeTruthy();
+  });
+
+  // The error envelopes are part of the wire contract too, and drift between
+  // the two SDKs' error mapping is exactly what this file exists to catch.
+  // Both SDKs validate the SAME fixture files.
+  it("402 envelope maps every field onto LenzQuotaExceededError", () => {
+    const fixture = loadFixture("error_quota_402.json");
+    const err = mapResponseToError(402, JSON.stringify(fixture), {}) as LenzQuotaExceededError;
+
+    expect(err).toBeInstanceOf(LenzQuotaExceededError);
+    expect(err.message).toBe(fixture["detail"]);
+    expect(err.code).toBe(fixture["code"]);
+    expect(err.upgradeUrl).toBe(fixture["upgrade_url"]);
+    expect(err.remaining).toBe(fixture["remaining"]);
+    expect(err.resetsAt).toBe(fixture["resets_at"]);
+
+    // Every key the server sends must be consumed by a typed field or
+    // deliberately skipped — an unhandled key means the mapper drifted.
+    const handled = new Set([
+      "detail",
+      "code",
+      "upgrade_url",
+      "remaining",
+      "resets_at",
+      "requested",
+    ]);
+    // `doc_url` is intentionally not mapped: the SDK sets its own docUrl from
+    // the status table so the link is right even on an older server.
+    handled.add("doc_url");
+    const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
+    expect(unhandled).toEqual([]);
+  });
+
+  it("429 envelope maps every field onto LenzRateLimitError", () => {
+    const fixture = loadFixture("error_rate_limit_429.json");
+    const err = mapResponseToError(429, JSON.stringify(fixture), {}) as LenzRateLimitError;
+
+    expect(err).toBeInstanceOf(LenzRateLimitError);
+    expect(err.message).toBe(fixture["detail"]);
+    expect(err.code).toBe(fixture["code"]);
+    expect(err.limit).toBe(fixture["limit"]);
+    expect(err.resetInSeconds).toBe(fixture["reset_in_seconds"]);
+    expect(err.retryAfter).toBe(fixture["reset_in_seconds"]);
+    // upgrade_url is on 429 too — the daily /extract cap is lifted by a plan.
+    expect(err.upgradeUrl).toBe(fixture["upgrade_url"]);
+
+    const handled = new Set([
+      "detail",
+      "code",
+      "limit",
+      "reset_in_seconds",
+      "upgrade_url",
+      "doc_url",
+    ]);
+    const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
+    expect(unhandled).toEqual([]);
   });
 });
