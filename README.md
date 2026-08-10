@@ -184,12 +184,22 @@ Every error subclass is typed and carries a `requestId` you can quote on
 support tickets:
 
 ```ts
-import { LenzAuthError, LenzRateLimitError, LenzValidationError } from "lenz-io";
+import {
+  LenzAuthError,
+  LenzQuotaExceededError,
+  LenzRateLimitError,
+  LenzValidationError,
+} from "lenz-io";
 
 try {
   await client.verifyAndWait({ claim: "..." });
 } catch (exc) {
-  if (exc instanceof LenzAuthError) {
+  if (exc instanceof LenzQuotaExceededError) {
+    // HTTP 402. Out of balance — retrying will not clear it.
+    console.error(exc.remaining); // 0, or null if the server didn't report a balance
+    console.error(exc.resetsAt); // "2026-09-01T00:00:00+00:00", or null
+    console.error(exc.upgradeUrl); // https://lenz.io/plans
+  } else if (exc instanceof LenzAuthError) {
     console.error(String(exc));
     // Unauthorized
     //   Cause:  Invalid api key
@@ -197,7 +207,10 @@ try {
     //   Docs:   https://lenz.io/docs/auth
     //   Request ID: req_abc123
   } else if (exc instanceof LenzRateLimitError) {
-    await new Promise((r) => setTimeout(r, exc.retryAfter * 1000));
+    // Waits up to 60s are already retried for you, so reaching here means
+    // either the ladder ran out or the wait is long. Don't sleep it — the
+    // /extract daily cap can be hours away.
+    scheduleRetryIn(exc.retryAfter);
   } else if (exc instanceof LenzValidationError) {
     for (const fieldErr of exc.errors) {
       console.error(fieldErr["loc"], fieldErr["msg"]);
@@ -207,6 +220,11 @@ try {
   }
 }
 ```
+
+`LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
+"fix your key" and "top up your account" are different actions. So if you were
+checking `LenzAuthError` to handle an empty balance, that branch stops firing;
+add a `LenzQuotaExceededError` case.
 
 ## Resuming a verification
 
