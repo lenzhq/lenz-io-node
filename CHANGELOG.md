@@ -16,13 +16,22 @@ Adds a setup binary. The SDK surface is unchanged.
   then verifies the key with one authenticated request. `--print` emits the
   JSON without touching anything.
 
-  The key comes from `-k` or `$LENZ_API_KEY` and is never persisted anywhere
-  but the client's own config file.
+  The key comes from `-k` or `$LENZ_API_KEY`, and nothing is stored anywhere
+  of ours.
+
+  **The key is not written into the project configs.** `.mcp.json` is a file
+  Claude Code's documentation tells teams to check into version control, so
+  writing a live credential there by default would be handing the user a leak.
+  Claude Code and Cursor get an environment-variable reference instead — in
+  each client's own syntax, `${LENZ_API_KEY}` and `${env:LENZ_API_KEY}`, which
+  are not interchangeable — and the command prints the `export` line to run.
+  `--write-key` opts out, for a private checkout. Claude Desktop still gets the
+  key itself: its config is global and the app never sees an exported variable.
 
   Existing MCP servers in that file are preserved — only the `lenz` key is
   written, and a file that exists but does not parse as JSON is refused
   rather than overwritten, because guessing there could silently discard
-  servers configured by hand.
+  servers configured by hand. Writes are atomic and the file is created `0600`.
 
   **This is not the `lenz` command.** The Python package's CLI calls the API
   from a shell; this one wires Lenz into an agent. `--help` says which is

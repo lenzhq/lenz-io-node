@@ -6,12 +6,51 @@
  * actively destructive on exactly the machines it exists to help.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildServerConfig, mergeConfig, parseArgs, run } from "../src/cli.js";
+import {
+  CLIENTS,
+  SHARED,
+  buildServerConfig,
+  credentialFor,
+  mergeConfig,
+  parseArgs,
+  run,
+} from "../src/cli.js";
+
+/**
+ * Pinned literals shared with `lenz init` in the Python SDK.
+ *
+ * The two commands are a stated parity pair, and the existing parity test
+ * covered the server block — the thing that never drifted — while SETUP_URL
+ * sat at the pre-rename /welcome/setup and printed a 404 on every successful
+ * run. tests/test_cli_init.py asserts this same table.
+ */
+describe("parity with the Python SDK", () => {
+  it("pins the shared constants", () => {
+    expect(SHARED.MCP_SERVER_URL).toBe("https://lenz.io/mcp");
+    expect(SHARED.CONSOLE_URL).toBe("https://lenz.io/api-integration");
+    expect(SHARED.SETUP_URL).toBe("https://lenz.io/setup");
+    expect(SHARED.KEY_ENV_VAR).toBe("LENZ_API_KEY");
+  });
+
+  it("pins the per-client placeholder syntax", () => {
+    expect(SHARED.PLACEHOLDERS["claude-code"]).toBe("${LENZ_API_KEY}");
+    expect(SHARED.PLACEHOLDERS.cursor).toBe("${env:LENZ_API_KEY}");
+    expect(SHARED.PLACEHOLDERS["claude-desktop"]).toBeNull();
+  });
+
+  it("writes the same server block both SDKs write", () => {
+    expect(buildServerConfig("k")).toEqual({
+      type: "http",
+      url: "https://lenz.io/mcp",
+      headers: { Authorization: "Bearer k" },
+    });
+  });
+});
 
 describe("buildServerConfig", () => {
   it("points at the remote MCP server with a bearer key", () => {
@@ -121,7 +160,7 @@ describe("run", () => {
 
     expect(code).toBe(0);
     const written = JSON.parse(readFileSync(join(dir, ".mcp.json"), "utf8"));
-    expect(written.mcpServers.lenz.headers.Authorization).toBe("Bearer lenz_abc");
+    expect(written.mcpServers.lenz.url).toBe("https://lenz.io/mcp");
   });
 
   it("writes .cursor/mcp.json for Cursor, creating the directory", async () => {
@@ -179,5 +218,126 @@ describe("run", () => {
     const help = out.join("");
     expect(help).toContain("WIRES Lenz into your agent");
     expect(help).toContain("CALLS the API from your shell");
+  });
+});
+
+/**
+ * Where the key ends up.
+ *
+ * `.mcp.json` is a project file whose own documentation says to commit it —
+ * "Check .mcp.json into version control so everyone on your team gets the same
+ * MCP tools and services." A setup tool that puts a live credential there by
+ * default is handing the user a leak, so project-scoped clients get an env-var
+ * reference and only --write-key opts out.
+ */
+describe("credential placement", () => {
+  let dir: string;
+  let out: string[];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "lenz-cli-key-"));
+    out = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => {
+      out.push(String(s));
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const readCfg = (...parts: string[]) => JSON.parse(readFileSync(join(dir, ...parts), "utf8"));
+
+  it("keeps the key out of Claude Code's project config", async () => {
+    await run(["init", "-k", "lenz_secret", "--no-verify"], { cwd: dir });
+
+    const raw = readFileSync(join(dir, ".mcp.json"), "utf8");
+    expect(readCfg(".mcp.json").mcpServers.lenz.headers.Authorization).toBe(
+      "Bearer ${LENZ_API_KEY}",
+    );
+    expect(raw).not.toContain("lenz_secret");
+  });
+
+  it("uses Cursor's ${env:VAR} syntax, which is not Claude Code's", async () => {
+    // Writing ${LENZ_API_KEY} here would not expand — Cursor would send that
+    // literal text as the bearer token and 401 with no clue why.
+    await run(["init", "--cursor", "-k", "lenz_secret", "--no-verify"], { cwd: dir });
+
+    expect(readCfg(".cursor", "mcp.json").mcpServers.lenz.headers.Authorization).toBe(
+      "Bearer ${env:LENZ_API_KEY}",
+    );
+  });
+
+  it("tells the user to export the variable, with the key to export", async () => {
+    await run(["init", "-k", "lenz_secret", "--no-verify"], { cwd: dir });
+
+    // Otherwise the run reads as finished while the client still has nothing
+    // to authenticate with.
+    expect(out.join("")).toContain("export LENZ_API_KEY=lenz_secret");
+  });
+
+  it("--write-key puts the key in the file for a private checkout", async () => {
+    await run(["init", "-k", "lenz_secret", "--write-key", "--no-verify"], { cwd: dir });
+
+    expect(readCfg(".mcp.json").mcpServers.lenz.headers.Authorization).toBe("Bearer lenz_secret");
+    expect(out.join("")).not.toContain("export LENZ_API_KEY");
+  });
+
+  it("writes the literal key for Claude Desktop, which cannot expand one", () => {
+    // Global config, and the app is launched from the desktop rather than a
+    // shell, so it never sees an exported variable — a placeholder there is
+    // simply broken. Asserted through credentialFor rather than a real write:
+    // the path is an absolute one under the true home directory on every
+    // platform, and a test that has to skip itself on macOS is not a test.
+    const credential = credentialFor(CLIENTS["claude-desktop"], "lenz_secret", false);
+
+    expect(credential.value).toBe("lenz_secret");
+    expect(credential.isPlaceholder).toBe(false);
+  });
+
+  it("--print previews exactly what a write would produce", async () => {
+    await run(["init", "--cursor", "-k", "lenz_secret", "--print"], { cwd: dir });
+
+    // A preview that differs from the write is worse than no preview.
+    expect(JSON.parse(out.join("")).mcpServers.lenz.headers.Authorization).toBe(
+      "Bearer ${env:LENZ_API_KEY}",
+    );
+  });
+});
+
+describe("the write path", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "lenz-cli-write-"));
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("stages the temp file beside the target, not in os.tmpdir()", async () => {
+    // rename() is atomic only within one filesystem and fails with EXDEV
+    // across two. /tmp is a separate filesystem on most Linux distros and in
+    // every container, so staging there works on a Mac and breaks in CI.
+    await run(["init", "--cursor", "-k", "lenz_abc", "--no-verify"], { cwd: dir });
+
+    expect(readdirSync(join(dir, ".cursor"))).toEqual(["mcp.json"]);
+  });
+
+  it("writes the config 0600, because it can hold a credential", async () => {
+    if (process.platform === "win32") return; // POSIX modes only
+
+    await run(["init", "-k", "lenz_abc", "--write-key", "--no-verify"], { cwd: dir });
+
+    expect(statSync(join(dir, ".mcp.json")).mode & 0o777).toBe(0o600);
   });
 });

@@ -320,19 +320,35 @@ npx lenz-io init --claude-desktop            # writes the global config
 npx lenz-io init --print                     # print the JSON, write nothing
 ```
 
-The key comes from `-k` or `$LENZ_API_KEY`, and is never persisted anywhere
-but the client's own config file — no dotfile of ours, no cache, no telemetry.
+The key comes from `-k` or `$LENZ_API_KEY`. Nothing is stored anywhere of
+ours — no dotfile, no cache, no telemetry.
+
+**Your key does not go into the project configs.** `.mcp.json` and
+`.cursor/mcp.json` live in your repo, and Claude Code's documentation says to
+check `.mcp.json` into version control so your team shares the same servers. So
+those two get an environment-variable reference, and you export the key:
+
+```bash
+export LENZ_API_KEY=lenz_...   # add to your shell profile to make it stick
+```
+
+Each client spells that reference differently — `${LENZ_API_KEY}` for Claude
+Code, `${env:LENZ_API_KEY}` for Cursor — and `init` writes the right one. Pass
+`--write-key` to put the key in the file instead, for a private checkout.
+Claude Desktop always gets the key itself: its config is global, and the app is
+launched from the desktop rather than a shell, so it never sees an exported
+variable.
 
 Existing MCP servers in that file are preserved: only the `lenz` key is
 written. If the file exists but isn't valid JSON the command refuses rather
 than guessing, because overwriting it could silently discard servers you
-configured by hand.
+configured by hand. The write is atomic, and the file is created `0600`.
 
-| Client         | Config written                                                                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code    | `./.mcp.json` (project)                                                                                                                            |
-| Cursor         | `./.cursor/mcp.json` (project)                                                                                                                     |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\...` (Windows), `$XDG_CONFIG_HOME/Claude/...` (Linux) |
+| Client         | Config written                                                                                                                                     | Key                   |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| Claude Code    | `./.mcp.json` (project)                                                                                                                            | `${LENZ_API_KEY}`     |
+| Cursor         | `./.cursor/mcp.json` (project)                                                                                                                     | `${env:LENZ_API_KEY}` |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\...` (Windows), `$XDG_CONFIG_HOME/Claude/...` (Linux) | the key itself        |
 
 **Not the same tool as `lenz`.** The Python package's `lenz` command CALLS the
 API from your shell (`pipx install "lenz-io[cli]"`). This one WIRES Lenz into
