@@ -12,10 +12,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildCodexBlock,
+  mergeTomlConfig,
   CLIENTS,
   SHARED,
   buildServerConfig,
-  credentialFor,
   mergeConfig,
   parseArgs,
   run,
@@ -38,9 +39,11 @@ describe("parity with the Python SDK", () => {
   });
 
   it("pins the per-client placeholder syntax", () => {
+    // Only the JSON clients interpolate. Codex names the variable in a field
+    // of its own; Claude Desktop takes no config file at all.
     expect(SHARED.PLACEHOLDERS["claude-code"]).toBe("${LENZ_API_KEY}");
     expect(SHARED.PLACEHOLDERS.cursor).toBe("${env:LENZ_API_KEY}");
-    expect(SHARED.PLACEHOLDERS["claude-desktop"]).toBeNull();
+    expect(Object.keys(SHARED.PLACEHOLDERS).sort()).toEqual(["claude-code", "cursor"]);
   });
 
   it("writes the same server block both SDKs write", () => {
@@ -287,16 +290,30 @@ describe("credential placement", () => {
     expect(out.join("")).not.toContain("export LENZ_API_KEY");
   });
 
-  it("writes the literal key for Claude Desktop, which cannot expand one", () => {
-    // Global config, and the app is launched from the desktop rather than a
-    // shell, so it never sees an exported variable — a placeholder there is
-    // simply broken. Asserted through credentialFor rather than a real write:
-    // the path is an absolute one under the true home directory on every
-    // platform, and a test that has to skip itself on macOS is not a test.
-    const credential = credentialFor(CLIENTS["claude-desktop"], "lenz_secret", false);
+  it("writes nothing at all for Claude Desktop and prints the connector flow", async () => {
+    // claude_desktop_config.json is documented for local stdio servers only.
+    // A remote streamable-HTTP server is added through Settings → Connectors,
+    // so writing that file put a live key somewhere nothing reads it.
+    const code = await run(["init", "--claude-desktop", "-k", "lenz_secret", "--no-verify"], {
+      cwd: dir,
+    });
 
-    expect(credential.value).toBe("lenz_secret");
-    expect(credential.isPlaceholder).toBe(false);
+    expect(code).toBe(0);
+    expect(CLIENTS["claude-desktop"].configPath).toBeNull();
+    const printed = out.join("");
+    expect(printed).toContain("Add custom connector");
+    expect(printed).toContain("claude.ai/directory/connectors/lenz");
+    // And the key stays out of the terminal for a flow that never takes one.
+    expect(printed).not.toContain("lenz_secret");
+  });
+
+  it("names the variable for Codex instead of writing a key", async () => {
+    await run(["init", "--codex", "-k", "lenz_secret", "--no-verify"], { cwd: dir });
+
+    const written = readFileSync(join(dir, ".codex", "config.toml"), "utf8");
+    expect(written).toContain("[mcp_servers.lenz]");
+    expect(written).toContain('bearer_token_env_var = "LENZ_API_KEY"');
+    expect(written).not.toContain("lenz_secret");
   });
 
   it("--print previews exactly what a write would produce", async () => {
@@ -306,6 +323,45 @@ describe("credential placement", () => {
     expect(JSON.parse(out.join("")).mcpServers.lenz.headers.Authorization).toBe(
       "Bearer ${env:LENZ_API_KEY}",
     );
+  });
+});
+
+/**
+ * Codex keeps MCP servers in TOML, so this path merges TEXT rather than
+ * parse → mutate → re-serialize. Every TOML library drops comments and
+ * reflows formatting; handing someone back a file that is equivalent but
+ * visibly not theirs is the same failure as clobbering it.
+ */
+describe("codex TOML merge", () => {
+  it("appends when there is no lenz table yet", () => {
+    const existing = '# my setup\n[mcp_servers.github]\nurl = "https://example.com/mcp"\n';
+
+    const merged = mergeTomlConfig(existing, buildCodexBlock("lenz_abc", false));
+
+    // Everything the user wrote survives byte-for-byte, comment included.
+    expect(merged.startsWith(existing.trimEnd())).toBe(true);
+    expect(merged).toContain("# my setup");
+    expect(merged).toContain("[mcp_servers.github]");
+    expect(merged).toContain("[mcp_servers.lenz]");
+  });
+
+  it("refuses a second lenz table rather than corrupting the file", () => {
+    // TOML rejects duplicate tables outright, so appending blindly would stop
+    // the WHOLE file parsing — every other server in it included.
+    const existing = '[mcp_servers.lenz]\nurl = "https://lenz.io/mcp"\n';
+
+    expect(() => mergeTomlConfig(existing, buildCodexBlock("k", false))).toThrow(/duplicate-table/);
+  });
+
+  it("handles an empty file without a leading blank line", () => {
+    expect(mergeTomlConfig("", buildCodexBlock("k", false))).toBe(buildCodexBlock("k", false));
+  });
+
+  it("--write-key uses http_headers, the other documented auth field", () => {
+    const block = buildCodexBlock("lenz_secret", true);
+
+    expect(block).toContain('http_headers = { "Authorization" = "Bearer lenz_secret" }');
+    expect(block).not.toContain("bearer_token_env_var");
   });
 });
 

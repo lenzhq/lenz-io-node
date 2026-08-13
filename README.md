@@ -316,8 +316,9 @@ key with one authenticated request.
 ```bash
 npx lenz-io init --claude-code -k lenz_...   # writes ./.mcp.json
 npx lenz-io init --cursor                    # writes ./.cursor/mcp.json
-npx lenz-io init --claude-desktop            # writes the global config
-npx lenz-io init --print                     # print the JSON, write nothing
+npx lenz-io init --codex                     # appends to ./.codex/config.toml
+npx lenz-io init --claude-desktop            # prints the connector steps
+npx lenz-io init --print                     # print the config, write nothing
 ```
 
 The key comes from `-k` or `$LENZ_API_KEY`. Nothing is stored anywhere of
@@ -344,11 +345,25 @@ written. If the file exists but isn't valid JSON the command refuses rather
 than guessing, because overwriting it could silently discard servers you
 configured by hand. The write is atomic, and the file is created `0600`.
 
-| Client         | Config written                                                                                                                                     | Key                   |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| Claude Code    | `./.mcp.json` (project)                                                                                                                            | `${LENZ_API_KEY}`     |
-| Cursor         | `./.cursor/mcp.json` (project)                                                                                                                     | `${env:LENZ_API_KEY}` |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\...` (Windows), `$XDG_CONFIG_HOME/Claude/...` (Linux) | the key itself        |
+| Client         | Config written                   | Key                                      |
+| -------------- | -------------------------------- | ---------------------------------------- |
+| Claude Code    | `./.mcp.json` (project)          | `${LENZ_API_KEY}`                        |
+| Cursor         | `./.cursor/mcp.json` (project)   | `${env:LENZ_API_KEY}`                    |
+| Codex          | `./.codex/config.toml` (project) | `bearer_token_env_var`, so no key at all |
+| Claude Desktop | none — see below                 | none                                     |
+
+**Codex is TOML.** The Lenz table is appended to your existing
+`.codex/config.toml` as text rather than parsed and rewritten, so comments and
+formatting survive untouched. A config that already declares
+`[mcp_servers.lenz]` is refused rather than given a second one — TOML rejects
+duplicate tables, and a second copy would stop the whole file parsing.
+`~/.codex/config.toml` is the global equivalent if you would rather move it.
+
+**Claude Desktop takes no config file.** `claude_desktop_config.json` is for
+local stdio servers; a remote server like Lenz is added through Settings →
+Connectors → "Add custom connector", or in one click from
+[the directory](https://claude.ai/directory/connectors/lenz).
+`init --claude-desktop` prints those steps rather than writing anything.
 
 **Not the same tool as `lenz`.** The Python package's `lenz` command CALLS the
 API from your shell (`pipx install "lenz-io[cli]"`). This one WIRES Lenz into

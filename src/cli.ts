@@ -19,7 +19,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { Lenz } from "./index.js";
@@ -39,22 +38,28 @@ export const SHARED = {
   CONSOLE_URL: "https://lenz.io/api-integration",
   SETUP_URL: "https://lenz.io/setup",
   KEY_ENV_VAR: "LENZ_API_KEY",
-  /** Per-client, because the syntaxes are not interchangeable. */
+  /**
+   * Per-client, because the syntaxes are not interchangeable. Only the
+   * JSON-config clients need one — Codex names the variable in a field of its
+   * own, and Claude Desktop takes no config file at all.
+   */
   PLACEHOLDERS: {
     "claude-code": "${LENZ_API_KEY}",
     cursor: "${env:LENZ_API_KEY}",
-    "claude-desktop": null,
   },
+  /** The TOML table Codex keys its server on. Duplicates are a parse error. */
+  CODEX_TABLE: "[mcp_servers.lenz]",
 } as const;
 
 const MCP_SERVER_URL = SHARED.MCP_SERVER_URL;
 const CONSOLE_URL = SHARED.CONSOLE_URL;
 const SETUP_URL = SHARED.SETUP_URL;
+const CLAUDE_CONNECTORS_URL = "https://claude.ai/directory/connectors/lenz";
 
 /** The environment variable both SDKs read, and the one the placeholders name. */
 const KEY_ENV_VAR = SHARED.KEY_ENV_VAR;
 
-type ClientId = "claude-code" | "claude-desktop" | "cursor";
+type ClientId = "claude-code" | "claude-desktop" | "cursor" | "codex";
 
 interface ClientSpec {
   id: ClientId;
@@ -63,19 +68,29 @@ interface ClientSpec {
    * Where the MCP config lives, or null when this platform is unsupported.
    * Takes the working directory rather than reading process.cwd() so the
    * project-scoped clients are testable — vitest workers cannot chdir.
+   *
+   * null for a client configured through its own UI rather than a file —
+   * see `manual`.
    */
-  configPath: (cwd: string) => string | null;
+  configPath: ((cwd: string) => string | null) | null;
+  /** Config file syntax. Decides which merge path runs. */
+  format: "json" | "toml";
   /** Human-readable note printed after a successful write. */
   after: string;
   /**
    * How THIS client spells an environment-variable reference inside a config
-   * value, or null when it cannot resolve one at all.
+   * value, or null when it does not use one.
    *
    * The syntaxes are not the same and are not interchangeable: Claude Code
    * takes `${VAR}`, Cursor takes `${env:VAR}`. Writing one into the other
    * produces a header containing that literal text and a puzzling 401.
    */
   keyPlaceholder: string | null;
+  /**
+   * Set when this client has NO config file to write and must be connected
+   * through its own interface. Printed instead of writing anything.
+   */
+  manual?: (apiKey: string) => string;
 }
 
 /**
@@ -92,43 +107,60 @@ export const CLIENTS: Record<ClientId, ClientSpec> = {
     id: "claude-code",
     label: "Claude Code",
     configPath: (cwd) => join(cwd, ".mcp.json"),
+    format: "json",
     after: "Restart your Claude Code session so the server loads.",
     keyPlaceholder: SHARED.PLACEHOLDERS["claude-code"],
-  },
-  "claude-desktop": {
-    id: "claude-desktop",
-    label: "Claude Desktop",
-    // Global, and the only client that gets the literal key. It is launched
-    // from the desktop rather than a shell, so it does not inherit an
-    // exported LENZ_API_KEY and a placeholder would simply never resolve.
-    keyPlaceholder: null,
-    configPath: () => {
-      if (process.platform === "darwin") {
-        return join(
-          homedir(),
-          "Library",
-          "Application Support",
-          "Claude",
-          "claude_desktop_config.json",
-        );
-      }
-      if (process.platform === "win32") {
-        const appData = process.env.APPDATA;
-        return appData ? join(appData, "Claude", "claude_desktop_config.json") : null;
-      }
-      // Linux builds are unofficial but do exist and follow XDG.
-      const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-      return join(xdg, "Claude", "claude_desktop_config.json");
-    },
-    after: "Quit and reopen Claude Desktop — it only reads the config at launch.",
   },
   cursor: {
     id: "cursor",
     label: "Cursor",
     configPath: (cwd) => join(cwd, ".cursor", "mcp.json"),
+    format: "json",
     after: "Reload the Cursor window so the server loads.",
     // Cursor's syntax is ${env:VAR}, NOT ${VAR}. Not interchangeable.
     keyPlaceholder: SHARED.PLACEHOLDERS.cursor,
+  },
+  codex: {
+    id: "codex",
+    label: "Codex",
+    // TOML, not JSON — and project-scoped for the same reason as the two
+    // above. `~/.codex/config.toml` is the global equivalent; the success
+    // note says so rather than writing there behind the user's back.
+    configPath: (cwd) => join(cwd, ".codex", "config.toml"),
+    format: "toml",
+    after: "Restart the Codex session so the server loads.",
+    // No interpolation to get wrong: `bearer_token_env_var` names the
+    // variable in a field of its own, so the key never enters the file.
+    keyPlaceholder: null,
+  },
+  "claude-desktop": {
+    id: "claude-desktop",
+    label: "Claude Desktop",
+    // NO config file. claude_desktop_config.json is documented for local
+    // stdio servers only — every example in Anthropic's docs is command/args.
+    // A remote streamable-HTTP server like ours is added through Settings →
+    // Connectors → Add custom connector, a UI flow with its own auth step.
+    //
+    // We used to write a `{"type":"http", headers:{...}}` entry here, which is
+    // not a documented shape for that file — and it was the one client we gave
+    // the literal key to, so the likely outcome was a live credential sitting
+    // in a file nothing reads.
+    configPath: null,
+    format: "json",
+    keyPlaceholder: null,
+    after: "",
+    manual: () =>
+      [
+        `${CLAUDE_CONNECTORS_URL} adds Lenz to your account in one click — no key to paste.`,
+        "",
+        "Or add it by hand:",
+        "  1. Claude Desktop → Settings → Connectors",
+        '  2. "Add" → "Add custom connector"',
+        `  3. Paste ${MCP_SERVER_URL} and complete the sign-in prompt`,
+        "",
+        "Claude Desktop takes remote servers through that flow, not through",
+        "claude_desktop_config.json — that file is for local stdio servers.",
+      ].join("\n"),
   },
 };
 
@@ -153,6 +185,48 @@ export function credentialFor(
   return { value: apiKey, isPlaceholder: false };
 }
 
+/**
+ * Codex's server block. TOML, and no interpolation anywhere.
+ *
+ * `bearer_token_env_var` names an environment variable in a field of its own,
+ * which is what Claude Code and Cursor need `${VAR}` / `${env:VAR}` string
+ * syntax for — so the default writes no credential at all. `--write-key` uses
+ * `http_headers` instead, the other documented way to authenticate.
+ */
+export function buildCodexBlock(apiKey: string, writeKey: boolean): string {
+  const lines = [SHARED.CODEX_TABLE, `url = "${MCP_SERVER_URL}"`];
+  lines.push(
+    writeKey
+      ? `http_headers = { "Authorization" = "Bearer ${apiKey}" }`
+      : `bearer_token_env_var = "${KEY_ENV_VAR}"`,
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Append the Lenz table to an existing config.toml, as TEXT.
+ *
+ * Deliberately not a parse → mutate → re-serialize round trip. Every TOML
+ * library drops comments and reflows formatting, so a round trip would hand
+ * the user back a file that is technically equivalent and visibly not theirs —
+ * the same reason `readExisting` refuses a JSON file it cannot parse.
+ *
+ * Appending is always valid: TOML tables are order-independent. The one thing
+ * that is NOT safe is a second `[mcp_servers.lenz]`, which is a duplicate-key
+ * error that stops the whole file parsing — so that case refuses and says what
+ * to edit.
+ */
+export function mergeTomlConfig(existing: string, block: string): string {
+  if (new RegExp(`^\\s*${SHARED.CODEX_TABLE.replace(/[[\]]/g, "\\$&")}`, "m").test(existing)) {
+    throw new Error(
+      `already has a ${SHARED.CODEX_TABLE} entry. Edit or remove it and re-run — ` +
+        `a second copy is a duplicate-table error and would stop the whole file parsing.`,
+    );
+  }
+  const trimmed = existing.replace(/\s+$/, "");
+  return trimmed ? `${trimmed}\n\n${block}` : block;
+}
+
 const USAGE = `lenz-io ${VERSION}
 
   Wire Lenz fact-checking into an MCP client.
@@ -162,9 +236,10 @@ Usage
 
 Clients
   --claude-code       write .mcp.json in this project (default)
-  --claude-desktop    write the global Claude Desktop config
   --cursor            write .cursor/mcp.json in this project
-  --print             print the config JSON and exit, writing nothing
+  --codex             append to .codex/config.toml in this project
+  --claude-desktop    print how to add the connector (it takes no config file)
+  --print             print the config and exit, writing nothing
 
 Options
   -k, --key <key>     API key. Defaults to $${KEY_ENV_VAR}.
@@ -246,17 +321,26 @@ function readExisting(path: string): unknown {
  * mode 0o600 because this file holds a credential: the default 0o666 & ~umask
  * leaves it readable by every account on the machine.
  */
-function writeJson(path: string, data: unknown): void {
+function writeText(path: string, contents: string): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.lenz-mcp-${process.pid}-${Date.now()}.json`);
+  const tmp = join(dir, `.lenz-mcp-${process.pid}-${Date.now()}.tmp`);
   try {
-    writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    writeFileSync(tmp, contents, { encoding: "utf8", mode: 0o600 });
     renameSync(tmp, path);
   } catch (err) {
     rmSync(tmp, { force: true });
     throw err;
   }
+}
+
+function writeJson(path: string, data: unknown): void {
+  writeText(path, `${JSON.stringify(data, null, 2)}\n`);
+}
+
+/** Existing file as text, or '' — the TOML path merges textually. */
+function readText(path: string): string {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
 async function verifyKey(apiKey: string): Promise<string> {
@@ -302,6 +386,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--cursor":
         out.client = "cursor";
+        break;
+      case "--codex":
+        out.client = "codex";
         break;
       case "--print":
         out.print = true;
@@ -363,10 +450,21 @@ export async function run(argv: string[], opts: RunOptions = {}): Promise<number
 
   const spec = CLIENTS[args.client];
 
+  // Clients with no config file: print the route and stop. Nothing to write,
+  // nothing to verify against — the connector flow does its own sign-in.
+  if (spec.manual) {
+    process.stdout.write(`${spec.manual(args.apiKey)}\n`);
+    return 0;
+  }
+
   if (args.print) {
     // No key required: the point of --print is to hand someone a config they
     // paste and fill in themselves. Whatever it prints must be what a write
     // for the same client would produce, or --print stops being a preview.
+    if (spec.format === "toml") {
+      process.stdout.write(buildCodexBlock(args.apiKey, args.writeKey));
+      return 0;
+    }
     const credential = args.apiKey
       ? credentialFor(spec, args.apiKey, args.writeKey).value
       : (spec.keyPlaceholder ?? `\${${KEY_ENV_VAR}}`);
@@ -381,13 +479,27 @@ export async function run(argv: string[], opts: RunOptions = {}): Promise<number
     return 1;
   }
 
-  const path = spec.configPath(cwd);
+  const path = spec.configPath?.(cwd) ?? null;
   if (!path) {
     process.stderr.write(
       `Can't locate ${spec.label}'s config on this platform (${process.platform}).\n` +
-        `Run with --print and paste the JSON in yourself.\n`,
+        `Run with --print and paste the config in yourself.\n`,
     );
     return 1;
+  }
+
+  // TOML clients merge as text — see mergeTomlConfig.
+  if (spec.format === "toml") {
+    let merged: string;
+    try {
+      merged = mergeTomlConfig(readText(path), buildCodexBlock(args.apiKey, args.writeKey));
+    } catch (err) {
+      process.stderr.write(`${path} ${(err as Error).message}\n`);
+      return 1;
+    }
+    writeText(path, merged);
+    process.stdout.write(`Added the Lenz MCP server to ${path}\n`);
+    return finish(spec, args, path, !args.writeKey);
   }
 
   let existing: unknown;
@@ -402,6 +514,20 @@ export async function run(argv: string[], opts: RunOptions = {}): Promise<number
   writeJson(path, mergeConfig(existing, credential.value));
   process.stdout.write(`Wrote Lenz MCP server to ${path}\n`);
 
+  return finish(spec, args, path, credential.isPlaceholder);
+}
+
+/**
+ * The tail every file-writing client shares: verify the key, say what is still
+ * needed, then how to reload. Shared so the JSON and TOML paths cannot drift
+ * into telling the user different things about the same key.
+ */
+async function finish(
+  spec: ClientSpec,
+  args: ParsedArgs,
+  path: string,
+  needsExport: boolean,
+): Promise<number> {
   if (args.verify) {
     try {
       const summary = await verifyKey(args.apiKey);
@@ -417,7 +543,7 @@ export async function run(argv: string[], opts: RunOptions = {}): Promise<number
     }
   }
 
-  if (credential.isPlaceholder) {
+  if (needsExport) {
     // Without this the run reads as finished — "Wrote the config, key
     // verified" — while the client still has nothing to authenticate with.
     // The export is the remaining step, so it goes above the restart note.

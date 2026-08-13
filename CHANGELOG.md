@@ -11,10 +11,22 @@ Adds a setup binary. The SDK surface is unchanged.
 ### Added
 
 - **`npx lenz-io init` — wire Lenz into an MCP client.** Writes the Lenz MCP
-  server block into Claude Code (`./.mcp.json`), Cursor
-  (`./.cursor/mcp.json`) or Claude Desktop (the platform's global config),
-  then verifies the key with one authenticated request. `--print` emits the
-  JSON without touching anything.
+  server block into Claude Code (`./.mcp.json`), Cursor (`./.cursor/mcp.json`)
+  or Codex (`./.codex/config.toml`), then verifies the key with one
+  authenticated request. `--print` emits the config without touching anything.
+
+  Codex is TOML, so its table is APPENDED as text rather than parsed and
+  re-serialized — every TOML library drops comments and reflows formatting, and
+  handing someone back a file that is equivalent but visibly not theirs is the
+  same failure as clobbering it. A config already declaring
+  `[mcp_servers.lenz]` is refused: TOML rejects duplicate tables, so a second
+  copy would stop the whole file parsing. Codex also takes
+  `bearer_token_env_var`, so no key is written there at all.
+
+  **Claude Desktop writes nothing and prints its connector steps instead.**
+  `claude_desktop_config.json` is documented for local stdio servers only; a
+  remote streamable-HTTP server is added through Settings → Connectors → Add
+  custom connector. Writing that file put a live key somewhere nothing reads.
 
   The key comes from `-k` or `$LENZ_API_KEY`, and nothing is stored anywhere
   of ours.
