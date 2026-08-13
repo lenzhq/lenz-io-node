@@ -4,6 +4,30 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.8.0] - 2026-08-13
+
+Adds a setup binary. The SDK surface is unchanged.
+
+### Added
+
+- **`npx lenz-io init` — wire Lenz into an MCP client.** Writes the Lenz MCP
+  server block into Claude Code (`./.mcp.json`), Cursor
+  (`./.cursor/mcp.json`) or Claude Desktop (the platform's global config),
+  then verifies the key with one authenticated request. `--print` emits the
+  JSON without touching anything.
+
+  The key comes from `-k` or `$LENZ_API_KEY` and is never persisted anywhere
+  but the client's own config file.
+
+  Existing MCP servers in that file are preserved — only the `lenz` key is
+  written, and a file that exists but does not parse as JSON is refused
+  rather than overwritten, because guessing there could silently discard
+  servers configured by hand.
+
+  **This is not the `lenz` command.** The Python package's CLI calls the API
+  from a shell; this one wires Lenz into an agent. `--help` says which is
+  which, because the names are one character apart and the jobs are not.
+
 ## [2.7.0] - 2026-08-10
 
 Quota errors are now a first-class, typed condition instead of an

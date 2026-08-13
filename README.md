@@ -307,6 +307,37 @@ Environment variables:
 - `LENZ_API_KEY` — read if `apiKey` is not passed
 - `LENZ_BASE_URL` — read if `baseUrl` is not passed
 
+## Wiring Lenz into an agent — `npx lenz-io init`
+
+The package ships a small binary whose job is **configuration, not API calls**:
+it writes the Lenz MCP server block into your client's config and verifies the
+key with one authenticated request.
+
+```bash
+npx lenz-io init --claude-code -k lenz_...   # writes ./.mcp.json
+npx lenz-io init --cursor                    # writes ./.cursor/mcp.json
+npx lenz-io init --claude-desktop            # writes the global config
+npx lenz-io init --print                     # print the JSON, write nothing
+```
+
+The key comes from `-k` or `$LENZ_API_KEY`, and is never persisted anywhere
+but the client's own config file — no dotfile of ours, no cache, no telemetry.
+
+Existing MCP servers in that file are preserved: only the `lenz` key is
+written. If the file exists but isn't valid JSON the command refuses rather
+than guessing, because overwriting it could silently discard servers you
+configured by hand.
+
+| Client         | Config written                                                                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code    | `./.mcp.json` (project)                                                                                                                            |
+| Cursor         | `./.cursor/mcp.json` (project)                                                                                                                     |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\...` (Windows), `$XDG_CONFIG_HOME/Claude/...` (Linux) |
+
+**Not the same tool as `lenz`.** The Python package's `lenz` command CALLS the
+API from your shell (`pipx install "lenz-io[cli]"`). This one WIRES Lenz into
+your agent. The names are one character apart; the jobs are not.
+
 ## Compatibility
 
 - Node 18, 20, 22
