@@ -464,7 +464,7 @@ export interface SelectInput {
 
 export interface LibraryListInput {
   page?: number;
-  sort?: "recent" | "popular" | "most_true" | "most_untrue" | "relevance" | "random";
+  sort?: "recent" | "most_true" | "most_untrue" | "relevance" | "random";
   search?: string;
   domain?: string;
   entity?: string;
