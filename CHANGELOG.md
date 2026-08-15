@@ -4,6 +4,19 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.7.1] - 2026-08-15
+
+### Fixed
+
+- **`library.list` no longer offers the `popular` sort.** The server retired
+  the view counter and its popularity sort (Lenz #273) and silently coerces
+  `sort=popular` to `recent`, so the option was dead in the type. Removing it
+  from the `sort` union is a compile-time correction only — a caller that
+  still sends `"popular"` (e.g. from JS) keeps getting `recent` ordering from
+  the server, same as before.
+- Refreshed the `openapi.json` snapshot (doc-only server drift: /extract
+  enumeration semantics, /verify body-keyed idempotency, the errors table).
+
 ## [2.7.0] - 2026-08-10
 
 Quota errors are now a first-class, typed condition instead of an
