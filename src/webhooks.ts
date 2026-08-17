@@ -45,7 +45,7 @@ export function verifySignature(rawBody: RawBody, signature: string, secret: str
     throw new LenzWebhookSignatureError({
       message: "Missing webhook signature",
       cause: `No ${SIGNATURE_HEADER} header on the request.`,
-      fix: "Inspect the webhook delivery in /api-integration to confirm the secret is set.",
+      fix: "Inspect the webhook delivery in /api-credentials to confirm the secret is set.",
       docUrl: "https://lenz.io/docs/webhooks",
     });
   }
@@ -60,7 +60,7 @@ export function verifySignature(rawBody: RawBody, signature: string, secret: str
     throw new LenzWebhookSignatureError({
       message: "Webhook signature mismatch",
       cause: "HMAC of the raw body using your secret does not match X-Lenz-Signature.",
-      fix: "Verify the secret in /api-integration matches the one you configured here.",
+      fix: "Verify the secret in /api-credentials matches the one you configured here.",
       docUrl: "https://lenz.io/docs/webhooks",
     });
   }
@@ -158,7 +158,7 @@ export class LenzWebhooks {
 
   constructor(opts: LenzWebhooksOptions) {
     if (!opts.secret) {
-      throw new Error("LenzWebhooks requires a non-empty secret. Get it from /api-integration.");
+      throw new Error("LenzWebhooks requires a non-empty secret. Get it from /api-credentials.");
     }
     this.secret = opts.secret;
     this.replayWindow = opts.replayWindowSeconds ?? DEFAULT_REPLAY_WINDOW_SECONDS;

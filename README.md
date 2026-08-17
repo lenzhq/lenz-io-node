@@ -80,7 +80,7 @@ for (const source of (v.sources ?? []).slice(0, 3)) {
 The demo claim is pre-cached so this returns in ~1.5s. Your own claims
 hit the full pipeline (~60-90s) — use webhooks for production async flows.
 
-> **Get your webhook secret here →** [lenz.io/api-integration](https://lenz.io/api-integration)
+> **Get your webhook secret here →** [lenz.io/api-credentials](https://lenz.io/api-credentials)
 
 ## What you get on the client
 
@@ -203,7 +203,7 @@ try {
     console.error(String(exc));
     // Unauthorized
     //   Cause:  Invalid api key
-    //   Fix:    Generate a new key at https://lenz.io/api-integration.
+    //   Fix:    Generate a new key at https://lenz.io/api-credentials.
     //   Docs:   https://lenz.io/docs/auth
     //   Request ID: req_abc123
   } else if (exc instanceof LenzRateLimitError) {

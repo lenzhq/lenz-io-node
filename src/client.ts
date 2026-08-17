@@ -648,7 +648,7 @@ export class Lenz {
       throw new LenzAuthError({
         message: "API key required",
         cause: "This method requires authentication; no API key was provided.",
-        fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-integration. Library endpoints work without a key.",
+        fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-credentials. Library endpoints work without a key.",
         docUrl: "https://lenz.io/docs/auth",
       });
     }
