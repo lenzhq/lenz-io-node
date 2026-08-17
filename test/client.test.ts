@@ -90,7 +90,7 @@ describe("Construction", () => {
       captured = e;
     }
     expect(captured).toBeInstanceOf(LenzAuthError);
-    expect(String(captured)).toContain("api-integration");
+    expect(String(captured)).toContain("api-credentials");
   });
 
   it("base url override routes through alternate base", async () => {

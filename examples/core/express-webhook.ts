@@ -10,7 +10,7 @@
  *   npx tsx examples/core/express-webhook.ts
  *
  * Then point your Lenz API key's webhook URL at https://<your-host>/lenz-webhook
- * on the /api-integration page, or pass `webhookUrl: ...` on individual
+ * on the /api-credentials page, or pass `webhookUrl: ...` on individual
  * verify() calls.
  */
 
