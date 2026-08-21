@@ -20,6 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
+import type { FailureClass } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
@@ -98,6 +99,10 @@ export interface VerificationCompleted extends WebhookEventBase {
 export interface VerificationFailed extends WebhookEventBase {
   event: "verification.failed";
   error: string;
+  /** WHY it failed — the closed `FailureClass` set; "" when an older server omits it. */
+  failureClass: FailureClass;
+  /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
+  retryable: boolean | null;
 }
 
 export interface VerificationNeedsInput extends WebhookEventBase {
@@ -135,6 +140,8 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       ...base,
       event: "verification.failed",
       error: String(payload["error"] ?? ""),
+      failureClass: String(payload["failure_class"] ?? ""),
+      retryable: typeof payload["retryable"] === "boolean" ? payload["retryable"] : null,
     };
   }
   if (event === "verification.needs_input") {

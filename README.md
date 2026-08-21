@@ -147,7 +147,7 @@ Every claim-shaped response shares these fields at top level:
 
 ```ts
 import { LenzWebhooks } from "lenz-io";
-import type { VerificationCompleted, VerificationNeedsInput } from "lenz-io";
+import type { VerificationCompleted, VerificationFailed, VerificationNeedsInput } from "lenz-io";
 
 const webhooks = new LenzWebhooks({ secret: "whsec_..." });
 
@@ -164,6 +164,17 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     case "verification.needs_input": {
       const ni = event as VerificationNeedsInput;
       // …surface candidate claims, call client.select(taskId, ...) to resolve
+      break;
+    }
+    case "verification.failed": {
+      const failed = event as VerificationFailed;
+      // failed.error is WHERE the pipeline stopped; failed.failureClass is
+      // WHY (closed set) and failed.retryable tells you what to do about it.
+      if (failed.retryable) {
+        resubmitLater(failed.taskId); // transient provider outage
+      } else {
+        logPermanentFailure(failed.taskId, failed.error);
+      }
       break;
     }
   }
@@ -188,6 +199,7 @@ import {
   LenzAuthError,
   LenzQuotaExceededError,
   LenzRateLimitError,
+  LenzUpstreamUnavailableError,
   LenzValidationError,
 } from "lenz-io";
 
@@ -215,11 +227,24 @@ try {
     for (const fieldErr of exc.errors) {
       console.error(fieldErr["loc"], fieldErr["msg"]);
     }
+  } else if (exc instanceof LenzUpstreamUnavailableError) {
+    // HTTP 503, code "upstream_unavailable" (model/search providers
+    // exhausted) or "capacity" (submissions shed at the door). Nothing was
+    // charged. Waits up to 60s are already slept through by the automatic
+    // retry ladder; reaching here means the server stated a longer one.
+    scheduleRetryIn(exc.retryAfter ?? 90); // typically 90-120s
   } else {
     throw exc;
   }
 }
 ```
+
+A failed _verification_ (as opposed to a failed HTTP call) throws
+`LenzPipelineError` from `verifyAndWait` / `wait`. Since 2.8.0 it carries
+`failureClass` (closed set: `upstream_unavailable` | `insufficient_evidence`
+| `invalid_input` | `cancelled` | `internal`) and `retryable` — `true` means
+a transient provider-side exhaustion where resubmitting the same claim is the
+right move; older servers leave it `null`.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were

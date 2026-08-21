@@ -4,6 +4,61 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.8.0] - 2026-08-21
+
+The server now says WHY a verification failed and states honest waits when it
+is overloaded; the SDK types both. Lockstep release with Python 2.8.0.
+
+### Added
+
+- **`failure_class` + `retryable` on failed verifications.** `TaskStatus`
+  (plus the new `FailureClass` union), the `VerificationFailed` webhook event
+  (`failureClass` / `retryable`), and `LenzPipelineError` all carry the WHY
+  (closed set: `upstream_unavailable` | `insufficient_evidence` |
+  `invalid_input` | `cancelled` | `internal`) and the derived retry signal
+  (true iff `upstream_unavailable` — resubmitting the same claim is the right
+  move). Older servers omit both; the fields default rather than break.
+- **`LenzUpstreamUnavailableError`** — a `LenzAPIError` subclass for 503s with
+  `code` `upstream_unavailable` (model/search providers exhausted; the request
+  was not charged) or `capacity` (submission shed at the door; nothing was
+  accepted). Carries `retryAfter`.
+
+### Changed
+
+- **A 503 that Lenz itself typed — body `code` `upstream_unavailable` or
+  `capacity` — and that asks for more than 60s now throws immediately**, as
+  `LenzUpstreamUnavailableError` carrying the true `retryAfter`, instead of
+  silently burning the 1s/2s/4s backoff ladder against a server that asked
+  for 90-120s. That is the same rule 429 has always had. The decision is
+  gated on the body code, not on the status number:
+  - typed 503, stated wait ≤ 60s → still slept through and retried (unchanged);
+  - **untyped 503** — an ordinary proxy / load-balancer / maintenance
+    response with no Lenz `code` — → **backoff ladder, exactly as before**,
+    however long a `Retry-After` it states;
+  - every other 5xx → backoff ladder, unchanged.
+
+  If you relied on long-stated-wait typed 503s being retried blindly, catch
+  `LenzUpstreamUnavailableError` (existing `instanceof LenzAPIError` checks
+  keep matching it).
+
+- The stated wait is now also read from the 503 body's `retry_after` key
+  (previously only the `Retry-After` header and the 429 body's
+  `reset_in_seconds`), so a proxy that strips headers can't demote an honest
+  wait to blind backoff.
+
+### Fixed
+
+- `LenzPipelineError` from the empty-result completed state now sets `taskId`
+  (parity with Python, which always did).
+- Contract fixtures refreshed to the live failed-status body; added the
+  `verification.failed` webhook payload and both 503 envelopes (shared
+  byte-identically with the Python SDK, as ever). The runtime `KEYSETS` in
+  the contract test caught up with `src/types.ts` (`Verification.visibility`,
+  `AssessResponse.error_code`/`candidate_claims`, `AssessClaim.language`,
+  `VerificationListItem.language`).
+- `VerificationFailed.failureClass` is typed as the exported `FailureClass`
+  union rather than a bare `string`, matching `TaskStatus.failure_class`.
+
 ## [2.7.1] - 2026-08-15
 
 ### Fixed
