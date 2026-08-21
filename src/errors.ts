@@ -163,6 +163,24 @@ export class LenzRateLimitError extends LenzError {
 
 export class LenzAPIError extends LenzError {}
 
+/**
+ * 503 with `code` `upstream_unavailable` or `capacity`.
+ *
+ * The server is stating a *transient* condition: its model/search providers
+ * are exhausted (`upstream_unavailable` — nothing was charged; the same
+ * request succeeds once they recover) or the pipeline is at capacity
+ * (`capacity` — nothing was accepted or charged). Retry the SAME request
+ * after `retryAfter` seconds.
+ *
+ * Subclasses {@link LenzAPIError}, so existing `instanceof LenzAPIError`
+ * handlers keep catching it. Waits up to {@link MAX_RETRY_AFTER_SLEEP} are
+ * already slept through by the automatic retry ladder — this being thrown
+ * means the stated wait was longer, and `retryAfter` carries it.
+ */
+export class LenzUpstreamUnavailableError extends LenzAPIError {
+  retryAfter: number | null = null;
+}
+
 export class LenzTimeoutError extends LenzError {
   taskId = "";
 }
@@ -176,6 +194,14 @@ export class LenzNeedsInputError extends LenzError {
 export class LenzPipelineError extends LenzError {
   taskId = "";
   failureReason = "";
+  /**
+   * WHY (closed set: `upstream_unavailable` | `insufficient_evidence` |
+   * `invalid_input` | `cancelled` | `internal`); "" when an older server
+   * omits it.
+   */
+  failureClass = "";
+  /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. `null` = server didn't say. */
+  retryable: boolean | null = null;
 }
 
 export class LenzWebhookSignatureError extends LenzError {}
@@ -275,9 +301,19 @@ export function mapResponseToError(
   const parsed = parseBody(body);
   const requestId = getHeader(headers, "X-Request-ID");
 
+  const codeForClass = typeof parsed["code"] === "string" ? (parsed["code"] as string) : "";
   let entry: StatusEntry;
   if (statusCode in STATUS_MAP) {
     entry = STATUS_MAP[statusCode]!;
+  } else if (
+    statusCode === 503 &&
+    (codeForClass === "upstream_unavailable" || codeForClass === "capacity")
+  ) {
+    entry = {
+      cls: LenzUpstreamUnavailableError,
+      message: "Service temporarily unavailable",
+      docUrl: `${DOCS_BASE}/errors#unavailable`,
+    };
   } else if (statusCode >= 500 && statusCode < 600) {
     entry = { cls: LenzAPIError, message: "Server error", docUrl: `${DOCS_BASE}/errors` };
   } else {
@@ -308,7 +344,12 @@ export function mapResponseToError(
   });
 
   // Per-class enrichment
-  if (err instanceof LenzQuotaExceededError) {
+  if (err instanceof LenzUpstreamUnavailableError) {
+    // Body `retry_after` first (both 503 shapes carry it), header as the
+    // fallback for any proxy that strips the body.
+    err.retryAfter =
+      optNumber(parsed["retry_after"]) ?? optNumber(getHeader(headers, "Retry-After"));
+  } else if (err instanceof LenzQuotaExceededError) {
     const upgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
     err.remaining = optNumber(parsed["remaining"]);

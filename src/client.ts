@@ -180,10 +180,10 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
   if (raw === null || String(raw).trim() === "") {
     try {
       const body: unknown = await response.clone().json();
-      raw =
-        body && typeof body === "object"
-          ? (body as Record<string, unknown>)["reset_in_seconds"]
-          : null;
+      const bag = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+      // 429 shapes carry `reset_in_seconds`; the 503 shapes carry the wait
+      // under `retry_after`.
+      raw = bag ? (bag["reset_in_seconds"] ?? bag["retry_after"]) : null;
     } catch {
       // A non-JSON body is not exceptional — fall back to backoff.
       return null;
@@ -583,12 +583,14 @@ export class Lenz {
   private _verificationFromTerminal(status: TaskStatus, taskId: string): Verification {
     if (status.status === "completed") {
       if (!status.result) {
-        throw new LenzPipelineError({
+        const emptyErr = new LenzPipelineError({
           message: "Pipeline completed but the result is empty.",
           cause: "Server reported status=completed without a result block.",
           fix: "File an issue at https://github.com/lenzhq/lenz-io-node/issues with the Request ID.",
           docUrl: "https://lenz.io/docs/errors",
         });
+        emptyErr.taskId = taskId; // parity: the Python SDK sets task_id here too
+        throw emptyErr;
       }
       return status.result;
     }
@@ -609,11 +611,15 @@ export class Lenz {
     const err = new LenzPipelineError({
       message: `Pipeline failed: ${detail}`,
       cause: detail,
-      fix: "Retry with a different claim, or check status.error for the diagnostic.",
+      fix: status.retryable
+        ? "Transient provider outage — retry the same request after a short wait."
+        : "Retry with a different claim, or check status.error for the diagnostic.",
       docUrl: "https://lenz.io/docs/errors",
     });
     err.taskId = taskId;
     err.failureReason = status.failure_reason ?? "";
+    err.failureClass = status.failure_class ?? "";
+    err.retryable = typeof status.retryable === "boolean" ? status.retryable : null;
     throw err;
   }
 
@@ -731,7 +737,14 @@ export class Lenz {
           await sleep(stated * 1000);
           continue;
         }
-        if (stated === null || response.status >= 500) {
+        // A stated wait past the cap: 429 throws with the true retryAfter
+        // (the /extract daily cap sends most of a day), and since 2.8.0 a
+        // 503 does too — the server's own shed/exhaustion responses state
+        // 90-120s, and burning the 1/2/4s ladder against them is the
+        // opposite of what the header asks (mapResponseToError types it
+        // LenzUpstreamUnavailableError). Other 5xx, or no stated wait at
+        // all, keep the ladder: the server is down, not pacing us.
+        if (stated === null || (response.status >= 500 && response.status !== 503)) {
           await sleep(retrySleepMs(attempt));
           continue;
         }

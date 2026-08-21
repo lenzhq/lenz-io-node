@@ -83,11 +83,25 @@ describe("LenzWebhooks", () => {
   });
 
   it("parses verification.failed", () => {
-    const body = payload("verification.failed", { error: "research_empty" });
+    const body = payload("verification.failed", {
+      error: "research_empty",
+      failure_class: "upstream_unavailable",
+      retryable: true,
+    });
     const wh = new LenzWebhooks({ secret: SECRET });
     const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationFailed;
     expect(event.event).toBe("verification.failed");
     expect(event.error).toBe("research_empty");
+    expect(event.failureClass).toBe("upstream_unavailable");
+    expect(event.retryable).toBe(true);
+  });
+
+  it("parses verification.failed from an older server without the class fields", () => {
+    const body = payload("verification.failed", { error: "research_empty" });
+    const wh = new LenzWebhooks({ secret: SECRET });
+    const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationFailed;
+    expect(event.failureClass).toBe("");
+    expect(event.retryable).toBeNull();
   });
 
   it("parses verification.needs_input", () => {

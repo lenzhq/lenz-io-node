@@ -20,7 +20,16 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { LenzQuotaExceededError, LenzRateLimitError, mapResponseToError } from "../src/index.js";
+import {
+  LenzAPIError,
+  LenzQuotaExceededError,
+  LenzRateLimitError,
+  LenzUpstreamUnavailableError,
+  mapResponseToError,
+} from "../src/index.js";
+import { LenzWebhooks } from "../src/webhooks.js";
+import type { VerificationFailed } from "../src/webhooks.js";
+import { createHmac } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures", "contract");
@@ -44,8 +53,8 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "original_input",
   ]),
   ExtractedEntity: new Set(["name", "type"]),
-  AssessResponse: new Set(["claims", "error"]),
-  AssessClaim: new Set(["claim", "verdict", "confidence", "verification_url"]),
+  AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims"]),
+  AssessClaim: new Set(["claim", "verdict", "confidence", "verification_url", "language"]),
   TaskStatus: new Set([
     "status",
     "reason",
@@ -57,6 +66,8 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "error",
     "failure_reason",
     "failure_detail",
+    "failure_class",
+    "retryable",
   ]),
   CandidateClaim: new Set(["text", "domain"]),
   Verification: new Set([
@@ -76,6 +87,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "modified_at",
     "language",
+    "visibility",
   ]),
   VerificationListItem: new Set([
     "verification_id",
@@ -276,6 +288,71 @@ describe("contract", () => {
       "doc_url",
     ]);
     const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
+    expect(unhandled).toEqual([]);
+  });
+
+  // The two 503 shapes (provider exhaustion on the sync endpoints; the
+  // admission-control shed on /verify) map to LenzUpstreamUnavailableError —
+  // a LenzAPIError subclass so existing handlers keep catching it.
+  for (const [fixtureName, expectedCode, expectedRetryAfter] of [
+    ["error_upstream_unavailable_503.json", "upstream_unavailable", 90],
+    ["error_capacity_503.json", "capacity", 105],
+  ] as Array<[string, string, number]>) {
+    it(`503 envelope ${fixtureName} maps every field onto LenzUpstreamUnavailableError`, () => {
+      const fixture = loadFixture(fixtureName);
+      const err = mapResponseToError(
+        503,
+        JSON.stringify(fixture),
+        {},
+      ) as LenzUpstreamUnavailableError;
+
+      expect(err).toBeInstanceOf(LenzUpstreamUnavailableError);
+      expect(err).toBeInstanceOf(LenzAPIError);
+      expect(err.message).toBe(fixture["detail"]);
+      expect(err.code).toBe(expectedCode);
+      expect(err.retryAfter).toBe(expectedRetryAfter);
+      expect(err.body).toEqual(fixture);
+
+      const handled = new Set(["detail", "code", "retry_after", "doc_url"]);
+      const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
+      expect(unhandled).toEqual([]);
+    });
+  }
+
+  it("webhook failed payload maps every field onto VerificationFailed", () => {
+    const payload = loadFixture("webhook_payload_failed.json");
+    // Fresh delivered_at so the fixture (frozen in time) clears the replay
+    // window; the key SET under test is unchanged.
+    payload["delivered_at"] = new Date().toISOString();
+    const secret = "whsec_test";
+    const body = JSON.stringify(payload);
+    const signature = "sha256=" + createHmac("sha256", secret).update(body, "utf8").digest("hex");
+    const webhooks = new LenzWebhooks({ secret });
+    const event = webhooks.parse(body, { "X-Lenz-Signature": signature }) as VerificationFailed;
+
+    expect(event.event).toBe("verification.failed");
+    expect(event.error).toBe(payload["error"]);
+    expect(event.failureClass).toBe(payload["failure_class"]);
+    expect(event.retryable).toBe(payload["retryable"]);
+    expect(event.status).toBe("failed");
+
+    // Every payload key is consumed by a typed camelCase attribute (or is one
+    // of the always-present-but-null slots that belong to the other events).
+    const handled = new Set([
+      "event",
+      "task_id",
+      "attempt",
+      "delivered_at",
+      "verification_id",
+      "batch_id",
+      "status",
+      "error",
+      "failure_class",
+      "retryable",
+      "result",
+      "needs_input",
+    ]);
+    const unhandled = Object.keys(payload).filter((k) => !handled.has(k));
     expect(unhandled).toEqual([]);
   });
 });

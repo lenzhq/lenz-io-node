@@ -98,6 +98,10 @@ export interface VerificationCompleted extends WebhookEventBase {
 export interface VerificationFailed extends WebhookEventBase {
   event: "verification.failed";
   error: string;
+  /** WHY (closed set — see `FailureClass` in types); "" when an older server omits it. */
+  failureClass: string;
+  /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
+  retryable: boolean | null;
 }
 
 export interface VerificationNeedsInput extends WebhookEventBase {
@@ -135,6 +139,8 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       ...base,
       event: "verification.failed",
       error: String(payload["error"] ?? ""),
+      failureClass: String(payload["failure_class"] ?? ""),
+      retryable: typeof payload["retryable"] === "boolean" ? payload["retryable"] : null,
     };
   }
   if (event === "verification.needs_input") {

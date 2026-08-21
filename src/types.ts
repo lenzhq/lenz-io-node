@@ -260,7 +260,29 @@ export interface TaskStatus {
   error?: string;
   failure_reason?: string;
   failure_detail?: string;
+  /**
+   * WHY it failed — closed set (`upstream_unavailable` |
+   * `insufficient_evidence` | `invalid_input` | `cancelled` | `internal`) —
+   * and the derived retry signal (true iff `upstream_unavailable`). Rows
+   * predating 2026-08 omit both.
+   */
+  failure_class?: FailureClass;
+  retryable?: boolean;
 }
+
+/**
+ * Closed set of failure causes on a `failed` verification. The
+ * `string & NonNullable<unknown>` arm preserves autocomplete for the known
+ * values while tolerating any future class the server adds (same trick as
+ * `WebhookEventKind`).
+ */
+export type FailureClass =
+  | "upstream_unavailable"
+  | "insufficient_evidence"
+  | "invalid_input"
+  | "cancelled"
+  | "internal"
+  | (string & NonNullable<unknown>);
 
 /**
  * Per-item outcome from `verifyBatchAndWait`.

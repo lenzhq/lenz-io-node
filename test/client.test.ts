@@ -8,12 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   API_VERSION,
   Lenz,
+  LenzAPIError,
   LenzAuthError,
   LenzNeedsInputError,
   LenzPipelineError,
   LenzQuotaExceededError,
   LenzRateLimitError,
   LenzTimeoutError,
+  LenzUpstreamUnavailableError,
   MAX_RETRY_AFTER_SLEEP,
 } from "../src/index.js";
 
@@ -977,16 +979,63 @@ describe("Auto-retry", () => {
   }, 10_000);
 
   it("5xx with a long Retry-After keeps retrying rather than aborting", async () => {
-    // Unlike 429, a 5xx is not the caller's fault and our own backoff may
-    // still satisfy it.
+    // Unlike 429 (and, since 2.8.0, 503), a 5xx is not the server pacing us
+    // and our own backoff may still satisfy it.
     const { fetch, calls } = makeFetch([
-      { status: 503, body: { detail: "down" }, headers: { "Retry-After": "3600" } },
+      { status: 500, body: { detail: "down" }, headers: { "Retry-After": "3600" } },
       { body: USAGE_BODY },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
     expect(u.plan).toBe("free");
     expect(calls).toHaveLength(2);
+  }, 10_000);
+
+  it("503 with a long Retry-After throws immediately with the true wait", async () => {
+    // 2.8.0: the server's own shed/exhaustion 503s state 90-120s waits.
+    // Burning the 1/2/4s ladder against them is the opposite of what the
+    // header asks — throw at once with the wait, exactly like 429.
+    const { fetch, calls } = makeFetch([
+      {
+        status: 503,
+        body: { detail: "at capacity", code: "capacity", retry_after: 90 },
+        headers: { "Retry-After": "90" },
+      },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+
+    const err = await client.usage().then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LenzUpstreamUnavailableError);
+    expect(err).toBeInstanceOf(LenzAPIError); // existing handlers still catch it
+    expect((err as LenzUpstreamUnavailableError).retryAfter).toBe(90);
+    expect((err as LenzUpstreamUnavailableError).code).toBe("capacity");
+    expect(calls).toHaveLength(1);
+  }, 10_000);
+
+  it("503 reads the wait from the body retry_after key — parity with Python", async () => {
+    // The 503 bodies carry `retry_after` (429 carries `reset_in_seconds`);
+    // a proxy that strips the header must not demote the stated wait to the
+    // blind ladder.
+    const { fetch, calls } = makeFetch([
+      {
+        status: 503,
+        body: { detail: "providers down", code: "upstream_unavailable", retry_after: 90 },
+      },
+      { body: USAGE_BODY },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+
+    const err = await client.usage().then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LenzUpstreamUnavailableError);
+    expect((err as LenzUpstreamUnavailableError).retryAfter).toBe(90);
+    expect(calls).toHaveLength(1);
   }, 10_000);
 
   it("402 surfaces as LenzQuotaExceededError and is never retried", async () => {
