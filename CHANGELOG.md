@@ -25,14 +25,22 @@ is overloaded; the SDK types both. Lockstep release with Python 2.8.0.
 
 ### Changed
 
-- **A 503 whose stated `Retry-After` exceeds 60s now throws immediately**
-  (as `LenzUpstreamUnavailableError`, with the true `retryAfter`) instead of
+- **A 503 that Lenz itself typed — body `code` `upstream_unavailable` or
+  `capacity` — and that asks for more than 60s now throws immediately**, as
+  `LenzUpstreamUnavailableError` carrying the true `retryAfter`, instead of
   silently burning the 1s/2s/4s backoff ladder against a server that asked
-  for 90-120s — the same rule 429 has always had. 503s with waits ≤ 60s are
-  still slept through and retried; other 5xx keep the ladder unchanged. If
-  you relied on long-stated-wait 503s being retried blindly, catch
+  for 90-120s. That is the same rule 429 has always had. The decision is
+  gated on the body code, not on the status number:
+  - typed 503, stated wait ≤ 60s → still slept through and retried (unchanged);
+  - **untyped 503** — an ordinary proxy / load-balancer / maintenance
+    response with no Lenz `code` — → **backoff ladder, exactly as before**,
+    however long a `Retry-After` it states;
+  - every other 5xx → backoff ladder, unchanged.
+
+  If you relied on long-stated-wait typed 503s being retried blindly, catch
   `LenzUpstreamUnavailableError` (existing `instanceof LenzAPIError` checks
   keep matching it).
+
 - The stated wait is now also read from the 503 body's `retry_after` key
   (previously only the `Retry-After` header and the 429 body's
   `reset_in_seconds`), so a proxy that strips headers can't demote an honest
@@ -46,7 +54,10 @@ is overloaded; the SDK types both. Lockstep release with Python 2.8.0.
   `verification.failed` webhook payload and both 503 envelopes (shared
   byte-identically with the Python SDK, as ever). The runtime `KEYSETS` in
   the contract test caught up with `src/types.ts` (`Verification.visibility`,
-  `AssessResponse.error_code`/`candidate_claims`, `AssessClaim.language`).
+  `AssessResponse.error_code`/`candidate_claims`, `AssessClaim.language`,
+  `VerificationListItem.language`).
+- `VerificationFailed.failureClass` is typed as the exported `FailureClass`
+  union rather than a bare `string`, matching `TaskStatus.failure_class`.
 
 ## [2.7.1] - 2026-08-15
 

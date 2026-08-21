@@ -61,6 +61,7 @@ import {
   LenzPipelineError,
   LenzTimeoutError,
   MAX_RETRY_AFTER_SLEEP,
+  UPSTREAM_503_CODES,
   mapResponseToError,
 } from "./errors.js";
 import type {
@@ -163,9 +164,10 @@ function retrySleepMs(attempt: number): number {
 /**
  * Seconds the server says to wait, or `null` if it didn't say.
  *
- * Header first, then the body's `reset_in_seconds`. Returns `null` — not `0` —
- * when neither states a wait, so the caller can tell "server stated no wait"
- * from "server said wait 0 seconds" and fall back to its own backoff.
+ * Header first, then the body — `reset_in_seconds` (the 429 shapes), then
+ * `retry_after` (the 503 shapes). Returns `null` — not `0` — when none of
+ * them states a wait, so the caller can tell "server stated no wait" from
+ * "server said wait 0 seconds" and fall back to its own backoff.
  *
  * Reads the body off a `clone()`: the original response is consumed once by
  * `response.text()` on the throw path, and a `Response` body can only be read
@@ -182,8 +184,14 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
       const body: unknown = await response.clone().json();
       const bag = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
       // 429 shapes carry `reset_in_seconds`; the 503 shapes carry the wait
-      // under `retry_after`.
-      raw = bag ? (bag["reset_in_seconds"] ?? bag["retry_after"]) : null;
+      // under `retry_after`. Fall through on an EMPTY value too, not just on
+      // null/undefined — `??` alone would let `reset_in_seconds: ""` mask a
+      // real `retry_after`, which is not what the Python SDK does.
+      let candidate: unknown = bag ? bag["reset_in_seconds"] : null;
+      if (candidate === null || candidate === undefined || String(candidate).trim() === "") {
+        candidate = bag ? bag["retry_after"] : null;
+      }
+      raw = candidate ?? null;
     } catch {
       // A non-JSON body is not exceptional — fall back to backoff.
       return null;
@@ -194,6 +202,41 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
   // Floored at zero: `Retry-After: -5` is malformed, and a negative delay
   // triggers a TimeoutNegativeWarning on stderr.
   return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : null;
+}
+
+/**
+ * The server's machine-readable `code` from the response body, or `""`.
+ *
+ * Reads it exactly the way `mapResponseToError` does — string-typed only, so
+ * a malformed `code: 42` reads as `""` rather than `"42"` and nothing
+ * branches on a value the server never meant as a code.
+ *
+ * Reads off a `clone()` for the same reason `statedRetryAfterSeconds` does:
+ * the original body is consumed once by `response.text()` on the throw path,
+ * and a `Response` body can only be read once.
+ */
+async function bodyErrorCode(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) return "";
+    const code = (body as Record<string, unknown>)["code"];
+    return typeof code === "string" ? code : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Whether a stated wait past the cap should abort instead of back off.
+ *
+ * True for 429 (always) and for a 503 the server typed as its own
+ * shed/exhaustion response. An untyped 503 — the ordinary proxy / maintenance
+ * shape — is deliberately false: it keeps the ladder.
+ */
+async function abortsOnLongStatedWait(response: Response): Promise<boolean> {
+  if (response.status === 429) return true;
+  if (response.status !== 503) return false;
+  return UPSTREAM_503_CODES.includes(await bodyErrorCode(response));
 }
 
 function pollSleepMs(idx: number, remainingMs: number): number {
@@ -716,35 +759,35 @@ export class Lenz {
         return (await response.json()) as T;
       }
 
-      // Error path. Retry on 5xx + 429; otherwise raise.
+      // Error path. Retry on 5xx + 429; otherwise throw.
       //
-      // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that
-      // the two statuses part ways, because the right answer differs:
+      // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that,
+      // whether we abort or keep retrying is decided by the typed body `code`
+      // — NOT by the status number:
       //
       //  * 429 — throw. The /extract daily cap sends seconds-until-UTC-
       //    midnight, so sleeping it blocks the call for most of a day, and
       //    this sleep sits OUTSIDE the AbortController so `timeoutMs` would
       //    not bound it. The caller gets the true retryAfter and can schedule.
-      //  * 5xx — keep retrying on our own backoff. The server is down, not
-      //    rate-limiting us; a maintenance-window Retry-After of an hour
-      //    shouldn't become an hour-long sleep, but it also shouldn't abort a
-      //    request our backoff might still satisfy. (2.6.0 slept the raw
-      //    value here, so ignoring it outright would be a silent change to a
-      //    status class this release never set out to touch.)
+      //  * 503 carrying a Lenz code in UPSTREAM_503_CODES
+      //    (`upstream_unavailable` / `capacity`) — throw, same reasoning.
+      //    These are the server's own shed/exhaustion responses; they state
+      //    an honest 90-120s and burning the 1/2/4s ladder against them is
+      //    the opposite of what the header asks (mapResponseToError types
+      //    them LenzUpstreamUnavailableError, carrying the true retryAfter).
+      //  * every other 5xx, including an UNTYPED 503 — keep retrying on our
+      //    own backoff. A Cloud Run / CDN / load-balancer
+      //    maintenance-or-overload 503 states a long wait and carries no Lenz
+      //    code; the server is down, not pacing us, so an hour-long
+      //    Retry-After must become backoff — not an hour-long sleep, and not
+      //    an abort of a request our ladder might still satisfy.
       if (attempt < this.maxRetries && (response.status >= 500 || response.status === 429)) {
         const stated = await statedRetryAfterSeconds(response);
         if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
           await sleep(stated * 1000);
           continue;
         }
-        // A stated wait past the cap: 429 throws with the true retryAfter
-        // (the /extract daily cap sends most of a day), and since 2.8.0 a
-        // 503 does too — the server's own shed/exhaustion responses state
-        // 90-120s, and burning the 1/2/4s ladder against them is the
-        // opposite of what the header asks (mapResponseToError types it
-        // LenzUpstreamUnavailableError). Other 5xx, or no stated wait at
-        // all, keep the ladder: the server is down, not pacing us.
-        if (stated === null || (response.status >= 500 && response.status !== 503)) {
+        if (stated === null || !(await abortsOnLongStatedWait(response))) {
           await sleep(retrySleepMs(attempt));
           continue;
         }

@@ -259,6 +259,18 @@ const FIX_HINTS: Record<number, string> = {
 export const MAX_RETRY_AFTER_SLEEP = 60;
 
 /**
+ * The body `code` values the server sends on a 503 it produced deliberately:
+ * providers exhausted mid-pipeline, or a submission shed at the door. Both
+ * map to {@link LenzUpstreamUnavailableError} and both state an honest wait.
+ *
+ * The retry ladder in `client.ts` keys its immediate-abort decision on THIS,
+ * not on the status number: an ordinary Cloud Run / CDN / load-balancer 503
+ * carries no Lenz code, states a maintenance-window wait, and must keep being
+ * retried exactly as it was before 2.8.0.
+ */
+export const UPSTREAM_503_CODES: readonly string[] = ["upstream_unavailable", "capacity"];
+
+/**
  * Coerce to a number, or `null` when absent/unparseable.
  *
  * `Number("")` is `0` and `Number(null)` is `0` in JS, so a plain `Number()`
@@ -305,10 +317,7 @@ export function mapResponseToError(
   let entry: StatusEntry;
   if (statusCode in STATUS_MAP) {
     entry = STATUS_MAP[statusCode]!;
-  } else if (
-    statusCode === 503 &&
-    (codeForClass === "upstream_unavailable" || codeForClass === "capacity")
-  ) {
+  } else if (statusCode === 503 && UPSTREAM_503_CODES.includes(codeForClass)) {
     entry = {
       cls: LenzUpstreamUnavailableError,
       message: "Service temporarily unavailable",
