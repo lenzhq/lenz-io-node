@@ -47,13 +47,44 @@ function makeFetch(responses: Iterable<MockResponse>) {
   return { fetch: impl as unknown as typeof fetch, calls };
 }
 
-// New-shape `GET /me/usage` body (per-capability). Reused across usage tests.
+// `GET /me/usage` body: one credit pool, projected into each capability's
+// unit. Reused across usage tests. A free account: 100 credits, no bonus.
 const USAGE_BODY = {
   plan: "free",
   quota_resets_at: "2026-07-01T00:00:00+00:00",
-  verify: { quota_used: 0, quota_total: 10, quota_remaining: 10, credits: 0, remaining: 10 },
-  ask: { quota_used: 0, quota_total: 5, quota_remaining: 5, credits: 0, remaining: 5 },
-  assess: { quota_used: 0, quota_total: 50, quota_remaining: 50, credits: 0, remaining: 50 },
+  credits: {
+    total: 100,
+    used: 0,
+    remaining: 100,
+    bonus: 0,
+    resets_at: "2026-07-01T00:00:00+00:00",
+  },
+  costs: { verify: 10, assess: 1, ask: 1, extract: 0 },
+  cost_options: { verify: { depth: { standard: 10, low: 5 } } },
+  verify: {
+    quota_used: 0,
+    quota_total: 10,
+    quota_remaining: 10,
+    bonus: 0,
+    credits: 0,
+    remaining: 10,
+  },
+  ask: {
+    quota_used: 0,
+    quota_total: 100,
+    quota_remaining: 100,
+    bonus: 0,
+    credits: 0,
+    remaining: 100,
+  },
+  assess: {
+    quota_used: 0,
+    quota_total: 100,
+    quota_remaining: 100,
+    bonus: 0,
+    credits: 0,
+    remaining: 100,
+  },
   extract: { calls_today: 0, daily_limit: 1000, unlimited: false },
 };
 
@@ -1207,19 +1238,108 @@ describe("Auto-retry", () => {
 });
 
 describe("usage", () => {
-  it("returns the per-capability shape", async () => {
+  it("returns the pool, the price list and the per-capability projections", async () => {
     const { fetch, calls } = makeFetch([{ body: USAGE_BODY }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
     expect(calls[0]!.url).toContain("/me/usage");
     expect(u.plan).toBe("free");
     expect(u.quota_resets_at).toBe("2026-07-01T00:00:00+00:00");
-    expect(u.verify.quota_total).toBe(10);
+    // The pool is the balance; the capability blocks divide it by the cost.
+    expect(u.credits.total).toBe(100);
+    expect(u.credits.remaining).toBe(100);
+    expect(u.credits.bonus).toBe(0);
+    expect(u.credits.resets_at).toBe("2026-07-01T00:00:00+00:00");
+    expect(u.verify.quota_total).toBe(10); // 100 credits / 10 per verify
     expect(u.verify.remaining).toBe(10);
-    // assess is quota-only — no one-off credit pool.
-    expect(u.assess.credits).toBe(0);
-    expect(u.assess.remaining).toBe(50);
+    expect(u.assess.remaining).toBe(100); // 100 credits / 1 per assess
     expect(u.extract.daily_limit).toBe(1000);
     expect(u.extract.unlimited).toBe(false);
+  });
+
+  it("passes the costs map through with the server's own keys", async () => {
+    // The SDK does not rewrite response keys, and `costs` is keyed by
+    // capability NAME — a casing transform here would rename the API surface.
+    const { fetch } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(Object.keys(u.costs).sort()).toEqual(["ask", "assess", "extract", "verify"]);
+    expect(u.costs["verify"]).toBe(10);
+    expect(u.costs["assess"]).toBe(1);
+    expect(u.costs["ask"]).toBe(1);
+    // Free at the pool — bounded by the daily cap in `extract` instead.
+    expect(u.costs["extract"]).toBe(0);
+  });
+
+  it("carries the low-depth verify price in the same costs map", async () => {
+    // `costs` is an open Record<string, number>, so a new price key needs no
+    // type change — this is the tripwire that it actually survives parsing.
+    const { fetch } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.cost_options["verify"]!["depth"]!["low"]).toBe(5);
+    expect(u.cost_options["verify"]!["depth"]!["low"]! * 2).toBe(u.costs["verify"]);
+    // `costs` names capabilities and nothing else.
+    expect(u.costs["verify_low"]).toBeUndefined();
+  });
+
+  it("treats the low-depth price as a price, never as a capability block", async () => {
+    // A `verify_low` projection would report the same balance in a second
+    // unit, so the server deliberately does not send one and the SDK must not
+    // invent one. Clients divide the balance themselves.
+    const { fetch } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    const bag = u as unknown as Record<string, unknown>;
+    expect(bag["verify_low"]).toBeUndefined();
+    // Only the three real capability blocks exist beside the pool.
+    const blockKeys = ["verify", "ask", "assess"].filter((k) => typeof bag[k] === "object");
+    expect(blockKeys).toEqual(["verify", "ask", "assess"]);
+    // 100 credits at 5 each is 20 low-depth checks — twice the verify block's
+    // 10, and a number no block on the response reports.
+    expect(Math.floor(u.credits.remaining / u.cost_options["verify"]!["depth"]!["low"]!)).toBe(20);
+    expect(u.verify.remaining).toBe(10);
+  });
+
+  it("reports bonus per capability, floored by that capability's cost", async () => {
+    // 25 non-expiring credits buys 25 assesses but only 2 verifications.
+    const body = {
+      ...USAGE_BODY,
+      credits: { total: 125, used: 0, remaining: 125, bonus: 25, resets_at: null },
+      verify: { ...USAGE_BODY.verify, bonus: 2, credits: 2 },
+      assess: { ...USAGE_BODY.assess, bonus: 25, credits: 25 },
+    };
+    const { fetch } = makeFetch([{ body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.credits.bonus).toBe(25);
+    expect(u.credits.resets_at).toBeNull();
+    expect(u.verify.bonus).toBe(2);
+    expect(u.assess.bonus).toBe(25);
+    // The deprecated per-capability `credits` is an alias of `bonus` until
+    // the server drops it on 2026-11-29.
+    expect(u.verify.credits).toBe(u.verify.bonus);
+    expect(u.assess.credits).toBe(u.assess.bonus);
+  });
+
+  it("parses a response that has already dropped the deprecated credits alias", async () => {
+    // After 2026-11-29 the server stops sending it; `bonus` carries on.
+    const withoutAlias = (cap: Record<string, unknown>): Record<string, unknown> => {
+      const copy = { ...cap };
+      delete copy["credits"];
+      return copy;
+    };
+    const body = {
+      ...USAGE_BODY,
+      verify: withoutAlias(USAGE_BODY.verify),
+      assess: withoutAlias(USAGE_BODY.assess),
+      ask: withoutAlias(USAGE_BODY.ask),
+    };
+    const { fetch } = makeFetch([{ body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.verify.credits).toBeUndefined();
+    expect(u.verify.bonus).toBe(0);
+    expect(u.verify.remaining).toBe(10);
   });
 });

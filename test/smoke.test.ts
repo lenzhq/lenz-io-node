@@ -58,12 +58,16 @@ maybe("smoke", () => {
     const client = makeClient();
     const u = await client.usage();
     expect(typeof u.plan).toBe("string");
+    // The pool is the balance; everything else divides it.
+    expect(typeof u.credits.remaining).toBe("number");
+    expect(typeof u.credits.bonus).toBe("number");
+    expect(typeof u.costs["verify"]).toBe("number");
     for (const cap of [u.verify, u.ask, u.assess]) {
       expect(typeof cap.quota_remaining).toBe("number");
       expect(typeof cap.remaining).toBe("number");
+      expect(typeof cap.bonus).toBe("number");
     }
-    // assess is quota-only — no one-off credit pool.
-    expect(u.assess.credits).toBe(0);
+    expect(u.verify.remaining).toBe(Math.floor(u.credits.remaining / u.costs["verify"]!));
     expect(typeof u.extract.daily_limit).toBe("number");
   });
 

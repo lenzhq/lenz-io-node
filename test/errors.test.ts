@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   LenzAPIError,
@@ -61,6 +61,109 @@ describe("mapResponseToError", () => {
     expect(e.remaining).toBeNull();
     expect(e.resetsAt).toBeNull();
     expect(e.requested).toBeNull();
+    expect(e.creditBalance).toBeNull();
+    expect(e.cost).toBeNull();
+  });
+
+  it("402 reports the pool balance and the call's cost in credits", () => {
+    // The point of the pair: "you hold 4 credits, this costs 10" is a
+    // different message from "you hold nothing".
+    const e = mapResponseToError(
+      402,
+      body({
+        detail: "out",
+        code: "no_credits",
+        remaining: 0,
+        credits_remaining: 4,
+        cost: 10,
+      }),
+      {},
+    ) as LenzQuotaExceededError;
+    expect(e.creditBalance).toBe(4);
+    expect(e.cost).toBe(10);
+    // `remaining` stays in the capability's own unit — 4 credits is zero
+    // verifications — and the deprecated `creditsRemaining` keeps aliasing
+    // THAT, not the pool. Same-named wire field, different quantity: wiring
+    // `credits_remaining` into the alias would have changed its unit under
+    // everyone still reading it.
+    expect(e.remaining).toBe(0);
+    // Reset the once-per-process latch so the warning is observable here
+    // regardless of which test touched the alias first.
+    (LenzQuotaExceededError as unknown as { warnedCreditsRemaining: boolean })[
+      "warnedCreditsRemaining"
+    ] = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(e.creditsRemaining).toBe(0);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(String(warn.mock.calls[0]![0])).toContain("deprecated");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("402 cost scales with a rejected batch", () => {
+    const e = mapResponseToError(
+      402,
+      body({
+        detail: "batch too big",
+        code: "no_credits",
+        remaining: 3,
+        requested: 5,
+        credits_remaining: 30,
+        cost: 50,
+      }),
+      {},
+    ) as LenzQuotaExceededError;
+    expect(e.remaining).toBe(3); // verifications
+    expect(e.requested).toBe(5); // verifications
+    expect(e.creditBalance).toBe(30); // credits
+    expect(e.cost).toBe(50); // credits
+  });
+
+  it("402 cost is depth-aware for a rejected low-depth verify", () => {
+    // A rejected `depth: "low"` verify reports 5, not the standard 10. `cost`
+    // is what the server would actually have charged, so a client must read
+    // it rather than multiplying `requested` by a price it assumed. The
+    // charge follows the depth REQUESTED — a `low` request the server could
+    // have answered from a cached `standard` verdict is still priced at low.
+    const e = mapResponseToError(
+      402,
+      body({
+        detail: "out",
+        code: "no_credits",
+        remaining: 0,
+        requested: 1,
+        credits_remaining: 4,
+        cost: 5,
+      }),
+      {},
+    ) as LenzQuotaExceededError;
+    expect(e.cost).toBe(5);
+    expect(e.creditBalance).toBe(4);
+    // 4 credits cannot buy even the half-price call — the whole point of
+    // publishing both numbers.
+    expect(e.cost!).toBeGreaterThan(e.creditBalance!);
+  });
+
+  it("402 cost for a mixed-depth batch is the real summed total", () => {
+    // Three standard (30) + two low (10) = 40, which is neither 5 * 10 nor
+    // 5 * 5. Deriving the cost from `requested` is wrong in both directions.
+    const e = mapResponseToError(
+      402,
+      body({
+        detail: "batch too big",
+        code: "no_credits",
+        remaining: 2,
+        requested: 5,
+        credits_remaining: 25,
+        cost: 40,
+      }),
+      {},
+    ) as LenzQuotaExceededError;
+    expect(e.cost).toBe(40);
+    expect(e.cost).not.toBe(e.requested! * 10);
+    expect(e.cost).not.toBe(e.requested! * 5);
   });
 
   it("402 echoes requested for a batch shortfall", () => {

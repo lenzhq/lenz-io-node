@@ -95,7 +95,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
 - **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed).
-- **`client.usage()`** → remaining capacity per capability (`verify` / `ask` / `assess` quota + top-up credits, and the daily `extract` rate limit). Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed.
+- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
 
@@ -190,6 +190,73 @@ See [`examples/core/express-webhook.ts`](examples/core/express-webhook.ts)
 for a runnable receiver and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
 for the headline assess-then-escalate pattern.
 
+## Credits
+
+One balance per account, spent by every billable call:
+
+| Call                                   | Credits                                  |
+| -------------------------------------- | ---------------------------------------- |
+| `verify` (and `verifyBatch`, `select`) | **10** per claim                         |
+| `verify` with `depth: "low"`           | **5** per claim                          |
+| `assess`                               | 1 per claim                              |
+| `ask`                                  | 1                                        |
+| `extract`                              | 0 — free, bounded by a daily cap instead |
+
+```ts
+const u = await client.usage();
+
+u.credits.remaining; // 5070 — the balance, in credits
+u.credits.bonus; // 200 — the non-expiring part of it
+u.credits.resets_at; // when the monthly allowance refills, or null
+
+u.costs["verify"]; // 10 credits per verification
+u.cost_options.verify.depth.low; // 5 — half price at depth: "low"
+u.verify.remaining; // 507 — the same balance, in verifications
+u.assess.remaining; // 5070 — and in assessments
+
+u.extract.calls_today; // /extract is free: a daily cap, not a credit price
+u.extract.daily_limit;
+```
+
+`verify` / `ask` / `assess` are **projections of the one balance**, not
+separate allowances — spending on any of them moves all three. Divide
+`credits.remaining` by `costs[...]` yourself if you prefer; the blocks just do
+it for you, flooring (5 credits is 5 assessments and 0 verifications).
+
+Read `costs` as a map rather than destructuring known names: a new capability
+appears in it without an SDK release, and the keys are the server's own.
+
+The per-capability `credits` field is **deprecated** — it was always that
+capability's one-off top-up balance, which is now `bonus`. It disappears from
+the API on **2026-11-29**; read `bonus`.
+
+### Depth pricing
+
+`cost_options.verify.depth.low` is the price of a `depth: "low"` verification — half a
+standard one. `low` caps research breadth (fewer discovery queries, a hard
+extraction ceiling, no recovery fetch tiers) while every reasoning step runs
+the same models; it is not a model downgrade.
+
+It is a **price, not a capability**, which is why it is nested under
+`cost_options` rather than sitting in `costs` beside the four capability
+names. There is deliberately no `u.verify_low`
+block beside `u.verify` — it would report the same balance in a second unit.
+Divide the balance yourself when you want the count:
+
+```ts
+// Every level is optional: a server predating this field sends `{}`, and
+// the capability's default price in `costs` is the right fallback.
+const low = u.cost_options.verify?.depth?.low ?? u.costs["verify"];
+const lowDepthLeft = Math.floor(u.credits.remaining / low); // 1014
+```
+
+**You are charged for the depth you requested, not the one you were served.**
+A `low` request answered from a cached `standard` verdict still costs 5. The
+`depth` echoed on the completed verification is what the verdict was
+_produced_ with, so it can read `standard` on a `low` request — the echo
+describes the evidence behind the answer, the charge follows the request. A
+batch may mix depths and is billed per item.
+
 ## Errors
 
 Every error subclass is typed and carries a `requestId` you can quote on
@@ -209,7 +276,12 @@ try {
 } catch (exc) {
   if (exc instanceof LenzQuotaExceededError) {
     // HTTP 402. Out of balance — retrying will not clear it.
-    console.error(exc.remaining); // 0, or null if the server didn't report a balance
+    console.error(exc.remaining); // 0 verifications left, or null if unreported
+    console.error(exc.creditBalance); // 4 credits held, or null if unreported
+    console.error(exc.cost); // 10 — what this call would have taken
+    // `cost` is depth-aware: a rejected depth: "low" verify reports 5, and a
+    // rejected batch mixing depths reports its real summed total. Read it
+    // rather than multiplying `requested` by a price you assumed.
     console.error(exc.resetsAt); // "2026-09-01T00:00:00+00:00", or null
     console.error(exc.upgradeUrl); // https://lenz.io/plans
   } else if (exc instanceof LenzAuthError) {

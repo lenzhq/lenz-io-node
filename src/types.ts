@@ -328,22 +328,67 @@ export interface BatchItemResult {
 }
 
 /**
- * Per-capability remaining capacity (`verify` / `ask` / `assess`).
+ * The account's credit balance — the one pool every capability spends from.
  *
- * Two buckets, kept separate on purpose:
- * - `quota_*`: the recurring monthly allowance for the current plan; resets
- *   every period (see {@link Usage.quota_resets_at}). `quota_remaining` is
- *   `quota_total - quota_used` (never negative).
- * - `credits`: one-off top-up credits that do NOT reset monthly; spent only
- *   after the monthly quota is exhausted.
+ * Two buckets:
+ * - the monthly allowance for the current plan, which resets at `resets_at`;
+ * - `bonus`, non-expiring credits from grants and top-ups, spent only once
+ *   the allowance is gone.
  *
- * `remaining` is the true usable capacity: `quota_remaining + credits`.
+ * `remaining` is the sum of both and is what a call is checked against.
+ * `total` and `used` cover the same two buckets, so `used + remaining` can
+ * exceed nothing — read `remaining` when you want "can I make this call".
+ *
+ * Convert to calls with {@link Usage.costs}: `remaining / costs.verify` is
+ * how many verifications the balance still buys — or the `depth` prices in
+ * that price, for a `depth: "low"` check. The per-capability blocks on
+ * {@link Usage} do that division for you, except for the depth prices, which are
+ * price with no block of its own.
+ */
+export interface UsageCredits {
+  total: number;
+  used: number;
+  remaining: number;
+  bonus: number;
+  resets_at: string | null;
+}
+
+/**
+ * One capability's share of the pool, projected into that capability's unit
+ * (`verify` / `ask` / `assess`).
+ *
+ * These are **projections, not allowances**. Every billable capability draws
+ * on the single balance in {@link Usage.credits}, at the weight in
+ * {@link Usage.costs}; this block answers "how many `/verify` calls could I
+ * still make if I spent everything on them". Spending on any capability moves
+ * every block, and the division floors — a `verify` block at a weight of 10
+ * ticks once per 10 credits spent anywhere.
+ *
+ * - `quota_total` / `quota_remaining`: the pool's `total` / `remaining`
+ *   divided by this capability's cost.
+ * - `quota_used`: derived as `quota_total - quota_remaining`, so
+ *   `used + remaining === total` always holds. It is therefore a ceiling —
+ *   one `/ask` credit moves the verify block's `quota_used` from 0 to 1.
+ * - `bonus`: the non-expiring bucket in this capability's unit. A user
+ *   holding 5 bonus credits sees `verify.bonus === 0` and `assess.bonus === 5`
+ *   — 5 credits doesn't buy a verification.
+ * - `remaining`: equals `quota_remaining` (it already spans both buckets).
  */
 export interface UsageCapacity {
   quota_used: number;
   quota_total: number;
   quota_remaining: number;
-  credits: number;
+  /** The non-expiring bonus bucket, in this capability's unit. */
+  bonus: number;
+  /**
+   * @deprecated Alias of {@link UsageCapacity.bonus}. The server removes it on
+   * **2026-11-29**; read `bonus` instead.
+   *
+   * It never meant the pool — before the single pool existed it meant this
+   * capability's one-off top-up balance, which is exactly what `bonus` now
+   * reports. Optional because the server stops sending it on that date.
+   */
+  credits?: number;
   remaining: number;
 }
 
@@ -355,19 +400,106 @@ export interface UsageExtract {
 }
 
 /**
- * Returned by `GET /me/usage` — remaining capacity per capability.
+ * Returned by `GET /me/usage` — the account's credit balance and what it buys.
  *
- * Monthly quota (resets at `quota_resets_at`) and one-off top-up credits are
- * reported separately per capability so callers can tell a recurring allowance
- * apart from a purchased balance. `assess` is quota-only — there is no one-off
- * assess credit pool, so its `credits` is always 0 and `remaining` equals its
- * `quota_remaining`.
+ * `credits` is the balance and `costs` is the price list (credits per call,
+ * keyed by capability name). The `verify` / `ask` / `assess` blocks are
+ * projections of that one pool into each capability's unit — read whichever is
+ * convenient, they all describe the same money.
+ *
+ * ```ts
+ * const u = await client.usage();
+ * u.credits.remaining; // 5070 credits left
+ * u.costs["verify"]; // 10 credits per verification
+ * u.cost_options.verify?.depth?.low; // 5 — half price at depth: "low"
+ * u.verify.remaining; // 507 verifications, the same balance divided
+ * ```
+ *
+ * `extract` is free at the pool (`costs.extract` is 0) and carries a
+ * per-account daily fair-use cap instead; it rejects with 429, not 402.
+ *
+ * The depth prices are **prices, not capabilities** — there is deliberately
+ * no `verify_low` block beside `verify`. See {@link Usage.cost_options}.
  */
 export interface Usage {
+  /**
+   * The tier slug — `"free" | "plus" | "developer" | "scale"`. This is the
+   * field to branch on; it is stable.
+   */
   plan: string;
+  /**
+   * The same tier as display copy (`"Developer"`). Separate from
+   * {@link Usage.plan} on purpose: this one is copy and may be reworded, so
+   * comparing against it breaks on a rename that ought to be free. Empty
+   * string on servers predating this field — fall back to `plan`.
+   */
+  plan_label: string;
   quota_resets_at: string | null;
+  /**
+   * The pool — the authoritative balance every capability spends from.
+   * Present since the 2026-08-29 credits release.
+   */
+  credits: UsageCredits;
+  /**
+   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`,
+   * `extract`), at that capability's default price. Keys are the server's
+   * own, verbatim — never rewritten by the SDK — and a zero cost means the
+   * capability is free at the pool and bounded by a daily cap instead. New
+   * keys appear here without an SDK release.
+   *
+   * Capability names and nothing else. Prices that depend on a request
+   * parameter are in {@link Usage.cost_options}.
+   */
+  costs: Record<string, number>;
+  /**
+   * Prices that depend on a request PARAMETER, nested capability → parameter
+   * → value:
+   *
+   * ```ts
+   * u.cost_options.verify?.depth; // { standard: 10, low: 5 }
+   * ```
+   *
+   * Read as "on `verify`, the `depth` parameter prices like this". `{}` on
+   * servers predating this field.
+   *
+   * Every capability here also appears in {@link Usage.costs} at its default
+   * price, so reading only `costs` is imprecise, never wrong.
+   *
+   * ```ts
+   * const low = u.cost_options.verify?.depth?.low ?? u.costs["verify"]!;
+   * const lowDepthLeft = Math.floor(u.credits.remaining / low);
+   * ```
+   *
+   * Every level is optional at the type level because every level is
+   * genuinely optional at runtime: a server predating this field sends
+   * `{}`, and the capability-default in `costs` is the correct fallback.
+   *
+   * ```ts
+   * ```
+   *
+   * Nested rather than flat so that a future request parameter adds a key
+   * under its capability instead of a new top-level entry — `costs` stays a
+   * list of capability names, safe to iterate.
+   *
+   * You are charged for the depth you **requested**, not the one served: a
+   * `low` request answered from a cached `standard` verdict still costs the
+   * `low` price. The `depth` echoed on a completed verification is what the
+   * verdict was PRODUCED with, so it can read `standard` on a `low` request —
+   * the echo describes the evidence, the charge follows the request.
+   */
+  cost_options: Record<string, Record<string, Record<string, number>>>;
+  /**
+   * @deprecated Removed 2026-11-29. Derive from {@link Usage.credits} and
+   * {@link Usage.costs} instead:
+   *
+   * ```ts
+   * const left = Math.floor(u.credits.remaining / u.costs["verify"]!);
+   * ```
+   */
   verify: UsageCapacity;
+  /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
   ask: UsageCapacity;
+  /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
   assess: UsageCapacity;
   extract: UsageExtract;
   /**
