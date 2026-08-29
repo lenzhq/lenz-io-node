@@ -401,7 +401,18 @@ export interface UsageExtract {
  * no `verify_low` block beside `verify`. See {@link Usage.costs}.
  */
 export interface Usage {
+  /**
+   * The tier slug — `"free" | "plus" | "developer" | "scale"`. This is the
+   * field to branch on; it is stable.
+   */
   plan: string;
+  /**
+   * The same tier as display copy (`"Developer"`). Separate from
+   * {@link Usage.plan} on purpose: this one is copy and may be reworded, so
+   * comparing against it breaks on a rename that ought to be free. Empty
+   * string on servers predating this field — fall back to `plan`.
+   */
+  plan_label: string;
   quota_resets_at: string | null;
   /**
    * The pool — the authoritative balance every capability spends from.
