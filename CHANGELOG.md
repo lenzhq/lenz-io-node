@@ -4,6 +4,54 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.9.0] - 2026-08-29
+
+The six per-endpoint quotas became **one weighted credit pool**. Lockstep
+release with Python 2.9.0.
+
+### Added
+
+- **`Usage.credits`** (`UsageCredits`) — the account's balance: `total`,
+  `used`, `remaining`, the non-expiring `bonus` bucket, and `resets_at`. This
+  is the authoritative number; every billable call spends from it.
+- **`Usage.costs`** — `Record<string, number>`, credits per call keyed by
+  capability name (`verify` 10, `assess` 1, `ask` 1, `extract` 0). Keys are
+  the server's own and are never rewritten by the SDK, so a new capability
+  appears without an SDK release — read it as a map.
+- **`UsageCapacity.bonus`** — the non-expiring bucket in that capability's
+  unit, floored by its cost (5 bonus credits is `assess.bonus === 5` and
+  `verify.bonus === 0`).
+- **`LenzQuotaExceededError.creditBalance` and `.cost`** — the 402 rejection
+  in pool units: credits you hold (server field `credits_remaining`) and
+  credits the refused call would have taken (`cost`, scaled for a batch).
+  Together they separate "you hold 4 credits and this verification costs 10"
+  from "you hold nothing". `null` when the server omits them, matching
+  `remaining`.
+
+### Changed
+
+- **The `verify` / `ask` / `assess` blocks are now projections of the one
+  pool**, not separate allowances — spending on any capability moves all
+  three. Each is `credits` divided by that capability's cost, flooring, and
+  `quota_used` is derived as `quota_total - quota_remaining` so
+  `used + remaining === total` still holds in every block. Reading them needs
+  no code change; the numbers now move together.
+- **`UsageCapacity.credits` is deprecated and optional** (`credits?: number`).
+  It is an alias of the new `bonus` — it never meant the pool, it meant that
+  capability's one-off top-up balance. The server stops sending it on
+  **2026-11-29**. TypeScript callers assigning it straight into a `number`
+  will need `?? 0`, or a move to `bonus`.
+
+### Notes
+
+- The deprecated `creditsRemaining` accessor still aliases `remaining` and is
+  still removed in 3.0. It is deliberately **not** wired to the server's new
+  `credits_remaining` field: that one is the pool balance and reads in a
+  different unit — hence the separate `creditBalance`. Its JSDoc and its
+  warning now say so.
+- `LenzQuotaExceededError.remaining` / `.requested` are unchanged and stay in
+  the capability's own unit (verifications, asks, assesses).
+
 ## [2.8.0] - 2026-08-21
 
 The server now says WHY a verification failed and states honest waits when it

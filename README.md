@@ -94,7 +94,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
 - **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed).
-- **`client.usage()`** → remaining capacity per capability (`verify` / `ask` / `assess` quota + top-up credits, and the daily `extract` rate limit). Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed.
+- **`client.usage()`** → your credit balance (`credits`), the price list (`costs`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
 
@@ -189,6 +189,39 @@ See [`examples/core/express-webhook.ts`](examples/core/express-webhook.ts)
 for a runnable receiver and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
 for the headline assess-then-escalate pattern.
 
+## Credits
+
+One balance per account, spent by every billable call. `/assess` and `/ask`
+cost 1 credit; `/verify` (including each claim of a batch, and `/select`) costs
+10; `/extract` is free and bounded by a daily cap instead.
+
+```ts
+const u = await client.usage();
+
+u.credits.remaining; // 5070 — the balance, in credits
+u.credits.bonus; // 200 — the non-expiring part of it
+u.credits.resets_at; // when the monthly allowance refills, or null
+
+u.costs["verify"]; // 10 credits per verification
+u.verify.remaining; // 507 — the same balance, in verifications
+u.assess.remaining; // 5070 — and in assessments
+
+u.extract.calls_today; // /extract is free: a daily cap, not a credit price
+u.extract.daily_limit;
+```
+
+`verify` / `ask` / `assess` are **projections of the one balance**, not
+separate allowances — spending on any of them moves all three. Divide
+`credits.remaining` by `costs[...]` yourself if you prefer; the blocks just do
+it for you, flooring (5 credits is 5 assessments and 0 verifications).
+
+Read `costs` as a map rather than destructuring known names: a new capability
+appears in it without an SDK release, and the keys are the server's own.
+
+The per-capability `credits` field is **deprecated** — it was always that
+capability's one-off top-up balance, which is now `bonus`. It disappears from
+the API on **2026-11-29**; read `bonus`.
+
 ## Errors
 
 Every error subclass is typed and carries a `requestId` you can quote on
@@ -208,7 +241,9 @@ try {
 } catch (exc) {
   if (exc instanceof LenzQuotaExceededError) {
     // HTTP 402. Out of balance — retrying will not clear it.
-    console.error(exc.remaining); // 0, or null if the server didn't report a balance
+    console.error(exc.remaining); // 0 verifications left, or null if unreported
+    console.error(exc.creditBalance); // 4 credits held, or null if unreported
+    console.error(exc.cost); // 10 — what this call would have taken
     console.error(exc.resetsAt); // "2026-09-01T00:00:00+00:00", or null
     console.error(exc.upgradeUrl); // https://lenz.io/plans
   } else if (exc instanceof LenzAuthError) {

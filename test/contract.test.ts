@@ -117,13 +117,25 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   Usage: new Set([
     "plan",
     "quota_resets_at",
+    "credits",
+    "costs",
     "verify",
     "ask",
     "assess",
     "extract",
     "has_webhook_secret",
   ]),
-  UsageCapacity: new Set(["quota_used", "quota_total", "quota_remaining", "credits", "remaining"]),
+  UsageCredits: new Set(["total", "used", "remaining", "bonus", "resets_at"]),
+  // The block's `credits` is the deprecated alias of `bonus`; the server
+  // stops sending it on 2026-11-29 and this entry goes with it.
+  UsageCapacity: new Set([
+    "quota_used",
+    "quota_total",
+    "quota_remaining",
+    "bonus",
+    "credits",
+    "remaining",
+  ]),
   UsageExtract: new Set(["calls_today", "daily_limit", "unlimited"]),
 };
 
@@ -149,6 +161,8 @@ const NESTED: Record<string, Record<string, string | null>> = {
     debate_con: "DebateSide",
   },
   Usage: {
+    credits: "UsageCredits",
+    costs: null, // capability → credits map; keys are the server's, verbatim
     verify: "UsageCapacity",
     ask: "UsageCapacity",
     assess: "UsageCapacity",
@@ -249,6 +263,9 @@ describe("contract", () => {
     expect(err.upgradeUrl).toBe(fixture["upgrade_url"]);
     expect(err.remaining).toBe(fixture["remaining"]);
     expect(err.resetsAt).toBe(fixture["resets_at"]);
+    // Pool units, alongside the capability-unit `remaining`/`requested`.
+    expect(err.creditBalance).toBe(fixture["credits_remaining"]);
+    expect(err.cost).toBe(fixture["cost"]);
 
     // Every key the server sends must be consumed by a typed field or
     // deliberately skipped — an unhandled key means the mapper drifted.
@@ -259,6 +276,8 @@ describe("contract", () => {
       "remaining",
       "resets_at",
       "requested",
+      "credits_remaining",
+      "cost",
     ]);
     // `doc_url` is intentionally not mapped: the SDK sets its own docUrl from
     // the status table so the link is right even on an older server.

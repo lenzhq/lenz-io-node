@@ -74,6 +74,7 @@ export type {
   TaskStatus,
   Usage,
   UsageCapacity,
+  UsageCredits,
   UsageExtract,
   Verification,
   VerificationList,

@@ -80,6 +80,10 @@ export class LenzAuthError extends LenzError {}
 /**
  * 402 — you're out of balance, or your plan doesn't cover this call.
  *
+ * `remaining` and `requested` are in the **capability's own unit** (you asked
+ * for verifications, so the shortfall is reported in verifications).
+ * `creditBalance` and `cost` report the same rejection in pool credits.
+ *
  * `remaining` is **nullable**: `null` means the server didn't report a
  * balance, `0` means it reported an empty one. The old `creditsRemaining = 0`
  * could not tell those apart, which made it useless to branch on. The server
@@ -95,6 +99,26 @@ export class LenzQuotaExceededError extends LenzError {
   resetsAt: string | null = null;
   /** For a batch call, how many units were asked for. */
   requested: number | null = null;
+  /**
+   * Credits left in the account's pool, or `null` if unreported.
+   *
+   * The same rejection as {@link remaining}, in pool units instead of the
+   * capability's own: together with {@link cost} it separates "you hold 4
+   * credits and this verification costs 10" from "you hold nothing". Server
+   * field `credits_remaining`.
+   *
+   * Deliberately NOT named `creditsRemaining` — that name is the deprecated
+   * alias of {@link remaining} and reports verifications/asks/assesses, not
+   * credits. Reusing it would change the unit under existing callers.
+   */
+  creditBalance: number | null = null;
+  /**
+   * Credits the rejected call would have taken, or `null` if unreported.
+   *
+   * Scales with a batch: five verifications at 10 credits each reports 50.
+   * Server field `cost`.
+   */
+  cost: number | null = null;
 
   private static warnedCreditsRemaining = false;
 
@@ -102,8 +126,16 @@ export class LenzQuotaExceededError extends LenzError {
    * @deprecated Use {@link remaining}. Removed in 3.0.
    *
    * Reports `0` when the balance is unknown — exactly the ambiguity
-   * `remaining` exists to fix. The server never sent the `credits_remaining`
-   * field this read, so it was always `0`.
+   * `remaining` exists to fix.
+   *
+   * **This is NOT the server's `credits_remaining` field**, despite the name.
+   * It is an alias of {@link remaining} and reads in the CAPABILITY's unit
+   * (verifications, asks, assesses). The pool balance the server now sends as
+   * `credits_remaining` is {@link creditBalance}, and the two differ: 4
+   * credits is `creditBalance === 4` and `creditsRemaining === 0`, because 4
+   * credits buys no verification. The alias was never wired to a server field
+   * — before the credit pool existed nothing sent one, so it always read `0`
+   * unless a caller assigned it.
    */
   get creditsRemaining(): number {
     LenzQuotaExceededError.warnCreditsRemaining();
@@ -130,7 +162,9 @@ export class LenzQuotaExceededError extends LenzError {
     console.warn(
       "[lenz-io] creditsRemaining is deprecated and will be removed in 3.0; " +
         "use `remaining`, which is null when the server didn't report a " +
-        "balance (creditsRemaining reports that as 0).",
+        "balance (creditsRemaining reports that as 0). It is not the " +
+        "server's `credits_remaining` field — that pool balance is " +
+        "`creditBalance`.",
     );
   }
 }
@@ -363,6 +397,11 @@ export function mapResponseToError(
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
     err.remaining = optNumber(parsed["remaining"]);
     err.requested = optNumber(parsed["requested"]);
+    // Pool units. Assigned to their own fields, never folded into
+    // `remaining` — that one is in the capability's unit and callers branch
+    // on it.
+    err.creditBalance = optNumber(parsed["credits_remaining"]);
+    err.cost = optNumber(parsed["cost"]);
     const resetsAt = parsed["resets_at"];
     err.resetsAt = typeof resetsAt === "string" && resetsAt ? resetsAt : null;
   } else if (err instanceof LenzValidationError) {
