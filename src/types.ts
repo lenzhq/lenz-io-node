@@ -106,6 +106,12 @@ export interface Verification {
   claim?: string;
   /** "private" | "unlisted" | "public". Read-back of the claim's visibility. */
   visibility?: string;
+  /**
+   * "standard" | "low". Read-back of the depth the verdict was actually
+   * produced with — a "low" request served from cache reads "standard".
+   * Absent on servers that predate the field.
+   */
+  depth?: string;
   domain?: string;
   entities?: EntityRef[];
   presumed_intent?: string;
@@ -435,6 +441,14 @@ export interface VerifyInput {
    * byte-identical wire format.
    */
   language?: string;
+  /**
+   * "standard" (server default) or "low". "low" runs a shallower check —
+   * fewer sources, faster. Same models, same quota cost. Omitted from the
+   * request body when unset. The completed `Verification.depth` echoes the
+   * depth the verdict was actually produced with, which can be "standard"
+   * for a "low" request served from cache.
+   */
+  depth?: "standard" | "low";
   idempotencyKey?: string;
 }
 
@@ -456,6 +470,8 @@ export interface VerifyBatchItem {
   idempotency_key?: string;
   /** Per-item "private" | "unlisted"; overrides the batch-wide default. */
   visibility?: "private" | "unlisted";
+  /** Per-item "standard" | "low"; overrides the batch-wide default. */
+  depth?: "standard" | "low";
 }
 
 export interface VerifyBatchInput {
@@ -466,6 +482,8 @@ export interface VerifyBatchInput {
   language?: string;
   /** Batch-wide "private" | "unlisted" default; per-item `visibility` overrides. */
   visibility?: "private" | "unlisted";
+  /** Batch-wide "standard" | "low" default; per-item `depth` overrides. */
+  depth?: "standard" | "low";
   idempotencyKey?: string;
 }
 

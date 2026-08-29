@@ -7,7 +7,8 @@ All notable changes to this SDK are documented here. Format follows
 ## [2.9.0] - 2026-08-29
 
 `extract` takes a `focus` — say what you are looking for and get back only
-those claims. Lockstep release with Python 2.9.0.
+those claims — and `verify` takes a `depth`, so callers can ask for a
+shallower check. Lockstep release with Python 2.9.0.
 
 ### Added
 
@@ -28,6 +29,17 @@ those claims. Lockstep release with Python 2.9.0.
   your `focus`. It is a successful answer, not an error, and it is never the
   unfocused list in disguise: `identified_claims` is empty and `claim` is
   `""`. Widen the focus and call again.
+
+- **`depth` on `verify` / `verifyBatch`** (and their `AndWait` helpers) —
+  `"standard"` (server default) or `"low"`. `"low"` runs a shallower check:
+  fewer sources, faster. Same models, same quota cost. `VerifyBatchInput`
+  takes a batch-wide `depth`; each `VerifyBatchItem` may set its own `depth`
+  to override it, exactly like `visibility`. Omitted from the request body
+  when unset, so existing callers stay byte-identical on the wire and keep
+  working against a server that does not know the field yet.
+- **`Verification.depth`** — echoes the depth the verdict was actually
+  produced with. A `"low"` request served from the result cache reads back
+  `"standard"`. Absent on servers that predate the field.
 
 ### Changed
 

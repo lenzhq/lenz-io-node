@@ -88,6 +88,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "modified_at",
     "language",
     "visibility",
+    "depth",
   ]),
   VerificationListItem: new Set([
     "verification_id",
