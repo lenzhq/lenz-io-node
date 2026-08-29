@@ -84,6 +84,7 @@ export type {
   DebateSide,
   EntityRef,
   ExtractInput,
+  ExtractStatus,
   ExtractedClaims,
   ExtractedEntity,
   FailureClass,
