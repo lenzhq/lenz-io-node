@@ -106,6 +106,12 @@ export interface Verification {
   claim?: string;
   /** "private" | "unlisted" | "public". Read-back of the claim's visibility. */
   visibility?: string;
+  /**
+   * "standard" | "low". Read-back of the depth the verdict was actually
+   * produced with — a "low" request served from cache reads "standard".
+   * Absent on servers that predate the field.
+   */
+  depth?: string;
   domain?: string;
   entities?: EntityRef[];
   presumed_intent?: string;
@@ -185,8 +191,23 @@ export interface ExtractedEntity {
   type: string;
 }
 
+/**
+ * Outcome of an `extract` call.
+ *
+ * - `ready` — claims were found (and, when a `focus` was given, at least one
+ *   claim fell within it).
+ * - `not_a_claim` — the text contains no verifiable factual claim at all.
+ * - `no_match` — claims were found, but none fall within the `focus`. The
+ *   unfocused list is never substituted; widen the focus and call again.
+ *
+ * The `string & NonNullable<unknown>` arm preserves autocomplete for the
+ * known values while tolerating any future status the server adds (same
+ * trick as `FailureClass`).
+ */
+export type ExtractStatus = "ready" | "not_a_claim" | "no_match" | (string & NonNullable<unknown>);
+
 export interface ExtractedClaims {
-  status?: string;
+  status?: ExtractStatus;
   claim?: string;
   identified_claims?: string[];
   candidate_claims?: string[];
@@ -552,6 +573,14 @@ export interface VerifyInput {
    * byte-identical wire format.
    */
   language?: string;
+  /**
+   * "standard" (server default) or "low". "low" runs a shallower check —
+   * fewer sources, faster. Same models, same quota cost. Omitted from the
+   * request body when unset. The completed `Verification.depth` echoes the
+   * depth the verdict was actually produced with, which can be "standard"
+   * for a "low" request served from cache.
+   */
+  depth?: "standard" | "low";
   idempotencyKey?: string;
 }
 
@@ -573,6 +602,8 @@ export interface VerifyBatchItem {
   idempotency_key?: string;
   /** Per-item "private" | "unlisted"; overrides the batch-wide default. */
   visibility?: "private" | "unlisted";
+  /** Per-item "standard" | "low"; overrides the batch-wide default. */
+  depth?: "standard" | "low";
 }
 
 export interface VerifyBatchInput {
@@ -583,6 +614,8 @@ export interface VerifyBatchInput {
   language?: string;
   /** Batch-wide "private" | "unlisted" default; per-item `visibility` overrides. */
   visibility?: "private" | "unlisted";
+  /** Batch-wide "standard" | "low" default; per-item `depth` overrides. */
+  depth?: "standard" | "low";
   idempotencyKey?: string;
 }
 
@@ -590,6 +623,22 @@ export interface ExtractInput {
   text: string;
   /** Output language (ISO 639-1). See `VerifyInput.language`. */
   language?: string;
+  /**
+   * Narrows the result to the claims this describes, e.g.
+   * `"market size, growth and competitors"`. At most 300 characters — a
+   * longer focus is rejected with a 422, never truncated.
+   *
+   * A focus can only select from the claims the extractor found: it cannot
+   * add a claim, reword one, reorder them, change the output language, or
+   * change what counts as a claim.
+   *
+   * When nothing matches, `status` is `"no_match"` and `identified_claims`
+   * is empty — the unfocused list is never substituted. Widen the focus and
+   * call again.
+   *
+   * A focused call costs the same single unit of the daily cap.
+   */
+  focus?: string;
 }
 
 export interface AssessInput {

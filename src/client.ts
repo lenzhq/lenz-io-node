@@ -394,6 +394,7 @@ export class Lenz {
         };
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
+        if (c.depth) item.depth = c.depth;
         return item;
       }),
     };
@@ -402,6 +403,7 @@ export class Lenz {
     if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
     if (input.language) body["language"] = input.language;
     if (input.visibility) body["visibility"] = input.visibility;
+    if (input.depth) body["depth"] = input.depth;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<BatchAccepted>({
@@ -412,9 +414,23 @@ export class Lenz {
     });
   }
 
+  /**
+   * Pull the verifiable claims out of any text. Sync, free, capped at
+   * 1000 calls/account/day (shared across your API keys).
+   *
+   * Pass `focus` to narrow the result to the claims you care about, e.g.
+   * `"market size and competitors"`. A focus can only SELECT from the claims
+   * the extractor found — see {@link ExtractInput.focus}.
+   *
+   * `status` is `"ready"`, `"not_a_claim"` (no verifiable claim in the text
+   * at all), or `"no_match"` (claims were found, none fell within `focus`).
+   */
   async extract(input: ExtractInput): Promise<ExtractedClaims> {
     const body: Record<string, unknown> = { text: input.text };
     if (input.language) body.language = input.language;
+    // No client-side length check on `focus`: the server's 422 is the
+    // contract, and a cap duplicated here would drift from it.
+    if (input.focus) body.focus = input.focus;
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
@@ -679,6 +695,8 @@ export class Lenz {
     if (input.language) body.language = input.language;
     // Omit-when-empty: the server defaults to "private".
     if (input.visibility) body.visibility = input.visibility;
+    // Omit-when-empty: the server defaults to "standard".
+    if (input.depth) body.depth = input.depth;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<TaskAccepted>({

@@ -6,8 +6,9 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [2.9.0] - 2026-08-29
 
-The six per-endpoint quotas became **one weighted credit pool**. Lockstep
-release with Python 2.9.0.
+One weighted credit pool replaces six per-endpoint quotas; `extract` takes a
+`focus`; `verify` takes a `depth`. Lockstep release with Python 2.9.0 and the
+server-side pool.
 
 ### Added
 
@@ -15,22 +16,29 @@ release with Python 2.9.0.
   `used`, `remaining`, the non-expiring `bonus` bucket, and `resets_at`. This
   is the authoritative number; every billable call spends from it.
 - **`Usage.costs`** — `Record<string, number>`, credits per call keyed by
-  capability name (`verify` 10, `verify_low` 5, `assess` 1, `ask` 1,
-  `extract` 0). Keys are the server's own and are never rewritten by the SDK,
-  so a new key appears without an SDK release — read it as a map.
-- **`costs["verify_low"]`** — the `depth: "low"` verify price, half a standard
-  one. `low` caps research breadth while every reasoning step runs the same
-  models; it is not a model downgrade. It is a **price, not a capability**:
-  there is deliberately no `verify_low` block beside `usage.verify`, because
-  it would report the same balance in a second unit. Divide
-  `credits.remaining` by it for the low-depth count. `costs` was already an
-  open `Record<string, number>`, so this is additive and needed no type
-  change.
+  **capability** at its default price (`verify` 10, `assess` 1, `ask` 1,
+  `extract` 0). Read the weight from here rather than hard-coding it; a new
+  capability arrives as a new key. Capability names and nothing else, so it is
+  safe to iterate.
+- **`Usage.cost_options`** — prices that depend on a request **parameter**,
+  nested capability → parameter → value:
+  `{ verify: { depth: { standard: 10, low: 5 } } }`. Every capability here also
+  appears in `costs` at its default, so reading only `costs` is imprecise but
+  never wrong. Nested rather than flat so a future parameter adds a key under
+  its capability instead of a new top-level entry. Every level is optional at
+  the type level because every level is optional at runtime — a server
+  predating the field sends `{}`, and the `costs` default is the right
+  fallback.
+  - The low-depth price is a **price, not a capability**: there is deliberately
+    no `verify_low` block beside `usage.verify`, because it would report the
+    same balance in a second unit.
   - **You are charged for the depth you REQUESTED, not the one you were
     served.** A `low` request answered from a cached `standard` verdict still
-    costs 5. The `depth` echoed on the completed verification is what the
-    verdict was _produced_ with, so it can read `standard` on a `low` request
-    — the echo describes the evidence, the charge follows the request.
+    costs 5.
+- **`Usage.plan_label`** — the tier as display copy (`"Developer"`), beside the
+  stable `plan` slug. Two fields on purpose: `plan` is what you branch on,
+  `plan_label` is copy and may be reworded.
+
 - **`UsageCapacity.bonus`** — the non-expiring bucket in that capability's
   unit, floored by its cost (5 bonus credits is `assess.bonus === 5` and
   `verify.bonus === 0`).
@@ -45,7 +53,43 @@ release with Python 2.9.0.
     reports its real summed total. Read it rather than multiplying `requested`
     by an assumed price.
 
+- **`focus` on `extract`.** An optional hint of at most 300 characters —
+  `focus: "market size, growth and competitors"` — that narrows the result to
+  the claims it names. A focus can only SELECT from the claims the extractor
+  found: it cannot add a claim, reword one, reorder them, change the output
+  language, or change what counts as a claim, so a claim you get back is one
+  an unfocused call would have returned too, verbatim. Omitted when empty, so
+  the request body is unchanged for callers who don't use it. There is no
+  client-side length check — the server's 422 is the contract, and a cap
+  duplicated here would drift from it.
+- **`ExtractStatus`** — `"ready" | "not_a_claim" | "no_match"`, with the same
+  open-ended arm as `FailureClass` so a future status doesn't break the build.
+  `ExtractedClaims.status` widens from `string` to it, which is
+  source-compatible.
+- **`no_match`** — the status when the text HAS claims but none fall within
+  your `focus`. It is a successful answer, not an error, and it is never the
+  unfocused list in disguise: `identified_claims` is empty and `claim` is
+  `""`. Widen the focus and call again.
+
+- **`depth` on `verify` / `verifyBatch`** (and their `AndWait` helpers) —
+  `"standard"` (server default) or `"low"`. `"low"` runs a shallower check:
+  fewer sources, faster, and **half the credits** — same models throughout;
+  it is not a model downgrade. `VerifyBatchInput`
+  takes a batch-wide `depth`; each `VerifyBatchItem` may set its own `depth`
+  to override it, exactly like `visibility`. Omitted from the request body
+  when unset, so existing callers stay byte-identical on the wire and keep
+  working against a server that does not know the field yet.
+- **`Verification.depth`** — echoes the depth the verdict was actually
+  produced with. A `"low"` request served from the result cache reads back
+  `"standard"`. Absent on servers that predate the field.
+
 ### Changed
+
+- **`openapi.json` refreshed**, which also catches up on server changes that
+  were never re-snapshotted after 2.8.0: `failure_class` / `retryable` on the
+  status schema, the 502/503 error rows, and a `/extract` 200 response schema
+  where the vendored spec previously had none. No SDK behaviour depends on it —
+  the file is documentation and generator input.
 
 - **The `verify` / `ask` / `assess` blocks are now projections of the one
   pool**, not separate allowances — spending on any capability moves all
@@ -53,11 +97,22 @@ release with Python 2.9.0.
   `quota_used` is derived as `quota_total - quota_remaining` so
   `used + remaining === total` still holds in every block. Reading them needs
   no code change; the numbers now move together.
-- **`UsageCapacity.credits` is deprecated and optional** (`credits?: number`).
-  It is an alias of the new `bonus` — it never meant the pool, it meant that
-  capability's one-off top-up balance. The server stops sending it on
-  **2026-11-29**. TypeScript callers assigning it straight into a `number`
-  will need `?? 0`, or a move to `bonus`.
+
+### Deprecated
+
+- **The per-capability blocks `usage.verify` / `ask` / `assess`, and
+  `UsageCapacity.credits`,** are removed together on
+  **2026-11-29** — one date, one release, rather than two breaking changes
+  months apart. Both are marked `@deprecated`, so editors strike them through
+  and name the replacement.
+  - The blocks are two floor divisions of `credits` by `costs`:
+    `Math.floor(credits.remaining / costs[capability])`. Two capabilities at
+    the same price emit identical objects (`ask` and `assess` are both 1
+    credit), because there is one balance behind all of them.
+  - `UsageCapacity.credits` is an alias of `bonus` and is now optional
+    (`credits?: number`). It never meant the pool: before the pool existed it
+    meant that capability's one-off top-up balance, which is exactly what
+    `bonus` reports.
 
 ### Notes
 

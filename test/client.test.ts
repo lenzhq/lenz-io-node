@@ -203,6 +203,45 @@ describe("Marquee verbs", () => {
     expect(body.visibility).toBeUndefined();
   });
 
+  it("verify omits depth by default", async () => {
+    // The currently-deployed server 422s on unknown fields, so an
+    // always-present key would break every call.
+    const { fetch, calls } = makeFetch([{ body: { task_id: "t", claim_text: "x" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "x" });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.depth).toBeUndefined();
+  });
+
+  it("verify sends depth when set", async () => {
+    const { fetch, calls } = makeFetch([{ body: { task_id: "t", claim_text: "x" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "x", depth: "low" });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.depth).toBe("low");
+  });
+
+  it("verifyBatch sends batch-wide depth and per-item override", async () => {
+    const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatch({
+      claims: [{ text: "a" }, { text: "b", depth: "standard" }],
+      depth: "low",
+    });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.depth).toBe("low");
+    expect(body.claims[1].depth).toBe("standard");
+  });
+
+  it("verifyBatch omits depth by default", async () => {
+    const { fetch, calls } = makeFetch([{ body: { batch_id: "b", items: [] } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatch({ claims: [{ text: "a" }] });
+    const body = JSON.parse(String(calls[0]!.init.body));
+    expect(body.depth).toBeUndefined();
+    expect(body.claims[0].depth).toBeUndefined();
+  });
+
   it("verifyBatch returns batch_id and items", async () => {
     const { fetch } = makeFetch([
       {
@@ -252,6 +291,30 @@ describe("Marquee verbs", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const out = await client.extract({ text: "Sharks don't get cancer." });
     expect(out.claim).toBe("Sharks don't get cancer.");
+  });
+
+  it("extract returns no_match when nothing fell within the focus", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "no_match",
+          claim: "",
+          identified_claims: [],
+          candidate_claims: [],
+          domain: "",
+          key_entities: [],
+          presumed_intent: "Raise a Series A round from investors.",
+          original_input: "...",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "...", focus: "claims about cricket" });
+    // no_match is a successful answer, not an error, and it is never the
+    // unfocused list in disguise.
+    expect(out.status).toBe("no_match");
+    expect(out.identified_claims).toEqual([]);
+    expect(out.claim).toBe("");
   });
 
   it("getStatus returns typed status", async () => {
@@ -443,6 +506,24 @@ describe("verifyAndWait", () => {
     await client.verifyAndWait({ claim: "x", timeoutMs: 5_000, idempotency: false });
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Idempotency-Key")).toBeNull();
+  });
+
+  it("forwards depth to the submit body, and omits it when unset", async () => {
+    const polled = {
+      body: {
+        status: "completed",
+        result: { verification_id: "v", verdict: "True", confidence: "high" },
+      },
+    };
+    const withDepth = makeFetch([{ body: { task_id: "t", claim_text: "x" } }, polled]);
+    const c1 = new Lenz({ apiKey: "lenz_t", fetch: withDepth.fetch });
+    await c1.verifyAndWait({ claim: "x", timeoutMs: 5_000, depth: "low" });
+    expect(JSON.parse(String(withDepth.calls[0]!.init.body)).depth).toBe("low");
+
+    const without = makeFetch([{ body: { task_id: "t", claim_text: "x" } }, polled]);
+    const c2 = new Lenz({ apiKey: "lenz_t", fetch: without.fetch });
+    await c2.verifyAndWait({ claim: "x", timeoutMs: 5_000 });
+    expect(JSON.parse(String(without.calls[0]!.init.body)).depth).toBeUndefined();
   });
 
   it("happy path returns Verification on first poll (flat verdict block)", async () => {
@@ -689,6 +770,20 @@ describe("verifyBatchAndWait", () => {
     });
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Idempotency-Key")).toBe("k1");
+  });
+
+  it("forwards depth to /verify/batch", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { batch_id: "b", items: [{ task_id: "t1", claim_text: "a" }] } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifyBatchAndWait({
+      claims: [{ text: "a" }],
+      depth: "low",
+      timeoutMs: 5_000,
+    });
+    expect(JSON.parse(String(calls[0]!.init.body)).depth).toBe("low");
   });
 });
 

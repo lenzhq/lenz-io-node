@@ -4,7 +4,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 
 **Four API primitives, one research-depth ladder.**
 
-- `extract` — pull verifiable claims out of any text. Free, 1000 calls/account/day (shared across your API keys).
+- `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~5-10s. Sync, paid.
 - `verify` — full 8-model pipeline with citations in ~90s. Async, paid.
 - `ask` — follow-up questions grounded on a verification.
@@ -26,6 +26,7 @@ import { Lenz } from "lenz-io";
 const client = new Lenz({ apiKey: "lenz_..." });
 
 // 1. extract — pull verifiable claims out of any text (free)
+//    add focus: "..." to narrow it to the claims you care about
 const out = await client.extract({ text: llmOutput });
 
 // 2. assess — fast 3-model verdict on each (~5-10s, sync)
@@ -84,7 +85,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 
 ## What you get on the client
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list — see [Steering extract](#steering-extract).
 - **`client.assess({ text })`** → `AssessResponse`. Sync, ~5-10s, returns one entry per identified claim.
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
@@ -358,12 +359,47 @@ default, so a network drop after submit doesn't spawn a duplicate verification
 or charge a second credit. Override with `idempotencyKey: "..."` to pin a
 specific key, or `idempotency: false` to opt out.
 
+## Steering extract
+
+`extract` returns every major factual claim it finds, ranked most-check-worthy
+first. On a long document that is often more than you want to verify. Pass
+`focus` to narrow it:
+
+```ts
+const out = await client.extract({
+  text: pitchDeck,
+  focus: "market size, growth and competitors",
+});
+```
+
+A focus can only **select** from the claims the extractor found. It cannot add
+a claim, reword one, reorder them, change the output language, or change what
+counts as a claim — selection runs over the claim list, not over your document,
+so a claim you get back is one an unfocused call would have returned too,
+verbatim.
+
+At most 300 characters. A longer focus is rejected with a 422 rather than
+truncated, so you never get a subset you did not ask for.
+
+When the document has claims but none fall within your focus, `status` is
+`"no_match"` and `identified_claims` is empty. The unfocused list is never
+substituted — widen the focus and call again.
+
+```ts
+if (out.status === "no_match") {
+  // nothing in this document matched; broaden the focus
+}
+```
+
+A focused call costs the same single unit of the daily cap as an unfocused one.
+
 ## Multi-language output
 
 The Lenz API returns prose fields (atomic claim, executive summary, debate, panel
 reasoning) in any of 12 languages. Pass `language:` on `verify`, `verifyAndWait`,
 `verifyBatch`, `assess`, `extract`, or `ask.send`. Verdict labels stay English
-regardless of language.
+regardless of language. On `extract`, `language` and `focus` are independent —
+a focus written in any language selects claims emitted in `language`.
 
 ```ts
 const v = await client.verifyAndWait({

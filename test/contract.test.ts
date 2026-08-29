@@ -88,6 +88,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "modified_at",
     "language",
     "visibility",
+    "depth",
   ]),
   VerificationListItem: new Set([
     "verification_id",
@@ -211,6 +212,9 @@ function walk(payload: unknown, ifaceName: string, path: string): string[] {
 describe("contract", () => {
   const cases: Array<[string, string]> = [
     ["extract_response.json", "ExtractedClaims"],
+    // `no_match` (a focus that nothing matched) must deserialize into the
+    // same model with the same key set — a new status, never a new shape.
+    ["extract_response_no_match.json", "ExtractedClaims"],
     ["assess_single_claim.json", "AssessResponse"],
     ["assess_multiclaim.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
