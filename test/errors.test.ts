@@ -121,6 +121,51 @@ describe("mapResponseToError", () => {
     expect(e.cost).toBe(50); // credits
   });
 
+  it("402 cost is depth-aware for a rejected low-depth verify", () => {
+    // A rejected `depth: "low"` verify reports 5, not the standard 10. `cost`
+    // is what the server would actually have charged, so a client must read
+    // it rather than multiplying `requested` by a price it assumed. The
+    // charge follows the depth REQUESTED — a `low` request the server could
+    // have answered from a cached `standard` verdict is still priced at low.
+    const e = mapResponseToError(
+      402,
+      body({
+        detail: "out",
+        code: "no_credits",
+        remaining: 0,
+        requested: 1,
+        credits_remaining: 4,
+        cost: 5,
+      }),
+      {},
+    ) as LenzQuotaExceededError;
+    expect(e.cost).toBe(5);
+    expect(e.creditBalance).toBe(4);
+    // 4 credits cannot buy even the half-price call — the whole point of
+    // publishing both numbers.
+    expect(e.cost!).toBeGreaterThan(e.creditBalance!);
+  });
+
+  it("402 cost for a mixed-depth batch is the real summed total", () => {
+    // Three standard (30) + two low (10) = 40, which is neither 5 * 10 nor
+    // 5 * 5. Deriving the cost from `requested` is wrong in both directions.
+    const e = mapResponseToError(
+      402,
+      body({
+        detail: "batch too big",
+        code: "no_credits",
+        remaining: 2,
+        requested: 5,
+        credits_remaining: 25,
+        cost: 40,
+      }),
+      {},
+    ) as LenzQuotaExceededError;
+    expect(e.cost).toBe(40);
+    expect(e.cost).not.toBe(e.requested! * 10);
+    expect(e.cost).not.toBe(e.requested! * 5);
+  });
+
   it("402 echoes requested for a batch shortfall", () => {
     const e = mapResponseToError(
       402,

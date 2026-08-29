@@ -117,6 +117,16 @@ export class LenzQuotaExceededError extends LenzError {
    *
    * Scales with a batch: five verifications at 10 credits each reports 50.
    * Server field `cost`.
+   *
+   * **Depth-aware, not a fixed multiple.** A rejected `depth: "low"` verify
+   * reports 5 (half a standard one), and a rejected batch that mixes depths
+   * reports its real summed total — three standard plus two low is 40, which
+   * is neither `5 * 10` nor `5 * 5`. Read this field rather than multiplying
+   * {@link requested} by a price you assumed.
+   *
+   * The charge follows the depth **requested**, not the one served: a `low`
+   * request is priced at `low` even when the server could have answered it
+   * from a cached `standard` verdict.
    */
   cost: number | null = null;
 

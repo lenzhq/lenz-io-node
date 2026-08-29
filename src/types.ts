@@ -319,8 +319,10 @@ export interface BatchItemResult {
  * exceed nothing — read `remaining` when you want "can I make this call".
  *
  * Convert to calls with {@link Usage.costs}: `remaining / costs.verify` is
- * how many verifications the balance still buys. The per-capability blocks on
- * {@link Usage} do that division for you.
+ * how many verifications the balance still buys — or `costs.verify_low`, half
+ * that price, for a `depth: "low"` check. The per-capability blocks on
+ * {@link Usage} do that division for you, except for `verify_low`, which is a
+ * price with no block of its own.
  */
 export interface UsageCredits {
   total: number;
@@ -388,11 +390,15 @@ export interface UsageExtract {
  * const u = await client.usage();
  * u.credits.remaining; // 5070 credits left
  * u.costs["verify"]; // 10 credits per verification
+ * u.costs["verify_low"]; // 5 — half price at depth: "low"
  * u.verify.remaining; // 507 verifications, the same balance divided
  * ```
  *
  * `extract` is free at the pool (`costs.extract` is 0) and carries a
  * per-account daily fair-use cap instead; it rejects with 429, not 402.
+ *
+ * `costs.verify_low` is a **price, not a capability** — there is deliberately
+ * no `verify_low` block beside `verify`. See {@link Usage.costs}.
  */
 export interface Usage {
   plan: string;
@@ -403,11 +409,28 @@ export interface Usage {
    */
   credits: UsageCredits;
   /**
-   * Credits per call, keyed by capability name (`verify`, `assess`, `ask`,
-   * `extract`). Keys are the server's own, verbatim — never rewritten by the
-   * SDK — and a zero cost means the capability is free at the pool and bounded
-   * by a daily cap instead. New capabilities appear here without an SDK
-   * release, so read it as a map rather than destructuring known names.
+   * Credits per call, keyed by capability name (`verify`, `verify_low`,
+   * `assess`, `ask`, `extract`). Keys are the server's own, verbatim — never
+   * rewritten by the SDK — and a zero cost means the capability is free at the
+   * pool and bounded by a daily cap instead. New keys appear here without an
+   * SDK release, so read it as a map rather than destructuring known names.
+   *
+   * `verify_low` is the `depth: "low"` verify price — half of `verify`. `low`
+   * caps research breadth while every reasoning step runs the same models; it
+   * is not a model downgrade. It is a **price, not a capability**: there is
+   * deliberately no `verify_low` block beside {@link Usage.verify}, because it
+   * would report the same balance in a second unit. Divide the balance
+   * yourself for the count:
+   *
+   * ```ts
+   * const lowDepthLeft = Math.floor(u.credits.remaining / u.costs["verify_low"]);
+   * ```
+   *
+   * **You are charged for the depth you requested, not the one you were
+   * served.** A `low` request answered from a cached `standard` verdict still
+   * costs `verify_low`. The `depth` echoed on a completed verification is what
+   * the verdict was *produced* with, so it can read `standard` on a `low`
+   * request — the echo describes the evidence, the charge follows the request.
    */
   costs: Record<string, number>;
   verify: UsageCapacity;

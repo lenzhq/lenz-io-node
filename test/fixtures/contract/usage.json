@@ -1,15 +1,16 @@
 {
   "plan": "developer",
-  "quota_resets_at": "2026-07-01T00:00:00+00:00",
+  "quota_resets_at": "2026-09-01T00:00:00+00:00",
   "credits": {
     "total": 5200,
     "used": 130,
     "remaining": 5070,
     "bonus": 200,
-    "resets_at": "2026-07-01T00:00:00+00:00"
+    "resets_at": "2026-09-01T00:00:00+00:00"
   },
   "costs": {
     "verify": 10,
+    "verify_low": 5,
     "assess": 1,
     "ask": 1,
     "extract": 0
@@ -39,7 +40,7 @@
     "remaining": 5070
   },
   "extract": {
-    "calls_today": 3,
+    "calls_today": 4,
     "daily_limit": 1000,
     "unlimited": false
   },

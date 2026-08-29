@@ -15,9 +15,22 @@ release with Python 2.9.0.
   `used`, `remaining`, the non-expiring `bonus` bucket, and `resets_at`. This
   is the authoritative number; every billable call spends from it.
 - **`Usage.costs`** — `Record<string, number>`, credits per call keyed by
-  capability name (`verify` 10, `assess` 1, `ask` 1, `extract` 0). Keys are
-  the server's own and are never rewritten by the SDK, so a new capability
-  appears without an SDK release — read it as a map.
+  capability name (`verify` 10, `verify_low` 5, `assess` 1, `ask` 1,
+  `extract` 0). Keys are the server's own and are never rewritten by the SDK,
+  so a new key appears without an SDK release — read it as a map.
+- **`costs["verify_low"]`** — the `depth: "low"` verify price, half a standard
+  one. `low` caps research breadth while every reasoning step runs the same
+  models; it is not a model downgrade. It is a **price, not a capability**:
+  there is deliberately no `verify_low` block beside `usage.verify`, because
+  it would report the same balance in a second unit. Divide
+  `credits.remaining` by it for the low-depth count. `costs` was already an
+  open `Record<string, number>`, so this is additive and needed no type
+  change.
+  - **You are charged for the depth you REQUESTED, not the one you were
+    served.** A `low` request answered from a cached `standard` verdict still
+    costs 5. The `depth` echoed on the completed verification is what the
+    verdict was _produced_ with, so it can read `standard` on a `low` request
+    — the echo describes the evidence, the charge follows the request.
 - **`UsageCapacity.bonus`** — the non-expiring bucket in that capability's
   unit, floored by its cost (5 bonus credits is `assess.bonus === 5` and
   `verify.bonus === 0`).
@@ -27,6 +40,10 @@ release with Python 2.9.0.
   Together they separate "you hold 4 credits and this verification costs 10"
   from "you hold nothing". `null` when the server omits them, matching
   `remaining`.
+  - `cost` is **depth-aware**, not a fixed multiple: a rejected
+    `depth: "low"` verify reports 5, and a rejected batch that mixes depths
+    reports its real summed total. Read it rather than multiplying `requested`
+    by an assumed price.
 
 ### Changed
 

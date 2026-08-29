@@ -59,7 +59,7 @@ const USAGE_BODY = {
     bonus: 0,
     resets_at: "2026-07-01T00:00:00+00:00",
   },
-  costs: { verify: 10, assess: 1, ask: 1, extract: 0 },
+  costs: { verify: 10, verify_low: 5, assess: 1, ask: 1, extract: 0 },
   verify: {
     quota_used: 0,
     quota_total: 10,
@@ -1167,12 +1167,46 @@ describe("usage", () => {
     const { fetch } = makeFetch([{ body: USAGE_BODY }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
-    expect(Object.keys(u.costs).sort()).toEqual(["ask", "assess", "extract", "verify"]);
+    expect(Object.keys(u.costs).sort()).toEqual([
+      "ask",
+      "assess",
+      "extract",
+      "verify",
+      "verify_low",
+    ]);
     expect(u.costs["verify"]).toBe(10);
     expect(u.costs["assess"]).toBe(1);
     expect(u.costs["ask"]).toBe(1);
     // Free at the pool — bounded by the daily cap in `extract` instead.
     expect(u.costs["extract"]).toBe(0);
+  });
+
+  it("carries the low-depth verify price in the same costs map", async () => {
+    // `costs` is an open Record<string, number>, so a new price key needs no
+    // type change — this is the tripwire that it actually survives parsing.
+    const { fetch } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.costs["verify_low"]).toBe(5);
+    expect(u.costs["verify_low"]! * 2).toBe(u.costs["verify"]);
+  });
+
+  it("treats verify_low as a price, never as a capability block", async () => {
+    // A `verify_low` projection would report the same balance in a second
+    // unit, so the server deliberately does not send one and the SDK must not
+    // invent one. Clients divide the balance themselves.
+    const { fetch } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    const bag = u as unknown as Record<string, unknown>;
+    expect(bag["verify_low"]).toBeUndefined();
+    // Only the three real capability blocks exist beside the pool.
+    const blockKeys = ["verify", "ask", "assess"].filter((k) => typeof bag[k] === "object");
+    expect(blockKeys).toEqual(["verify", "ask", "assess"]);
+    // 100 credits at 5 each is 20 low-depth checks — twice the verify block's
+    // 10, and a number no block on the response reports.
+    expect(Math.floor(u.credits.remaining / u.costs["verify_low"]!)).toBe(20);
+    expect(u.verify.remaining).toBe(10);
   });
 
   it("reports bonus per capability, floored by that capability's cost", async () => {
