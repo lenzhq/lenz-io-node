@@ -262,6 +262,30 @@ describe("Marquee verbs", () => {
     expect(out.claim).toBe("Sharks don't get cancer.");
   });
 
+  it("extract returns no_match when nothing fell within the focus", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "no_match",
+          claim: "",
+          identified_claims: [],
+          candidate_claims: [],
+          domain: "",
+          key_entities: [],
+          presumed_intent: "Raise a Series A round from investors.",
+          original_input: "...",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "...", focus: "claims about cricket" });
+    // no_match is a successful answer, not an error, and it is never the
+    // unfocused list in disguise.
+    expect(out.status).toBe("no_match");
+    expect(out.identified_claims).toEqual([]);
+    expect(out.claim).toBe("");
+  });
+
   it("getStatus returns typed status", async () => {
     const { fetch } = makeFetch([
       { body: { status: "processing", progress: { step: "Framing..." } } },

@@ -142,6 +142,71 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
     await client.ask.send("v1", { message: "why?" });
     expect(bodyOf(calls)).not.toHaveProperty("language");
   });
+
+  it("extract: no focus key when omitted", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "x",
+          identified_claims: ["x"],
+          domain: "Science",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "The earth is flat" });
+    expect(bodyOf(calls)).not.toHaveProperty("focus");
+  });
+
+  it("extract: sends focus", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "x",
+          identified_claims: ["x"],
+          domain: "Science",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", focus: "market size and competitors" });
+    expect(bodyOf(calls).focus).toBe("market size and competitors");
+  });
+
+  it("extract: sends focus and language together", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "x",
+          identified_claims: ["x"],
+          domain: "Science",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", language: "es", focus: "competidores" });
+    expect(bodyOf(calls).language).toBe("es");
+    expect(bodyOf(calls).focus).toBe("competidores");
+  });
+
+  it("extract: does not send an empty focus", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "x",
+          identified_claims: ["x"],
+          domain: "Science",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", focus: "" });
+    expect(bodyOf(calls)).not.toHaveProperty("focus");
+  });
 });
 
 // ─────────────────────────────────────────────── HAPPY PATH ──

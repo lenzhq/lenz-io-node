@@ -414,9 +414,23 @@ export class Lenz {
     });
   }
 
+  /**
+   * Pull the verifiable claims out of any text. Sync, free, capped at
+   * 1000 calls/account/day (shared across your API keys).
+   *
+   * Pass `focus` to narrow the result to the claims you care about, e.g.
+   * `"market size and competitors"`. A focus can only SELECT from the claims
+   * the extractor found — see {@link ExtractInput.focus}.
+   *
+   * `status` is `"ready"`, `"not_a_claim"` (no verifiable claim in the text
+   * at all), or `"no_match"` (claims were found, none fell within `focus`).
+   */
   async extract(input: ExtractInput): Promise<ExtractedClaims> {
     const body: Record<string, unknown> = { text: input.text };
     if (input.language) body.language = input.language;
+    // No client-side length check on `focus`: the server's 422 is the
+    // contract, and a cap duplicated here would drift from it.
+    if (input.focus) body.focus = input.focus;
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
