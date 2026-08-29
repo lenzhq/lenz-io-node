@@ -467,8 +467,18 @@ export interface Usage {
    * the echo describes the evidence, the charge follows the request.
    */
   cost_options: Record<string, Record<string, Record<string, number>>>;
+  /**
+   * @deprecated Removed 2026-11-29. Derive from {@link Usage.credits} and
+   * {@link Usage.costs} instead:
+   *
+   * ```ts
+   * const left = Math.floor(u.credits.remaining / u.costs["verify"]!);
+   * ```
+   */
   verify: UsageCapacity;
+  /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
   ask: UsageCapacity;
+  /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
   assess: UsageCapacity;
   extract: UsageExtract;
   /**
