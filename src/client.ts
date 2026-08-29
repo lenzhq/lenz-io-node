@@ -394,6 +394,7 @@ export class Lenz {
         };
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
+        if (c.depth) item.depth = c.depth;
         return item;
       }),
     };
@@ -402,6 +403,7 @@ export class Lenz {
     if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
     if (input.language) body["language"] = input.language;
     if (input.visibility) body["visibility"] = input.visibility;
+    if (input.depth) body["depth"] = input.depth;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<BatchAccepted>({
@@ -679,6 +681,8 @@ export class Lenz {
     if (input.language) body.language = input.language;
     // Omit-when-empty: the server defaults to "private".
     if (input.visibility) body.visibility = input.visibility;
+    // Omit-when-empty: the server defaults to "standard".
+    if (input.depth) body.depth = input.depth;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.request<TaskAccepted>({
