@@ -319,9 +319,9 @@ export interface BatchItemResult {
  * exceed nothing — read `remaining` when you want "can I make this call".
  *
  * Convert to calls with {@link Usage.costs}: `remaining / costs.verify` is
- * how many verifications the balance still buys — or `costs.verify_low`, half
+ * how many verifications the balance still buys — or the `depth` prices in
  * that price, for a `depth: "low"` check. The per-capability blocks on
- * {@link Usage} do that division for you, except for `verify_low`, which is a
+ * {@link Usage} do that division for you, except for the depth prices, which are
  * price with no block of its own.
  */
 export interface UsageCredits {
@@ -390,15 +390,15 @@ export interface UsageExtract {
  * const u = await client.usage();
  * u.credits.remaining; // 5070 credits left
  * u.costs["verify"]; // 10 credits per verification
- * u.costs["verify_low"]; // 5 — half price at depth: "low"
+ * u.cost_options.verify?.depth?.low; // 5 — half price at depth: "low"
  * u.verify.remaining; // 507 verifications, the same balance divided
  * ```
  *
  * `extract` is free at the pool (`costs.extract` is 0) and carries a
  * per-account daily fair-use cap instead; it rejects with 429, not 402.
  *
- * `costs.verify_low` is a **price, not a capability** — there is deliberately
- * no `verify_low` block beside `verify`. See {@link Usage.costs}.
+ * The depth prices are **prices, not capabilities** — there is deliberately
+ * no `verify_low` block beside `verify`. See {@link Usage.cost_options}.
  */
 export interface Usage {
   /**
@@ -420,30 +420,53 @@ export interface Usage {
    */
   credits: UsageCredits;
   /**
-   * Credits per call, keyed by capability name (`verify`, `verify_low`,
-   * `assess`, `ask`, `extract`). Keys are the server's own, verbatim — never
-   * rewritten by the SDK — and a zero cost means the capability is free at the
-   * pool and bounded by a daily cap instead. New keys appear here without an
-   * SDK release, so read it as a map rather than destructuring known names.
+   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`,
+   * `extract`), at that capability's default price. Keys are the server's
+   * own, verbatim — never rewritten by the SDK — and a zero cost means the
+   * capability is free at the pool and bounded by a daily cap instead. New
+   * keys appear here without an SDK release.
    *
-   * `verify_low` is the `depth: "low"` verify price — half of `verify`. `low`
-   * caps research breadth while every reasoning step runs the same models; it
-   * is not a model downgrade. It is a **price, not a capability**: there is
-   * deliberately no `verify_low` block beside {@link Usage.verify}, because it
-   * would report the same balance in a second unit. Divide the balance
-   * yourself for the count:
-   *
-   * ```ts
-   * const lowDepthLeft = Math.floor(u.credits.remaining / u.costs["verify_low"]);
-   * ```
-   *
-   * **You are charged for the depth you requested, not the one you were
-   * served.** A `low` request answered from a cached `standard` verdict still
-   * costs `verify_low`. The `depth` echoed on a completed verification is what
-   * the verdict was *produced* with, so it can read `standard` on a `low`
-   * request — the echo describes the evidence, the charge follows the request.
+   * Capability names and nothing else. Prices that depend on a request
+   * parameter are in {@link Usage.cost_options}.
    */
   costs: Record<string, number>;
+  /**
+   * Prices that depend on a request PARAMETER, nested capability → parameter
+   * → value:
+   *
+   * ```ts
+   * u.cost_options.verify?.depth; // { standard: 10, low: 5 }
+   * ```
+   *
+   * Read as "on `verify`, the `depth` parameter prices like this". `{}` on
+   * servers predating this field.
+   *
+   * Every capability here also appears in {@link Usage.costs} at its default
+   * price, so reading only `costs` is imprecise, never wrong.
+   *
+   * ```ts
+   * const low = u.cost_options.verify?.depth?.low ?? u.costs["verify"]!;
+   * const lowDepthLeft = Math.floor(u.credits.remaining / low);
+   * ```
+   *
+   * Every level is optional at the type level because every level is
+   * genuinely optional at runtime: a server predating this field sends
+   * `{}`, and the capability-default in `costs` is the correct fallback.
+   *
+   * ```ts
+   * ```
+   *
+   * Nested rather than flattened into `costs` as `verify_low`, which is what
+   * this was at first: a flat map grows one sibling per tuning parameter, and
+   * anything iterating `costs` would count prices as capabilities.
+   *
+   * You are charged for the depth you **requested**, not the one served: a
+   * `low` request answered from a cached `standard` verdict still costs the
+   * `low` price. The `depth` echoed on a completed verification is what the
+   * verdict was PRODUCED with, so it can read `standard` on a `low` request —
+   * the echo describes the evidence, the charge follows the request.
+   */
+  cost_options: Record<string, Record<string, Record<string, number>>>;
   verify: UsageCapacity;
   ask: UsageCapacity;
   assess: UsageCapacity;

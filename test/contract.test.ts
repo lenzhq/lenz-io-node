@@ -116,9 +116,11 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   DebateSide: new Set(["role", "argument", "rebuttal"]),
   Usage: new Set([
     "plan",
+    "plan_label",
     "quota_resets_at",
     "credits",
     "costs",
+    "cost_options",
     "verify",
     "ask",
     "assess",
@@ -163,6 +165,10 @@ const NESTED: Record<string, Record<string, string | null>> = {
   Usage: {
     credits: "UsageCredits",
     costs: null, // capability → credits map; keys are the server's, verbatim
+    // capability → parameter → value → credits. Opaque for the same reason
+    // `costs` is: every level is keyed by the server's own names, and new
+    // parameters appear without an SDK release.
+    cost_options: null,
     verify: "UsageCapacity",
     ask: "UsageCapacity",
     assess: "UsageCapacity",

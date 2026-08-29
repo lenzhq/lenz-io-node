@@ -94,7 +94,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
 - **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed).
-- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `verify_low` 5, `assess` 1, `ask` 1, `extract` 0), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
+- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
 
@@ -209,7 +209,7 @@ u.credits.bonus; // 200 — the non-expiring part of it
 u.credits.resets_at; // when the monthly allowance refills, or null
 
 u.costs["verify"]; // 10 credits per verification
-u.costs["verify_low"]; // 5 — half price at depth: "low"
+u.cost_options.verify.depth.low; // 5 — half price at depth: "low"
 u.verify.remaining; // 507 — the same balance, in verifications
 u.assess.remaining; // 5070 — and in assessments
 
@@ -231,17 +231,22 @@ the API on **2026-11-29**; read `bonus`.
 
 ### Depth pricing
 
-`costs["verify_low"]` is the price of a `depth: "low"` verification — half a
+`cost_options.verify.depth.low` is the price of a `depth: "low"` verification — half a
 standard one. `low` caps research breadth (fewer discovery queries, a hard
 extraction ceiling, no recovery fetch tiers) while every reasoning step runs
 the same models; it is not a model downgrade.
 
-It is a **price, not a capability**. There is deliberately no `u.verify_low`
+It is a **price, not a capability**, which is why it is nested under
+`cost_options` rather than sitting in `costs` beside the four capability
+names. There is deliberately no `u.verify_low`
 block beside `u.verify` — it would report the same balance in a second unit.
 Divide the balance yourself when you want the count:
 
 ```ts
-const lowDepthLeft = Math.floor(u.credits.remaining / u.costs["verify_low"]); // 1014
+// Every level is optional: a server predating this field sends `{}`, and
+// the capability's default price in `costs` is the right fallback.
+const low = u.cost_options.verify?.depth?.low ?? u.costs["verify"];
+const lowDepthLeft = Math.floor(u.credits.remaining / low); // 1014
 ```
 
 **You are charged for the depth you requested, not the one you were served.**
