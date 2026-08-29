@@ -456,9 +456,9 @@ export interface Usage {
    * ```ts
    * ```
    *
-   * Nested rather than flattened into `costs` as `verify_low`, which is what
-   * this was at first: a flat map grows one sibling per tuning parameter, and
-   * anything iterating `costs` would count prices as capabilities.
+   * Nested rather than flat so that a future request parameter adds a key
+   * under its capability instead of a new top-level entry — `costs` stays a
+   * list of capability names, safe to iterate.
    *
    * You are charged for the depth you **requested**, not the one served: a
    * `low` request answered from a cached `standard` verdict still costs the
