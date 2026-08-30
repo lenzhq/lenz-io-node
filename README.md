@@ -5,7 +5,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 **Four API primitives, one research-depth ladder.**
 
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
-- `assess` — fast 3-model panel verdict in ~5-10s. Sync, paid.
+- `assess` — fast 3-model panel verdict in ~10s. Sync, paid.
 - `verify` — full 8-model pipeline with citations in ~90s. Async, paid.
 - `ask` — follow-up questions grounded on a verification.
 
@@ -29,7 +29,7 @@ const client = new Lenz({ apiKey: "lenz_..." });
 //    add focus: "..." to narrow it to the claims you care about
 const out = await client.extract({ text: llmOutput });
 
-// 2. assess — fast 3-model verdict on each (~5-10s, sync)
+// 2. assess — fast 3-model verdict on each (~10s, sync)
 const quick = await client.assess({ text: llmOutput });
 for (const c of quick.claims) {
   console.log(c.verdict, c.confidence, c.claim);
@@ -60,7 +60,7 @@ already has a deep verification, `assess` returns it via
 Framing → Research → Debate (2 models, 2 rounds) → Panel Review
 (3 reviewers: source quality, logical structure, claim precision) → Conclusion. ~90 seconds wall-clock
 per claim. `assess` runs a leaner 3-model panel against the same
-framing for the ~5-10s pass.
+framing for the ~10s pass.
 
 ## Quickstart demo
 
@@ -86,7 +86,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 ## What you get on the client
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list — see [Steering extract](#steering-extract).
-- **`client.assess({ text })`** → `AssessResponse`. Sync, ~5-10s, returns one entry per identified claim.
+- **`client.assess({ text })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim.
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
