@@ -27,7 +27,7 @@
  * // 1. extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
  *
- * // 2. assess — fast 3-model verdict on each (~5-10s, paid)
+ * // 2. assess — fast 3-model verdict on each (~10s, paid)
  * const quick = await client.assess({ text: llmOutput });
  *
  * // 3. verify — escalate low-confidence to the full pipeline (~90s, paid)
@@ -440,7 +440,7 @@ export class Lenz {
 
   /**
    * Fast 3-model panel verdict on each identified claim in the input.
-   * Sync, ~5-10s. Returns one entry per atomic_claim. For deeper analysis
+   * Sync, ~10s. Returns one entry per atomic_claim. For deeper analysis
    * (citations, full audit trail), escalate low-confidence claims to
    * `verifyAndWait`; the two endpoints share a result cache server-side.
    *
