@@ -27,17 +27,19 @@
  * // 1. extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
  *
- * // 2. assess — fast 3-model verdict on each (~10s, paid)
- * const quick = await client.assess({ text: llmOutput });
+ * // 2. assess — fast 3-model verdict on each (~10s, one credit per claim); independent calls
+ * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+ * const quick = await Promise.all(
+ *   claims.map(async (c) => (await client.assess({ claim: c })).claims[0]),
+ * );
  *
- * // 3. verify — escalate low-confidence to the full pipeline (~90s, paid)
- * let deep;
- * for (const c of quick.claims) {
- *   if (c.confidence === 'low') {
- *     deep = await client.verifyAndWait({ claim: c.claim! });
- *     console.log(deep.verdict, deep.lenz_score);
- *   }
+ * // 3. verify — escalate the low-confidence ones to the full pipeline (~90s), in one batch
+ * const doubtful = quick.filter((c) => c.confidence === 'low').map((c) => ({ claim: c.claim! }));
+ * const results = await client.verifyBatchAndWait({ claims: doubtful });
+ * for (const r of results) {
+ *   if (r.verification) console.log(r.verification.verdict, r.verification.lenz_score);
  * }
+ * const deep = results[0]?.verification;
  *
  * // 4. ask — follow-up grounded on a verification
  * const reply = await client.ask.send(deep!.verification_id!, {
