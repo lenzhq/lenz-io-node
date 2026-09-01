@@ -28,14 +28,20 @@ const client = new Lenz({ apiKey: "lenz_..." });
 // 1. extract — pull verifiable claims out of any text (free)
 //    add focus: "..." to narrow it to the claims you care about
 const out = await client.extract({ text: llmOutput });
-const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+const claims = (out.identified_claims?.length ? out.identified_claims : [out.claim]).filter(
+  Boolean,
+) as string[];
 
 // 2. assess — fast 3-model verdict on each (~10s, sync, one credit per claim).
-//    Assess the extracted claims, not the document: the calls are independent,
-//    so run them side by side.
-const quick = await Promise.all(
-  claims.map(async (c) => (await client.assess({ claim: c })).claims[0]),
-);
+//    Assess the extracted claims, not the document. The calls are independent;
+//    run at most 5 at a time (the server's own fan-out cap).
+const quick = [];
+for (let i = 0; i < claims.length; i += 5) {
+  const batch = await Promise.all(
+    claims.slice(i, i + 5).map(async (c) => (await client.assess({ claim: c })).claims[0]),
+  );
+  quick.push(...batch.filter(Boolean)); // claims is [] when nothing is checkable
+}
 for (const c of quick) {
   console.log(c.verdict, c.confidence, c.claim);
 }

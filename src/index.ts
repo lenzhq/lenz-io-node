@@ -14,10 +14,12 @@
  * const out = await client.extract({ text: llmOutput });
  *
  * // 2. /assess — fast 3-model verdict on each (~10s, one credit per claim); independent calls
- * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
- * const quick = await Promise.all(
- *   claims.map(async (c) => (await client.assess({ claim: c })).claims[0]),
- * );
+ * const claims = (out.identified_claims?.length ? out.identified_claims : [out.claim]).filter(Boolean);
+ * const quick = [];
+ * for (let i = 0; i < claims.length; i += 5) {   // at most 5 in flight, the server's own cap
+ *   const batch = await Promise.all(claims.slice(i, i + 5).map(async (c) => (await client.assess({ claim: c })).claims[0]));
+ *   quick.push(...batch.filter(Boolean));         // claims is [] when nothing is checkable
+ * }
  *
  * // 3. /verify — escalate the low-confidence ones to the full pipeline (~90s), in one batch
  * const doubtful = quick.filter((c) => c.confidence === 'low').map((c) => ({ claim: c.claim! }));
