@@ -59,11 +59,14 @@ for (const r of results) {
 }
 
 // 4. ask — follow-up grounded on a verification
-const deep = results[0]?.verification;
-const reply = await client.ask.send(deep!.verification_id!, {
-  message: "Which source is strongest?",
-});
-console.log(reply.content);
+const deep = results.find((r) => r.verification)?.verification;
+if (deep) {
+  // step 3 escalated at least one claim
+  const reply = await client.ask.send(deep.verification_id!, {
+    message: "Which source is strongest?",
+  });
+  console.log(reply.content);
+}
 ```
 
 `assess` and `verify` share a result cache server-side: if a claim

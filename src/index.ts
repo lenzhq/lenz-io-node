@@ -27,7 +27,7 @@
  * for (const r of results) {
  *   if (r.verification) console.log(r.verification.verdict, r.verification.lenz_score);
  * }
- * const deep = results[0]?.verification;
+ * const deep = results.find((r) => r.verification)?.verification;   // guard before /ask
  *
  * // 4. /ask — follow-up questions grounded on a verification
  * const reply = await client.ask.send(deep!.verification_id!, {
