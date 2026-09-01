@@ -112,6 +112,20 @@ describe("LenzWebhooks", () => {
     const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationNeedsInput;
     expect(event.event).toBe("verification.needs_input");
     expect((event.needsInput as Record<string, unknown>)["reason"]).toBe("multi_claim");
+    // No hint in the block → "" rather than "undefined".
+    expect(event.hint).toBe("");
+  });
+
+  it("needs_input lifts the hint out of the needs_input block", () => {
+    const hint = "Ambiguous: which memory market? Pick one candidate and resolve via select.";
+    const body = payload("verification.needs_input", {
+      needs_input: { reason: "clarification_required", candidate_claims: ["A", "B"], hint },
+    });
+    const wh = new LenzWebhooks({ secret: SECRET });
+    const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationNeedsInput;
+    expect(event.hint).toBe(hint);
+    // The raw block is untouched — the hint is still readable there too.
+    expect((event.needsInput as Record<string, unknown>)["hint"]).toBe(hint);
   });
 
   it("rejects tampered body with mismatch message", () => {

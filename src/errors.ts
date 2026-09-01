@@ -233,6 +233,8 @@ export class LenzNeedsInputError extends LenzError {
   taskId = "";
   kind = "";
   payload: Record<string, unknown> = {};
+  /** The server's one-sentence resolution hint; "" when an older server omits it. */
+  hint = "";
 }
 
 export class LenzPipelineError extends LenzError {
@@ -246,6 +248,8 @@ export class LenzPipelineError extends LenzError {
   failureClass = "";
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. `null` = server didn't say. */
   retryable: boolean | null = null;
+  /** The server's one-sentence hint on what to send instead (e.g. `not_a_claim`); "" when absent. */
+  hint = "";
 }
 
 export class LenzWebhookSignatureError extends LenzError {}

@@ -232,14 +232,39 @@ export interface AssessClaim {
   verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
   confidence?: string; // "high" | "medium" | "low"
   verification_url?: string | null;
+  /**
+   * Why this row has no verdict — set only when `verdict === "Error"`:
+   * `no_claim` | `ambiguous` | `framing_failed` | `upstream_unavailable`
+   * (the last is the retryable one). `null` on a verdict row. Error rows
+   * are free.
+   */
+  error_code?: string | null;
+  /** Specific readings when `error_code === "ambiguous"`; assess one of them. Else `[]`. */
+  candidate_claims?: string[];
+  /**
+   * Other claims found in this item that were NOT assessed — a compound
+   * item is assessed on its main claim. Send these as their own items to
+   * check the rest. Else `[]`.
+   */
+  identified_claims?: string[];
+  /**
+   * One sentence on what to send next. Set on every Error row and on a
+   * row with non-empty `identified_claims`; `null` on a plain verdict row.
+   */
+  hint?: string | null;
 }
 
 /**
  * Output of `POST /assess`.
  *
- * `claims` is one entry per atomic_claim that framing identified in the
- * input. Multiclaim inputs return N entries. `error` is set when
- * framing returns zero claims.
+ * Single form (`claim`): `claims` is one entry per atomic_claim that
+ * framing identified in the input. Multiclaim inputs return N entries.
+ * `error` is set when framing returns zero claims.
+ *
+ * List form (`claims`): exactly one entry per item sent, in the order
+ * sent. An item that could not be given a verdict is still in position,
+ * with `verdict: "Error"` and `error_code` / `hint` saying why; `error`
+ * is `null`.
  *
  * When `claims` is empty, `error_code` disambiguates why: `'ambiguous'`
  * → the input was vague but framing produced specific readings in
@@ -289,6 +314,13 @@ export interface TaskStatus {
    */
   failure_class?: FailureClass;
   retryable?: boolean;
+  /**
+   * One sentence on how to resolve the interrupt: what was unclear and that
+   * `select` resolves it. Sent on `needs_input` (`multi_claim` /
+   * `clarification_required`) and on a `failed` status whose
+   * `failure_reason` is `not_a_claim`. Older servers omit it.
+   */
+  hint?: string;
 }
 
 /**
@@ -656,8 +688,23 @@ export interface AssessInput {
   claim?: string;
   /** Accepted alias for `claim`; `claim` wins if both are given. */
   text?: string;
+  /**
+   * A list of claims — up to 20 per call — assessed in one trip. Exactly
+   * one `AssessClaim` comes back per item, in this order. Mutually
+   * exclusive with `claim` / `text`: giving both throws before any request
+   * is made. A compound item is assessed on its main claim and lists the
+   * rest in `identified_claims`; an item without a verdict is an
+   * in-position `verdict: "Error"` row (free) with `error_code` and `hint`.
+   */
+  claims?: string[];
   /** Output language (ISO 639-1). See `VerifyInput.language`. */
   language?: string;
+  /**
+   * Per-call HTTP timeout. A list call runs one parallel panel wave
+   * (~10-25s), so when omitted the list form waits at least 45s rather
+   * than the client's default; the single form uses the client's timeout.
+   */
+  timeoutMs?: number;
 }
 
 export interface AskSendInput {

@@ -3,5 +3,9 @@
 # sibling (see CONTRIBUTING.md → OpenAPI snapshot).
 openapi.json
 
+# Shared contract fixture — the SAME bytes as the Python SDK's copy. One row
+# per line is how it is captured; reformatting would break the parity.
+test/fixtures/contract/assess_claims_list.json
+
 # Generated bundle
 dist/

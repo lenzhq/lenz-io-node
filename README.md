@@ -5,7 +5,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 **Four API primitives, one research-depth ladder.**
 
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
-- `assess` — fast 3-model panel verdict in ~10s. Sync, paid.
+- `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full 8-model pipeline with citations in ~90s. Async, paid.
 - `ask` — follow-up questions grounded on a verification.
 
@@ -28,28 +28,44 @@ const client = new Lenz({ apiKey: "lenz_..." });
 // 1. extract — pull verifiable claims out of any text (free)
 //    add focus: "..." to narrow it to the claims you care about
 const out = await client.extract({ text: llmOutput });
+const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
 
-// 2. assess — fast 3-model verdict on each (~10s, sync)
-const quick = await client.assess({ claim: llmOutput });
-for (const c of quick.claims) {
+// 2. assess — ONE call over the extracted claims (up to 20), one row per
+//    claim, in the same order (~10-25s, sync)
+const quick = (await client.assess({ claims })).claims;
+for (const c of quick) {
   console.log(c.verdict, c.confidence, c.claim);
 }
 
-// 3. verify — escalate low-confidence claims to the full panel + citations
-let deep;
-for (const c of quick.claims) {
-  if (c.confidence === "low") {
-    deep = await client.verifyAndWait({ claim: c.claim! });
-    console.log(deep.verdict, deep.lenz_score, deep.executive_summary);
+// 3. verify — escalate the low-confidence rows to the full panel + citations
+const doubtful = quick
+  .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+  .map((c) => ({ claim: c.claim! }));
+const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
+for (const r of results) {
+  if (r.status === "completed") {
+    const v = r.verification!;
+    console.log(v.verdict, v.lenz_score, v.executive_summary);
   }
 }
 
 // 4. ask — follow-up grounded on a verification
+const deep = results.find((r) => r.status === "completed")?.verification;
 const reply = await client.ask.send(deep!.verification_id!, {
   message: "Which source is strongest?",
 });
 console.log(reply.content);
 ```
+
+`assess({ claims })` takes up to 20 claims per call and answers with exactly
+one row per item, in the order sent. A row with `verdict === "Error"` had no
+verdict: `error_code` says why (`no_claim`, `ambiguous`, `framing_failed`, or
+the retryable `upstream_unavailable`), `hint` says what to send next, and
+`candidate_claims` carries the specific readings when it was ambiguous. Error
+rows are free. A compound item is assessed on its main claim and lists the
+rest in `identified_claims` — send those as their own items to check them.
+The single form, `assess({ claim })`, is unchanged; the two are mutually
+exclusive.
 
 `assess` and `verify` share a result cache server-side: if a claim
 already has a deep verification, `assess` returns it via
@@ -87,6 +103,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list — see [Steering extract](#steering-extract).
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
+- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Takes a per-call `timeoutMs` (default 45s for a list).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
@@ -198,7 +215,7 @@ One balance per account, spent by every billable call:
 | -------------------------------------- | ---------------------------------------- |
 | `verify` (and `verifyBatch`, `select`) | **10** per claim                         |
 | `verify` with `depth: "low"`           | **5** per claim                          |
-| `assess`                               | 1 per claim                              |
+| `assess`                               | 1 per claim; `Error` rows are free       |
 | `ask`                                  | 1                                        |
 | `extract`                              | 0 — free, bounded by a daily cap instead |
 

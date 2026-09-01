@@ -8,14 +8,40 @@ All notable changes to this SDK are documented here. Format follows
 
 One input vocabulary: **`text` is a document, `claim` is a claim.** `extract`
 takes `text`; `assess`, `verify`, batch items and `select` take `claim` /
-`claims`. Lockstep release with Python 2.10.0. No request body changes: every
-call still serialises to the wire keys it always has, so this release works
-against any server version.
+`claims`. And `assess` takes a list: **`assess({ claims })`** checks up to 20
+claims in one call, one row per claim. Lockstep release with Python 2.10.0.
+
+Every existing call still serialises to the wire keys it always has, so it
+works against any server version. `assess({ claims })` is the one new request
+shape: it needs the server that accepts it (an earlier server answers 422).
 
 ### Added
 
 - **`AssessInput.claim`** — `client.assess({ claim })`. `text` keeps working
   as an alias; `claim` wins if both are given.
+- **`AssessInput.claims`** — `client.assess({ claims })`. Up to 20 claims per
+  call, sent as `claims` on the wire; exactly one `AssessClaim` comes back per
+  item, in the order sent. Mutually exclusive with `claim` / `text` — giving
+  both throws `LenzValidationError` before any request is made. A compound
+  item is assessed on its main claim; an item without a verdict comes back in
+  position as `verdict: "Error"`, free, and says why.
+- **`AssessClaim.error_code` / `candidate_claims` / `identified_claims` /
+  `hint`** — on every row, both forms. `error_code` is set only on an
+  `Error` row (`no_claim` | `ambiguous` | `framing_failed` |
+  `upstream_unavailable`, the last being the retryable one);
+  `candidate_claims` carries the readings when it was `ambiguous`;
+  `identified_claims` lists the other claims found in the item that were not
+  assessed; `hint` is one sentence on what to send next, set on every `Error`
+  row and on a row with non-empty `identified_claims`.
+- **`AssessInput.timeoutMs`** — per-call HTTP timeout on `assess`. A list
+  call waits at least 45s when it is omitted (the client default is 30s); the
+  single form keeps the client's timeout.
+- **`hint`** on the `needs_input` interrupt: `TaskStatus.hint`,
+  `LenzNeedsInputError.hint` and `VerificationNeedsInput.hint` (lifted out of
+  the webhook's `needs_input` block) carry the server's one-sentence
+  resolution hint for `multi_claim` / `clarification_required`; a `failed`
+  status with `failure_reason: not_a_claim` carries it too
+  (`LenzPipelineError.hint`). `""` when an older server omits it.
 - **`VerifyInput.text`** — an explicit alias for `claim` on `verify` /
   `verifyAndWait`. `claim` is no longer a required property at the type
   level (one of the two is required at runtime, as before).
@@ -23,6 +49,16 @@ against any server version.
   alias. Items keep serialising to `text` on the wire.
 - **`SelectInput.claims`** — `client.select(taskId, { claims })`. `texts`
   keeps working as an alias. The empty-selection error now names `claims`.
+
+### Changed
+
+- **The documented ladder** is now `extract` → one `assess({ claims })` over
+  the extracted claims → `verifyBatchAndWait` for the low-confidence rows →
+  `ask`. The README, the module headers and both core examples follow it;
+  `verify-llm-output.ts` no longer assesses the whole document in one string.
+- The shared contract fixture `assess_claims_list.json` (identical in the
+  Python SDK) pins the list form's row shape; the `AssessClaim` and
+  `TaskStatus` keysets carry the new fields.
 
 ## [2.9.0] - 2026-08-29
 
