@@ -26,20 +26,21 @@
  *
  * // 1. extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
+ * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
  *
- * // 2. assess — fast 3-model verdict on each (~10s, paid)
- * const quick = await client.assess({ text: llmOutput });
+ * // 2. assess — ONE call over the extracted claims (up to 20), one row per
+ * //    claim in the same order. A row with verdict 'Error' has error_code +
+ * //    hint; a compound item lists the rest in identified_claims.
+ * const quick = (await client.assess({ claims })).claims;
  *
- * // 3. verify — escalate low-confidence to the full pipeline (~90s, paid)
- * let deep;
- * for (const c of quick.claims) {
- *   if (c.confidence === 'low') {
- *     deep = await client.verifyAndWait({ claim: c.claim! });
- *     console.log(deep.verdict, deep.lenz_score);
- *   }
- * }
+ * // 3. verify — escalate the low-confidence rows to the full pipeline (~90s, paid)
+ * const doubtful = quick
+ *   .filter((c) => c.verdict !== 'Error' && c.confidence === 'low')
+ *   .map((c) => ({ claim: c.claim! }));
+ * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
  *
  * // 4. ask — follow-up grounded on a verification
+ * const deep = results.find((r) => r.status === 'completed')?.verification;
  * const reply = await client.ask.send(deep!.verification_id!, {
  *   message: 'Which source is strongest?',
  * });
@@ -60,6 +61,7 @@ import {
   LenzNeedsInputError,
   LenzPipelineError,
   LenzTimeoutError,
+  LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
   UPSTREAM_503_CODES,
   mapResponseToError,
@@ -95,6 +97,11 @@ import type {
 export const API_VERSION = "2026-05-13";
 export const DEFAULT_BASE_URL = "https://lenz.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
+/**
+ * Floor on the per-call timeout for `assess({ claims })`. A list runs one
+ * parallel panel wave (~10-25s), which the 30s default leaves no margin for.
+ */
+const ASSESS_LIST_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
@@ -143,6 +150,8 @@ interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   headers?: Record<string, string>;
   authRequired?: boolean;
+  /** Per-call override of the client's `timeoutMs` (each attempt's AbortController). */
+  timeoutMs?: number;
   /**
    * Optional-auth endpoint: don't fail when no key, but DO send the key when
    * we have one. The server returns a caller's own private/hidden rows only to
@@ -439,10 +448,31 @@ export class Lenz {
   }
 
   /**
-   * Fast 3-model panel verdict on each identified claim in the input.
-   * Sync, ~10s. Returns one entry per atomic_claim. For deeper analysis
-   * (citations, full audit trail), escalate low-confidence claims to
-   * `verifyAndWait`; the two endpoints share a result cache server-side.
+   * Fast 3-model panel verdict. Sync, ~10s for one claim. Two forms:
+   *
+   * - `assess({ claim })` — one claim; returns one entry per atomic_claim
+   *   framing identified in it.
+   * - `assess({ claims })` — up to 20 claims in one call (~10-25s); returns
+   *   exactly one entry per item, in the order sent. This is the step after
+   *   `extract` in the ladder. A row with `verdict === "Error"` has
+   *   `error_code` and `hint` and is free; a compound item is assessed on
+   *   its main claim and lists the rest in `identified_claims`.
+   *
+   * ```ts
+   * const out = await client.extract({ text: llmOutput });
+   * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+   * const quick = (await client.assess({ claims })).claims; // one row per claim, same order
+   * const doubtful = quick
+   *   .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+   *   .map((c) => ({ claim: c.claim! }));
+   * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
+   * ```
+   *
+   * The two forms are mutually exclusive — giving `claims` together with a
+   * non-empty `claim` / `text` throws `LenzValidationError` before any
+   * request is made. For deeper analysis (citations, full audit trail),
+   * escalate low-confidence rows to `verifyBatchAndWait`; the endpoints
+   * share a result cache server-side.
    *
    * Pass `language: "es"` (or any of the 12 supported codes) to receive
    * the claim text in that language. Verdict labels stay English.
@@ -450,12 +480,35 @@ export class Lenz {
   async assess(input: AssessInput): Promise<AssessResponse> {
     // `claim` is the documented name; `text` the alias. Either way the wire
     // key is `text`, which every server version accepts.
-    const body: Record<string, unknown> = { text: input.claim || input.text };
+    const single = input.claim || input.text;
+    const list = input.claims;
+    if (list && list.length > 0) {
+      if (single) {
+        throw new LenzValidationError({
+          message: "assess takes one claim (`claim`) or a list (`claims`), not both.",
+          cause: "`claims` was given together with a non-empty `claim` / `text`.",
+          fix: "Send a single claim as `claim`, or up to 20 claims as `claims`.",
+          docUrl: "https://lenz.io/docs/errors",
+        });
+      }
+      const body: Record<string, unknown> = { claims: list };
+      if (input.language) body.language = input.language;
+      return this.request<AssessResponse>({
+        method: "POST",
+        path: "/assess",
+        json: body,
+        // A list call is one parallel wave, so it needs more room than the
+        // default. Never shortens a client configured with a longer timeout.
+        timeoutMs: input.timeoutMs ?? Math.max(this.timeoutMs, ASSESS_LIST_TIMEOUT_MS),
+      });
+    }
+    const body: Record<string, unknown> = { text: single };
     if (input.language) body.language = input.language;
     return this.request<AssessResponse>({
       method: "POST",
       path: "/assess",
       json: body,
+      timeoutMs: input.timeoutMs,
     });
   }
 
@@ -666,6 +719,7 @@ export class Lenz {
       err.taskId = taskId;
       err.kind = status.reason ?? "";
       err.payload = status as unknown as Record<string, unknown>;
+      err.hint = status.hint ?? "";
       throw err;
     }
     // failed. Server sends the diagnostic under `error`; fall back to legacy fields.
@@ -682,6 +736,7 @@ export class Lenz {
     err.failureReason = status.failure_reason ?? "";
     err.failureClass = status.failure_class ?? "";
     err.retryable = typeof status.retryable === "boolean" ? status.retryable : null;
+    err.hint = status.hint ?? "";
     throw err;
   }
 
@@ -750,7 +805,7 @@ export class Lenz {
     let lastErr: unknown = undefined;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? this.timeoutMs);
       let response: Response;
       try {
         response = await this.fetchImpl(url.toString(), {

@@ -16,6 +16,7 @@ import {
   LenzRateLimitError,
   LenzTimeoutError,
   LenzUpstreamUnavailableError,
+  LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
 } from "../src/index.js";
 
@@ -462,6 +463,169 @@ describe("Assess", () => {
     const client = new Lenz();
     await expect(() => client.assess({ text: "x" })).rejects.toBeInstanceOf(LenzAuthError);
   });
+
+  it("single form is unchanged on the wire: `text`, never `claims`", async () => {
+    const { fetch, calls } = makeFetch([{ body: { claims: [], error: null } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.assess({ claim: "The Earth is flat." });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ text: "The Earth is flat." });
+  });
+
+  it("list form sends `claims` (no `text`) and returns one row per item, in order", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          claims: [
+            {
+              claim: "Water boils at 100 °C at sea level.",
+              language: "en",
+              verdict: "True",
+              confidence: "high",
+              verification_url: null,
+              error_code: null,
+              candidate_claims: [],
+              identified_claims: [],
+              hint: null,
+            },
+            {
+              claim: "Bilingual children develop stronger executive function.",
+              language: "en",
+              verdict: "Mixed",
+              confidence: "medium",
+              verification_url: "https://lenz.io/api/v1/verifications/3f9a1c2e",
+              error_code: null,
+              candidate_claims: [],
+              identified_claims: ["Bilingual children learn to read later than monolingual peers."],
+              hint: "Assessed the main claim only. Send identified_claims as their own items to check the rest.",
+            },
+            {
+              claim: "RAM prices have more than doubled",
+              language: "en",
+              verdict: "Error",
+              confidence: "low",
+              verification_url: null,
+              error_code: "ambiguous",
+              candidate_claims: [
+                "Average U.S. retail prices for consumer DDR4 desktop RAM have more than doubled between 2021 and 2026.",
+                "Global DRAM contract prices have more than doubled between 2021 and 2026.",
+              ],
+              identified_claims: [],
+              hint: "Ambiguous: Which memory market / form factor? Send one of candidate_claims as its own item.",
+            },
+          ],
+          error: null,
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const claims = [
+      "Water boils at 100 °C at sea level.",
+      "Bilingual children develop stronger executive function and learn to read later than monolingual peers.",
+      "RAM prices have more than doubled",
+    ];
+    const out = await client.assess({ claims, language: "en" });
+
+    expect(calls[0]!.url).toContain("/assess");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ claims, language: "en" });
+
+    expect(out.error).toBeNull();
+    expect(out.claims).toHaveLength(3);
+    expect(out.claims.map((c) => c.verdict)).toEqual(["True", "Mixed", "Error"]);
+
+    const [plain, compound, error] = out.claims;
+    // A plain verdict row: the four fields are present and empty.
+    expect(plain!.error_code).toBeNull();
+    expect(plain!.candidate_claims).toEqual([]);
+    expect(plain!.identified_claims).toEqual([]);
+    expect(plain!.hint).toBeNull();
+    // A compound item: assessed on its main claim, the rest listed on the row.
+    expect(compound!.verdict).toBe("Mixed");
+    expect(compound!.identified_claims).toEqual([
+      "Bilingual children learn to read later than monolingual peers.",
+    ]);
+    expect(compound!.hint).toContain("identified_claims");
+    // An Error row stays in position and says why.
+    expect(error!.verdict).toBe("Error");
+    expect(error!.error_code).toBe("ambiguous");
+    expect(error!.candidate_claims).toHaveLength(2);
+    expect(error!.hint).toContain("candidate_claims");
+  });
+
+  it("list form with `claim` / `text` throws LenzValidationError before any request", async () => {
+    const { fetch, calls } = makeFetch([]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.assess({ claims: ["a"], claim: "b" })).rejects.toBeInstanceOf(
+      LenzValidationError,
+    );
+    await expect(client.assess({ claims: ["a"], text: "b" })).rejects.toThrow(
+      /one claim \(`claim`\) or a list \(`claims`\), not both/,
+    );
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("Assess per-call timeout", () => {
+  /** A fetch that never answers — it settles only when the SDK aborts it. */
+  function hangingFetch() {
+    const signals: AbortSignal[] = [];
+    const impl = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init!.signal as AbortSignal;
+          signals.push(signal);
+          signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+    return { fetch: impl as unknown as typeof fetch, signals };
+  }
+
+  /** The one in-flight attempt is aborted at exactly `ms`, and nothing sooner. */
+  async function expectAbortAt(pending: Promise<unknown>, signals: AbortSignal[], ms: number) {
+    const settled = pending.catch((exc: unknown) => exc);
+    await vi.advanceTimersByTimeAsync(ms - 1);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(await settled).toBeInstanceOf(LenzAPIError);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("list form waits 45s by default (the client default is 30s)", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expectAbortAt(client.assess({ claims: ["a", "b"] }), signals, 45_000);
+  });
+
+  it("single form keeps the client's 30s default", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expectAbortAt(client.assess({ claim: "a" }), signals, 30_000);
+  });
+
+  it("per-call timeoutMs overrides the list default", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expectAbortAt(client.assess({ claims: ["a"], timeoutMs: 5_000 }), signals, 5_000);
+  });
+
+  it("a longer client-wide timeoutMs is never shortened for a list", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 90_000 });
+    await expectAbortAt(client.assess({ claims: ["a"] }), signals, 90_000);
+  });
+
+  it("other calls are untouched by the assess override", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expectAbortAt(client.extract({ text: "a" }), signals, 30_000);
+  });
 });
 
 describe("verifyAndWait", () => {
@@ -568,6 +732,54 @@ describe("verifyAndWait", () => {
     await expect(client.verifyAndWait({ claim: "x", timeoutMs: 5_000 })).rejects.toBeInstanceOf(
       LenzNeedsInputError,
     );
+  });
+
+  it("needs_input carries the server's hint; empty when an older server omits it", async () => {
+    const hint = "The text contains several claims. Pick the ones to check and resolve via select.";
+    const withHint = makeFetch([
+      { body: { task_id: "t", claim_text: "x" } },
+      { body: { status: "needs_input", reason: "multi_claim", claims: [], hint } },
+    ]);
+    await expect(
+      new Lenz({ apiKey: "lenz_t", fetch: withHint.fetch }).verifyAndWait({
+        claim: "x",
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toMatchObject({ kind: "multi_claim", hint });
+
+    const withoutHint = makeFetch([
+      { body: { task_id: "t", claim_text: "x" } },
+      { body: { status: "needs_input", reason: "multi_claim", claims: [] } },
+    ]);
+    await expect(
+      new Lenz({ apiKey: "lenz_t", fetch: withoutHint.fetch }).verifyAndWait({
+        claim: "x",
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toMatchObject({ kind: "multi_claim", hint: "" });
+  });
+
+  it("failed not_a_claim carries the server's hint on LenzPipelineError", async () => {
+    const hint =
+      "No factual statement that can be checked against evidence was found in the input.";
+    const { fetch } = makeFetch([
+      { body: { task_id: "t", claim_text: "x" } },
+      {
+        body: {
+          status: "failed",
+          error: "not_a_claim",
+          failure_reason: "not_a_claim",
+          failure_class: "invalid_input",
+          retryable: false,
+          hint,
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.verifyAndWait({ claim: "x", timeoutMs: 5_000 })).rejects.toMatchObject({
+      failureReason: "not_a_claim",
+      hint,
+    });
   });
 
   it("failed pipeline raises LenzPipelineError", async () => {

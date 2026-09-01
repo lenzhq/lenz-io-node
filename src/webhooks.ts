@@ -108,6 +108,11 @@ export interface VerificationFailed extends WebhookEventBase {
 export interface VerificationNeedsInput extends WebhookEventBase {
   event: "verification.needs_input";
   needsInput: Record<string, unknown>;
+  /**
+   * One sentence on what was unclear and how `select` resolves it
+   * (`multi_claim` / `clarification_required`); "" when the server sent none.
+   */
+  hint: string;
 }
 
 export type WebhookEvent =
@@ -145,10 +150,12 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     };
   }
   if (event === "verification.needs_input") {
+    const needsInput = (payload["needs_input"] as Record<string, unknown>) ?? {};
     return {
       ...base,
       event: "verification.needs_input",
-      needsInput: (payload["needs_input"] as Record<string, unknown>) ?? {},
+      needsInput,
+      hint: String(needsInput["hint"] ?? ""),
     };
   }
   return base;

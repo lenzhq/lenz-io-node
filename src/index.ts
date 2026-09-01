@@ -12,20 +12,21 @@
  *
  * // 1. /extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
+ * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
  *
- * // 2. /assess — fast 3-model verdict on each (~10s, paid)
- * const quick = await client.assess({ text: llmOutput });
+ * // 2. /assess — ONE call over the extracted claims (up to 20), one row per
+ * //    claim in the same order. A row with verdict 'Error' has error_code +
+ * //    hint; a compound item lists the rest in identified_claims.
+ * const quick = (await client.assess({ claims })).claims;
  *
- * // 3. /verify — escalate low-confidence to the full pipeline (~90s, paid)
- * let deep;
- * for (const c of quick.claims) {
- *   if (c.confidence === 'low') {
- *     deep = await client.verifyAndWait({ claim: c.claim! });
- *     console.log(deep.verdict, deep.lenz_score);
- *   }
- * }
+ * // 3. /verify — escalate the low-confidence rows to the full pipeline (~90s, paid)
+ * const doubtful = quick
+ *   .filter((c) => c.verdict !== 'Error' && c.confidence === 'low')
+ *   .map((c) => ({ claim: c.claim! }));
+ * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
  *
  * // 4. /ask — follow-up questions grounded on a verification
+ * const deep = results.find((r) => r.status === 'completed')?.verification;
  * const reply = await client.ask.send(deep!.verification_id!, {
  *   message: 'Which source is strongest?',
  * });

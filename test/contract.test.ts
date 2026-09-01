@@ -54,7 +54,17 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   ExtractedEntity: new Set(["name", "type"]),
   AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims"]),
-  AssessClaim: new Set(["claim", "verdict", "confidence", "verification_url", "language"]),
+  AssessClaim: new Set([
+    "claim",
+    "verdict",
+    "confidence",
+    "verification_url",
+    "language",
+    "error_code",
+    "candidate_claims",
+    "identified_claims",
+    "hint",
+  ]),
   TaskStatus: new Set([
     "status",
     "reason",
@@ -68,6 +78,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "failure_detail",
     "failure_class",
     "retryable",
+    "hint",
   ]),
   CandidateClaim: new Set(["text", "domain"]),
   Verification: new Set([
@@ -217,6 +228,9 @@ describe("contract", () => {
     ["extract_response_no_match.json", "ExtractedClaims"],
     ["assess_single_claim.json", "AssessResponse"],
     ["assess_multiclaim.json", "AssessResponse"],
+    // The list form: one row per item sent, Error rows in position. The
+    // response shape is the single form's — the four row fields are new.
+    ["assess_claims_list.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
     ["verify_status_failed.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
@@ -248,6 +262,37 @@ describe("contract", () => {
       throw new Error(
         `webhook_payload_completed.json → Verification (via .result):\n${errors.join("\n")}`,
       );
+    }
+  });
+
+  it("assess claims list keeps one row per item, Error rows in position", () => {
+    const payload = loadFixture("assess_claims_list.json");
+    expect(payload["error"]).toBeNull();
+    const rows = payload["claims"] as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(4);
+    expect(rows.map((r) => r["verdict"])).toEqual(["True", "Mixed", "Error", "Error"]);
+
+    // Every row carries all four fields, whatever its verdict.
+    for (const row of rows) {
+      for (const key of ["error_code", "candidate_claims", "identified_claims", "hint"]) {
+        expect(row).toHaveProperty(key);
+      }
+    }
+    // A plain verdict row: null / [] / [] / null.
+    expect(rows[0]!["error_code"]).toBeNull();
+    expect(rows[0]!["hint"]).toBeNull();
+    // A compound item: verdict on the main claim, the rest on the row, with a hint.
+    expect(rows[1]!["identified_claims"]).toHaveLength(1);
+    expect(rows[1]!["hint"]).toBeTruthy();
+    // Error rows: error_code + hint always; candidate_claims only when ambiguous.
+    expect(rows[2]!["error_code"]).toBe("no_claim");
+    expect(rows[2]!["candidate_claims"]).toEqual([]);
+    expect(rows[3]!["error_code"]).toBe("ambiguous");
+    expect(rows[3]!["candidate_claims"]).toHaveLength(2);
+    for (const row of rows.slice(2)) {
+      expect(row["confidence"]).toBe("low");
+      expect(row["verification_url"]).toBeNull();
+      expect(row["hint"]).toBeTruthy();
     }
   });
 
