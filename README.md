@@ -30,7 +30,7 @@ const client = new Lenz({ apiKey: "lenz_..." });
 const out = await client.extract({ text: llmOutput });
 
 // 2. assess — fast 3-model verdict on each (~10s, sync)
-const quick = await client.assess({ text: llmOutput });
+const quick = await client.assess({ claim: llmOutput });
 for (const c of quick.claims) {
   console.log(c.verdict, c.confidence, c.claim);
 }
@@ -86,7 +86,7 @@ hit the full pipeline (~60-90s) — use webhooks for production async flows.
 ## What you get on the client
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list — see [Steering extract](#steering-extract).
-- **`client.assess({ text })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim.
+- **`client.assess({ claim })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
@@ -416,8 +416,8 @@ Supported codes: `en` (default), `es`, `de`, `fr`, `it`, `pt`, `nl`, `sv`, `da`,
 ```ts
 const batch = await client.verifyBatch({
   claims: [
-    { text: "Coffee causes cancer." }, // en (batch default)
-    { text: "El café causa cáncer.", language: "es" }, // overrides
+    { claim: "Coffee causes cancer." }, // en (batch default)
+    { claim: "El café causa cáncer.", language: "es" }, // overrides
   ],
   language: "en",
 });

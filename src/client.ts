@@ -388,7 +388,7 @@ export class Lenz {
       // any subset including a per-item `language` override.
       claims: input.claims.map((c) => {
         const item: Record<string, unknown> = {
-          text: c.text,
+          text: c.claim || c.text,
           source_url: c.source_url ?? "",
           webhook_url: c.webhook_url ?? "",
         };
@@ -448,7 +448,9 @@ export class Lenz {
    * the claim text in that language. Verdict labels stay English.
    */
   async assess(input: AssessInput): Promise<AssessResponse> {
-    const body: Record<string, unknown> = { text: input.text };
+    // `claim` is the documented name; `text` the alias. Either way the wire
+    // key is `text`, which every server version accepts.
+    const body: Record<string, unknown> = { text: input.claim || input.text };
     if (input.language) body.language = input.language;
     return this.request<AssessResponse>({
       method: "POST",
@@ -466,13 +468,14 @@ export class Lenz {
    * claim offered in the prior interrupt — the server rejects anything else.
    */
   async select(taskId: string, input: SelectInput): Promise<BatchAccepted> {
-    if (!input.texts || input.texts.length === 0) {
-      throw new Error("select requires a non-empty texts array");
+    const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
+    if (!chosen || chosen.length === 0) {
+      throw new Error("select requires a non-empty claims array");
     }
     return this.request<BatchAccepted>({
       method: "POST",
       path: `/verify/${taskId}/select`,
-      json: { texts: input.texts },
+      json: { texts: chosen },
     });
   }
 
@@ -686,7 +689,9 @@ export class Lenz {
 
   private async submit(input: VerifyInput): Promise<TaskAccepted> {
     const body: Record<string, unknown> = {
-      text: input.claim,
+      // `claim` is the documented name; `text` the alias. The wire key stays
+      // `text`, which every server version accepts.
+      text: input.claim || input.text,
       source_url: input.sourceUrl ?? "",
       webhook_url: input.webhookUrl ?? "",
     };
