@@ -4,6 +4,26 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.10.0] - 2026-09-01
+
+One input vocabulary: **`text` is a document, `claim` is a claim.** `extract`
+takes `text`; `assess`, `verify`, batch items and `select` take `claim` /
+`claims`. Lockstep release with Python 2.10.0. No request body changes: every
+call still serialises to the wire keys it always has, so this release works
+against any server version.
+
+### Added
+
+- **`AssessInput.claim`** — `client.assess({ claim })`. `text` keeps working
+  as an alias; `claim` wins if both are given.
+- **`VerifyInput.text`** — an explicit alias for `claim` on `verify` /
+  `verifyAndWait`. `claim` is no longer a required property at the type
+  level (one of the two is required at runtime, as before).
+- **`VerifyBatchItem.claim`** — batch items take `claim`; `text` stays as an
+  alias. Items keep serialising to `text` on the wire.
+- **`SelectInput.claims`** — `client.select(taskId, { claims })`. `texts`
+  keeps working as an alias. The empty-selection error now names `claims`.
+
 ## [2.9.0] - 2026-08-29
 
 One weighted credit pool replaces six per-endpoint quotas; `extract` takes a

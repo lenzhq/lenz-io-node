@@ -556,7 +556,10 @@ export interface AskReply {
 // ── Input shapes ──
 
 export interface VerifyInput {
-  claim: string;
+  /** The claim to check. A document is `text` (see `extract`); a claim is `claim`. */
+  claim?: string;
+  /** Accepted alias for `claim`; `claim` wins if both are given. */
+  text?: string;
   sourceUrl?: string;
   webhookUrl?: string;
   /**
@@ -595,6 +598,9 @@ export interface VerifyInput {
  * authoritative on the merge.
  */
 export interface VerifyBatchItem {
+  /** The item's claim. */
+  claim?: string;
+  /** Accepted alias for `claim`; `claim` wins if both are given. */
   text?: string;
   language?: string;
   source_url?: string;
@@ -642,7 +648,14 @@ export interface ExtractInput {
 }
 
 export interface AssessInput {
-  text: string;
+  /**
+   * The claim to check. If it contains several atomic claims, each is
+   * verdicted separately. A document is `text` (see `extract`); a claim is
+   * `claim`.
+   */
+  claim?: string;
+  /** Accepted alias for `claim`; `claim` wins if both are given. */
+  text?: string;
   /** Output language (ISO 639-1). See `VerifyInput.language`. */
   language?: string;
 }
@@ -662,7 +675,9 @@ export interface SelectInput {
    * Each must match a claim that was offered in the prior status response.
    * Each selected claim fans out into its own pipeline.
    */
-  texts: string[];
+  claims?: string[];
+  /** Accepted alias for `claims`; `claims` wins if both are given. */
+  texts?: string[];
 }
 
 export interface LibraryListInput {
