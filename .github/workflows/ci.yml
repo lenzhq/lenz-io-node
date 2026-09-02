@@ -26,6 +26,30 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  coverage:
+    # One cell, deliberately. Coverage does not vary meaningfully by OS or Node
+    # version, so paying for it in all six matrix cells above buys nothing —
+    # they keep running a bare `npm test`, which stays fast.
+    #
+    # A separate job rather than a conditional step inside the matrix: the step
+    # form needs an `if:` naming one specific cell, which silently stops running
+    # the moment that Node version is dropped from the matrix.
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # The thresholds live in vitest.config.ts, not in flags here, so this
+      # reproduces exactly as `npm run test:coverage` on a contributor's
+      # machine. The `text` reporter prints the per-file table into this log,
+      # so a reviewer can see which lines are uncovered without re-running
+      # anything locally.
+      - run: npm run test:coverage
+
   ci-ok:
     # Aggregate gate. Branch protection requires THIS check and nothing else, so
     # the matrix above can gain or drop a cell without anyone touching the
@@ -39,10 +63,11 @@ jobs:
     # present as a stuck PR rather than a red gate.
     name: ci-ok
     if: always()
-    needs: [test]
+    needs: [test, coverage]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to have succeeded
         run: |
-          echo "test=${{ needs.test.result }}"
+          echo "test=${{ needs.test.result }} coverage=${{ needs.coverage.result }}"
           [ "${{ needs.test.result }}" = "success" ] || exit 1
+          [ "${{ needs.coverage.result }}" = "success" ] || exit 1
