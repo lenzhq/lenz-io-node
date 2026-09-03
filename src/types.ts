@@ -138,6 +138,100 @@ export interface Verification {
    * English regardless of language.
    */
   language?: string;
+  /**
+   * Warranty state for YOUR account over this analysis.
+   *
+   * Absent for two reasons that are NOT "this verdict does not qualify": Lenz
+   * is not operating the warranty, or the call was unauthenticated
+   * (`verifications.get` accepts anonymous callers, and an anonymous caller
+   * has no account for a warranty to attach to). A verdict that does not
+   * qualify carries the block with `status: "uncovered"` and the reasons why.
+   */
+  coverage?: Coverage | null;
+}
+
+/**
+ * Closed set of `coverage.status` values. Exported for exhaustive matching;
+ * the field itself stays `string` so the SDK never rejects a status the
+ * server adds after this release was cut.
+ */
+export type CoverageStatus = "covered" | "uncovered" | "pending_anchor";
+
+/**
+ * Closed set of `coverage.reasons` values — why a verdict is NOT covered.
+ * Deliberately smaller than the internal gate's vocabulary: `plan` and
+ * `depth` are actionable, `verdict` is a product rule you design around,
+ * `quality` covers everything you can neither act on nor define, and
+ * `withdrawn` / `issue_failed` are statements about Lenz rather than about
+ * your claim.
+ */
+export type CoverageReason =
+  | "plan"
+  | "depth"
+  | "verdict"
+  | "quality"
+  | "withdrawn"
+  | "issue_failed";
+
+/**
+ * Whether this verdict carries Lenz's warranty, for YOUR account.
+ *
+ * It describes the pair (your account, this analysis), not the analysis
+ * alone — two accounts can hold two certificates over one cached verdict, so
+ * the block you see is never another customer's.
+ *
+ * `reasons` is empty exactly when `status` is not `"uncovered"`.
+ *
+ * The money fields are three, not two: `currency` is ISO 4217 and the amounts
+ * are integers in **major units** — `cap: 10000` means ten thousand, not a
+ * hundred. They are contract figures, not amounts a payment processor
+ * charges. Read `currency`; do not assume EUR.
+ */
+export interface Coverage {
+  status?: string;
+  reasons?: string[];
+  certificate_id?: string | null;
+  certificate_url?: string | null;
+  /**
+   * The date the verdict is warranted AS OF — the analysis time, not the
+   * issue time. `null` when there is no certificate.
+   */
+  as_of?: string | null;
+  currency?: string;
+  cap?: number;
+  aggregate?: number;
+  terms_version?: string;
+}
+
+/**
+ * The signed warranty certificate, byte-identical to the public document.
+ *
+ * Everything needed to verify the record **without Lenz**: `leaf` is the
+ * digest the `signature` is over, `anchors` carries the qualified
+ * (RFC 3161 / eIDAS) timestamp and the OpenTimestamps receipt, and
+ * `verifier_url` / `keys_url` point at the open-source checker and the
+ * published keys.
+ *
+ * A withdrawn certificate is still served — it is the record of what was
+ * warranted, and `withdrawn_at` is on it.
+ */
+export interface Certificate {
+  document_version?: string;
+  certificate_id?: string;
+  record_version?: string;
+  /**
+   * The signed payload: the exact statement, verdict, warnings, sources and
+   * caps. This is what the leaf is computed over — treat it as opaque and
+   * hand it to the verifier rather than reconstructing it.
+   */
+  payload?: Record<string, unknown>;
+  leaf?: string;
+  signature?: string | null;
+  key_id?: string | null;
+  anchors?: Record<string, unknown>;
+  withdrawn_at?: string | null;
+  keys_url?: string;
+  verifier_url?: string;
 }
 
 /**

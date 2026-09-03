@@ -20,7 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
-import type { FailureClass } from "./types.js";
+import type { Coverage, FailureClass } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
@@ -74,6 +74,7 @@ export type WebhookEventKind =
   | "verification.completed"
   | "verification.failed"
   | "verification.needs_input"
+  | "certificate.anchored"
   // The `string & NonNullable<unknown>` trick preserves the autocomplete
   // hints from the literal union while still permitting any future
   // event-kind string the server adds. `(string & {})` reads cleaner but
@@ -115,10 +116,29 @@ export interface VerificationNeedsInput extends WebhookEventBase {
   hint: string;
 }
 
+/**
+ * `event=certificate.anchored` — the qualified timestamp landed.
+ *
+ * **This is the event to publish on, not `verification.completed`.** The
+ * warranty requires the certificate's timestamp to PRECEDE what you publish
+ * or send, so a pipeline that publishes on `completed` races the anchor and
+ * can put the statement out before cover exists. `completed` says a verdict
+ * was produced; this says the record is anchored and the cover is in force.
+ *
+ * Carries `coverage` INSTEAD of `result`: the event reports that a timestamp
+ * landed, not that a verdict was produced, so `result` is null here and
+ * reading it will not give you the verification.
+ */
+export interface CertificateAnchored extends WebhookEventBase {
+  event: "certificate.anchored";
+  coverage: Coverage;
+}
+
 export type WebhookEvent =
   | VerificationCompleted
   | VerificationFailed
   | VerificationNeedsInput
+  | CertificateAnchored
   | WebhookEventBase; // catch-all for forward compatibility
 
 function buildEvent(payload: Record<string, unknown>): WebhookEvent {
@@ -156,6 +176,13 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       event: "verification.needs_input",
       needsInput,
       hint: String(needsInput["hint"] ?? ""),
+    };
+  }
+  if (event === "certificate.anchored") {
+    return {
+      ...base,
+      event: "certificate.anchored",
+      coverage: (payload["coverage"] as Coverage) ?? {},
     };
   }
   return base;

@@ -6,6 +6,7 @@ import {
   LenzWebhooks,
   LenzWebhookSignatureError,
   verifySignature,
+  type CertificateAnchored,
   type VerificationCompleted,
   type VerificationFailed,
   type VerificationNeedsInput,
@@ -171,5 +172,56 @@ describe("LenzWebhooks", () => {
     const wh = new LenzWebhooks({ secret: SECRET });
     const event = wh.parse(body, { "X-Lenz-Signature": sign(body) });
     expect(event.event).toBe("verification.future_event");
+  });
+
+  // `certificate.anchored` — the event publishers must key on. The warranty
+  // requires the certificate's timestamp to PRECEDE what the customer
+  // publishes, so a pipeline that publishes on `verification.completed` races
+  // the anchor and can put the statement out before cover exists. An SDK that
+  // leaves this event untyped quietly encourages the wrong ordering.
+  it("parses certificate.anchored with a coverage block", () => {
+    const body = payload("certificate.anchored", {
+      verification_id: "vid_c",
+      status: "completed",
+      coverage: {
+        status: "covered",
+        reasons: [],
+        certificate_id: "9f2c",
+        certificate_url: "https://lenz.io/certificate/9f2c",
+        as_of: "2026-09-03T10:00:00+00:00",
+        currency: "EUR",
+        cap: 10000,
+        aggregate: 500000,
+        terms_version: "v1",
+      },
+    });
+    const wh = new LenzWebhooks({ secret: SECRET });
+    const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as CertificateAnchored;
+    expect(event.event).toBe("certificate.anchored");
+    expect(event.verificationId).toBe("vid_c");
+    expect(event.coverage.certificate_id).toBe("9f2c");
+    expect(event.coverage.cap).toBe(10000);
+  });
+
+  it("certificate.anchored carries coverage instead of result", () => {
+    // It reports a timestamp landing, not a verdict being produced, so
+    // `result` is null and a caller reaching for it gets nothing.
+    const body = payload("certificate.anchored", {
+      verification_id: "vid_c",
+      status: "completed",
+      result: null,
+      coverage: { status: "covered", certificate_id: "9f2c" },
+    });
+    const wh = new LenzWebhooks({ secret: SECRET });
+    const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as CertificateAnchored;
+    expect(event.coverage.status).toBe("covered");
+    expect((event as unknown as Record<string, unknown>)["result"]).toBeUndefined();
+  });
+
+  it("a missing coverage block is an empty object, not a crash", () => {
+    const body = payload("certificate.anchored", { verification_id: "vid_c", status: "completed" });
+    const wh = new LenzWebhooks({ secret: SECRET });
+    const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as CertificateAnchored;
+    expect(event.coverage).toEqual({});
   });
 });

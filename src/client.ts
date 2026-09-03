@@ -74,6 +74,7 @@ import type {
   AssessResponse,
   BatchAccepted,
   BatchItemResult,
+  Certificate,
   ExtractInput,
   ExtractedClaims,
   LibraryList,
@@ -299,6 +300,31 @@ class VerificationsNamespace {
       path: `/verifications/${verificationId}`,
       authRequired: false,
       authOptional: true, // send the key if we have one → owner sees private rows
+    });
+  }
+
+  /**
+   * Download the warranty certificate for a covered verification.
+   *
+   * Resolved by (verification, ACCOUNT), not by verification alone: one
+   * cached analysis can have several holders, each with their own certificate
+   * and their own cap, so this returns YOUR certificate over this analysis
+   * and never another customer's.
+   *
+   * Rejects with a 404 `LenzError` when this verification carries no
+   * certificate for your account — which is also what an uncovered verdict
+   * returns, so check `verification.coverage?.status` first rather than using
+   * a 404 here to mean "not covered".
+   *
+   * The document is byte-identical to the public
+   * `/certificate/<certificate_id>.json`, so it verifies with the published
+   * open-source checker without involving Lenz. A withdrawn certificate is
+   * still served — it is the record of what was warranted.
+   */
+  getCertificate(verificationId: string): Promise<Certificate> {
+    return this.client.request<Certificate>({
+      method: "GET",
+      path: `/verifications/${verificationId}/certificate`,
     });
   }
 
