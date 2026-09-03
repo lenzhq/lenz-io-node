@@ -67,6 +67,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   TaskStatus: new Set([
     "status",
+    "task_id",
     "reason",
     "progress",
     "result",
@@ -78,8 +79,10 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "failure_detail",
     "failure_class",
     "retryable",
+    "docs_url",
     "hint",
   ]),
+  Progress: new Set(["step", "index", "total", "elapsed_seconds", "poll_after_seconds"]),
   CandidateClaim: new Set(["text", "domain"]),
   Verification: new Set([
     "verification_id",
@@ -162,7 +165,9 @@ const NESTED: Record<string, Record<string, string | null>> = {
   TaskStatus: {
     result: "Verification",
     claims: "CandidateClaim",
-    progress: null, // dict bag
+    // Was `null` — an opaque dict bag. It has a shape now, so descend:
+    // that is what makes this test catch a server-side progress change.
+    progress: "Progress",
   },
   Verification: {
     entities: "EntityRef",
@@ -233,6 +238,10 @@ describe("contract", () => {
     ["assess_claims_list.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
     ["verify_status_failed.json", "TaskStatus"],
+    // The `processing` body. Under the server's `exclude_unset` a completed
+    // body has no `progress` key at all and this one has no `result` — the
+    // fixtures are the two halves of that contract.
+    ["verify_status_processing.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
     ["usage.json", "Usage"],
   ];
@@ -250,6 +259,36 @@ describe("contract", () => {
       }
     });
   }
+
+  it("a completed body keeps modified_at null and omits the other branches", () => {
+    // The server serialises with `exclude_unset`, not `exclude_none`.
+    // `exclude_none` applies recursively and would strip `modified_at`
+    // whenever it is null — which is every same-day completion. If this key
+    // disappears from the fixture, the server changed the wrong flag.
+    const payload = loadFixture("verify_status_completed.json");
+    const result = payload["result"] as Record<string, unknown>;
+    expect("modified_at" in result).toBe(true);
+    expect(result["modified_at"]).toBeNull();
+    for (const absent of ["progress", "claims", "candidates", "error"]) {
+      expect(absent in payload).toBe(false);
+    }
+  });
+
+  it("progress carries the five typed fields, not the pipeline's internals", () => {
+    const payload = loadFixture("verify_status_processing.json");
+    const progress = payload["progress"] as Record<string, unknown>;
+    expect(Object.keys(progress).sort()).toEqual([
+      "elapsed_seconds",
+      "index",
+      "poll_after_seconds",
+      "step",
+      "total",
+    ]);
+    expect(progress["step"]).toBe("research");
+    expect(progress["index"]).toBe(2);
+    expect(progress["total"]).toBe(5);
+    expect("result" in payload).toBe(false);
+  });
 
   it("webhook payload result block matches Verification", () => {
     // The webhook `result` is typed as Record<string, unknown> on the

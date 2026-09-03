@@ -4,6 +4,49 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.11.0] - 2026-09-03
+
+**`progress` on `GET /verify/status` is now a documented object.** It was
+previously an untyped bag whose contents were a server implementation detail,
+so nothing about it was safe to depend on. It now carries five typed fields —
+`step`, `index`, `total`, `elapsed_seconds`, `poll_after_seconds` — and this
+SDK types them. Lockstep release with Python 2.11.0.
+
+Works against any server version: an older server simply never sends
+`index` / `total` / `poll_after_seconds`, and the SDK falls back to its own
+backoff ladder.
+
+### Added
+
+- **`Progress`** — `step`, `index`, `total`, `elapsed_seconds`,
+  `poll_after_seconds`. `step` is one of `starting` / `framing` / `research` /
+  `debate` / `adjudication` / `conclusion`; `index` is the 1-based stage
+  position out of `total`. Typed `string`, not a union, so a stage the server
+  adds later passes through.
+- **`onProgress` on `verifyAndWait`, `wait` and `verifyBatchAndWait`** —
+  called as `onProgress(taskId, progress)` once per poll while a run is still
+  going. It takes the `taskId` because the batch helper round-robins several
+  ids in one loop. Without this the stage is invisible to anyone using the
+  documented happy path, since these helpers do the polling. A throw inside
+  your callback is swallowed and never breaks the poll.
+- **Honouring `progress.poll_after_seconds`** — the poll loop uses the
+  server's suggested interval in place of the fixed 2/4/8s ladder when it is
+  present and within bounds. A batch waits the shortest hint in flight.
+- **`TaskStatus.task_id`** — echoed by the server on every status shape.
+- **`TaskStatus.docs_url`** — on a `failed` status, the page explaining that
+  `failure_class`.
+
+### Changed
+
+- **`TaskStatus.progress` is `Progress | undefined`, was
+  `Record<string, unknown>`.** Compile-time narrowing only — the runtime value
+  is unchanged and no JavaScript caller is affected. TypeScript users indexing
+  arbitrary keys off `progress` now get a build error; read the named fields
+  instead.
+- **A completed status body no longer carries a `progress` key at all** (the
+  server omits unset fields). It was `{}` before, so `status.progress` is now
+  `undefined` on a terminal body rather than an empty object.
+
 ## [2.10.0] - 2026-09-01
 
 One input vocabulary: **`text` is a document, `claim` is a claim.** `extract`

@@ -999,6 +999,200 @@ describe("verifyBatchAndWait", () => {
   });
 });
 
+const PROCESSING = {
+  status: "processing",
+  task_id: "t",
+  progress: { step: "research", index: 2, total: 5, elapsed_seconds: 42, poll_after_seconds: 5 },
+};
+
+describe("onProgress", () => {
+  // The callback is the only way anyone using the documented happy path sees
+  // the stage at all — verifyAndWait / wait do the polling.
+  //
+  // Fake timers: PROCESSING carries a real 5s poll hint, and the SDK honours
+  // it, so these would otherwise sit out the wait for real.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Drive a promise past every poll sleep it is going to take. */
+  async function drain<T>(pending: Promise<T>): Promise<T> {
+    await vi.advanceTimersByTimeAsync(60_000);
+    return pending;
+  }
+
+  it("fires per still-running poll with the task id", async () => {
+    const { fetch } = makeFetch([
+      { body: PROCESSING },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const seen: Array<[string, string, number | undefined]> = [];
+    await drain(
+      client.wait("t", {
+        timeoutMs: 600_000,
+        onProgress: (taskId, p) => seen.push([taskId, p.step, p.index]),
+      }),
+    );
+    // Once for the processing poll; never for the terminal one.
+    expect(seen).toEqual([["t", "research", 2]]);
+  });
+
+  it("the batch loop says which claim moved", async () => {
+    // Without the id a callback cannot tell the caller which of the
+    // round-robined ids the progress belongs to.
+    const { fetch } = makeFetch([
+      {
+        body: {
+          batch_id: "b",
+          items: [
+            { task_id: "t1", claim_text: "a" },
+            { task_id: "t2", claim_text: "b" },
+          ],
+        },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+      { body: { ...PROCESSING, task_id: "t2", progress: { step: "debate", index: 3 } } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const seen: Array<[string, string]> = [];
+    await drain(
+      client.verifyBatchAndWait({
+        claims: [{ text: "a" }, { text: "b" }],
+        timeoutMs: 600_000,
+        onProgress: (taskId, p) => seen.push([taskId, p.step]),
+      }),
+    );
+    expect(seen).toEqual([["t2", "debate"]]);
+  });
+
+  it("a throwing callback does not kill the poll", async () => {
+    const { fetch } = makeFetch([
+      { body: PROCESSING },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await drain(
+      client.wait("t", {
+        timeoutMs: 600_000,
+        onProgress: () => {
+          throw new Error("caller bug");
+        },
+      }),
+    );
+    expect(v.verdict).toBe("True");
+  });
+
+  it("hands the callback a copy, not the response object it came from", async () => {
+    const { fetch } = makeFetch([
+      { body: PROCESSING },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    let handed: { step: string } | undefined;
+    await drain(
+      client.wait("t", {
+        timeoutMs: 600_000,
+        onProgress: (_id, p) => {
+          handed = p;
+        },
+      }),
+    );
+    handed!.step = "tampered";
+    // The mutation stayed in the caller's copy: the next poll built its own
+    // object from a fresh response, so nothing downstream saw it.
+    expect(handed!.step).toBe("tampered");
+  });
+});
+
+describe("poll_after_seconds", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Resolve `wait` by advancing exactly `expectedMs`, and no sooner. */
+  async function expectSleepOf(progress: unknown, expectedMs: number) {
+    const { fetch } = makeFetch([
+      { body: { status: "processing", task_id: "t", progress } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    let settled = false;
+    const pending = client.wait("t", { timeoutMs: 600_000 }).then((v) => {
+      settled = true;
+      return v;
+    });
+    await vi.advanceTimersByTimeAsync(expectedMs - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).verdict).toBe("True");
+  }
+
+  it("the hint replaces the local ladder", async () => {
+    await expectSleepOf({ step: "research", poll_after_seconds: 5 }, 5_000);
+  });
+
+  it("no hint falls back to the ladder", async () => {
+    await expectSleepOf({ step: "research" }, 2_000);
+  });
+
+  for (const bad of [0, -1, 999, "5", null]) {
+    it(`out-of-range hint ${JSON.stringify(bad)} falls back to the ladder`, async () => {
+      await expectSleepOf({ step: "research", poll_after_seconds: bad }, 2_000);
+    });
+  }
+
+  it("a batch waits the shortest hint in flight", async () => {
+    // Waiting the longest one would starve the fastest claim.
+    const { fetch } = makeFetch([
+      {
+        body: {
+          batch_id: "b",
+          items: [
+            { task_id: "t1", claim_text: "a" },
+            { task_id: "t2", claim_text: "b" },
+          ],
+        },
+      },
+      {
+        body: {
+          status: "processing",
+          task_id: "t1",
+          progress: { step: "research", poll_after_seconds: 12 },
+        },
+      },
+      {
+        body: {
+          status: "processing",
+          task_id: "t2",
+          progress: { step: "research", poll_after_seconds: 3 },
+        },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    let settled = false;
+    const pending = client
+      .verifyBatchAndWait({ claims: [{ text: "a" }, { text: "b" }], timeoutMs: 600_000 })
+      .then((r) => {
+        settled = true;
+        return r;
+      });
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toHaveLength(2);
+  });
+});
+
 describe("Resource namespaces", () => {
   it("verifications.list", async () => {
     const { fetch } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);

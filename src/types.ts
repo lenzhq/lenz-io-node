@@ -289,10 +289,46 @@ export interface BatchAccepted {
   items: TaskAccepted[];
 }
 
+/**
+ * Where a running verification has got to. Advisory — never results.
+ *
+ * `step` is one of `starting` / `framing` / `research` / `debate` /
+ * `adjudication` / `conclusion`. It is typed `string`, not a union: an SDK
+ * that hard-rejects a stage the server adds later is worse than one that
+ * passes it through.
+ *
+ * `index` is the 1-based stage position (0 while `starting`) out of `total`;
+ * read `total` off the response rather than hard-coding it. It is stage
+ * POSITION, not elapsed work — the stages are uneven, so a bar driven by it
+ * sits on `research` for roughly half the run.
+ *
+ * `poll_after_seconds` is how long to wait before looking again;
+ * `verifyAndWait` honours it for you. `elapsed_seconds` is how long the run
+ * has been going — a measurement, not an estimate of what is left.
+ */
+export interface Progress {
+  step: string;
+  index?: number;
+  total?: number;
+  elapsed_seconds?: number;
+  poll_after_seconds?: number;
+}
+
 export interface TaskStatus {
   status: "processing" | "needs_input" | "completed" | "failed";
+  /**
+   * Echoed on every status shape since 2026-09, so a caller polling several
+   * verifications in one loop can tell the replies apart. Older servers
+   * omit it.
+   */
+  task_id?: string;
   reason?: string;
-  progress?: Record<string, unknown>;
+  /**
+   * Present on `processing`; absent on every terminal shape (the server
+   * omits unset fields). Was `Record<string, unknown>` up to 2.10.0 — the
+   * runtime value is unchanged, so this is a compile-time narrowing only.
+   */
+  progress?: Progress;
   result?: Verification | null;
   claims?: CandidateClaim[];
   candidates?: string[];
@@ -314,6 +350,8 @@ export interface TaskStatus {
    */
   failure_class?: FailureClass;
   retryable?: boolean;
+  /** On a `failed` status: the page explaining that `failure_class`. */
+  docs_url?: string;
   /**
    * One sentence on how to resolve the interrupt: what was unclear and that
    * `select` resolves it. Sent on `needs_input` (`multi_claim` /
@@ -739,18 +777,34 @@ export interface LibraryListInput {
   verdict?: string;
 }
 
+/**
+ * Called once per poll while a verification is still running.
+ *
+ * It takes the `taskId` as well as the progress because the batch helper
+ * round-robins several ids in one loop — without it a callback cannot tell
+ * the caller which claim moved. A throw inside it is swallowed and never
+ * breaks the poll.
+ */
+export type OnProgress = (taskId: string, progress: Progress) => void;
+
 export interface VerifyAndWaitInput extends VerifyInput {
   timeoutMs?: number;
   idempotency?: boolean;
+  /** See {@link OnProgress}. The only way to see the stage during the ~90s wait. */
+  onProgress?: OnProgress;
 }
 
 export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
   /** Overall deadline for polling every item to a terminal state. Default 180s. */
   timeoutMs?: number;
+  /** See {@link OnProgress}. Fires per still-running item per round. */
+  onProgress?: OnProgress;
 }
 
 /** Options for `wait()`. */
 export interface WaitOptions {
   /** Deadline before raising `LenzTimeoutError`. Default 120s. */
   timeoutMs?: number;
+  /** See {@link OnProgress}. */
+  onProgress?: OnProgress;
 }

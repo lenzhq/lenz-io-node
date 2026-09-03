@@ -145,6 +145,25 @@ for (const r of results) {
 }
 ```
 
+A verify takes ~90 seconds, so show your users where it is. `onProgress` fires
+once per poll while the run is going — it takes the `taskId` as well, because
+the batch helper round-robins several ids in one loop:
+
+```ts
+await client.verifyAndWait({
+  claim: "Sharks don't get cancer",
+  onProgress: (taskId, p) => console.log(`${p.step} — step ${p.index} of ${p.total}`),
+});
+// framing — step 1 of 5
+// research — step 2 of 5
+// ...
+```
+
+`p.step` is one of `starting` / `framing` / `research` / `debate` /
+`adjudication` / `conclusion`. `p.index` is stage **position**, not elapsed
+work — the stages are uneven, so a bar driven by it sits on `research` for
+roughly half the run. A throw inside your callback never breaks the poll.
+
 Prefer **webhooks** for production async flows (no long-lived HTTP connection);
 prefer **polling** for scripts and request/response handlers where awaiting is
 fine. For full control over the loop, call `getStatus(taskId)` yourself — it's a

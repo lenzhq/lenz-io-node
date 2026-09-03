@@ -78,6 +78,8 @@ import type {
   ExtractedClaims,
   LibraryList,
   LibraryListInput,
+  OnProgress,
+  Progress,
   RelatedVerifications,
   SelectInput,
   TaskAccepted,
@@ -106,6 +108,9 @@ const DEFAULT_MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
 const POLL_BACKOFF_CAP_MS = 10_000;
+// Bounds on the server's `progress.poll_after_seconds` (see `pollHintMs`).
+const POLL_HINT_MIN_S = 1;
+const POLL_HINT_MAX_S = 30;
 
 // Generated at build time from package.json#version — see
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
@@ -251,6 +256,25 @@ async function abortsOnLongStatedWait(response: Response): Promise<boolean> {
 function pollSleepMs(idx: number, remainingMs: number): number {
   const base = POLL_BACKOFF_MS[Math.min(idx, POLL_BACKOFF_MS.length - 1)] ?? POLL_BACKOFF_CAP_MS;
   return Math.min(base, POLL_BACKOFF_CAP_MS, Math.max(0, remainingMs));
+}
+
+/**
+ * The server's suggested wait before the next poll, in ms, or `undefined`.
+ *
+ * Distinct from the `Retry-After` handling in the error-retry ladder, which
+ * means "you errored, back off". This one means "you are fine, look again
+ * shortly" and rides in the body — `Retry-After` on a 200 is off-spec enough
+ * that a proxy may drop it, and a header never appears in the OpenAPI schema.
+ *
+ * Out-of-range values fall back to the local ladder: the floor stops a bad
+ * value turning the loop hot, the ceiling stops it stalling a wait well
+ * inside its own timeout.
+ */
+function pollHintMs(progress: Progress | undefined): number | undefined {
+  const value = progress?.poll_after_seconds;
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value < POLL_HINT_MIN_S || value > POLL_HINT_MAX_S) return undefined;
+  return value * 1000;
 }
 
 class VerificationsNamespace {
@@ -560,7 +584,7 @@ export class Lenz {
     const accepted = await this.submit({ ...input, idempotencyKey });
     // eslint-disable-next-line no-console
     console.info(`[lenz-io] Submitted task: ${accepted.task_id}`);
-    return this.wait(accepted, { timeoutMs });
+    return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
   }
 
   /**
@@ -577,7 +601,7 @@ export class Lenz {
       throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
     }
     const timeoutMs = opts.timeoutMs ?? 120_000;
-    const { terminal, timedOut } = await this._pollToTerminal([taskId], timeoutMs);
+    const { terminal, timedOut } = await this._pollToTerminal([taskId], timeoutMs, opts.onProgress);
     if (timedOut.has(taskId)) {
       const err = new LenzTimeoutError({
         message: `wait timed out after ${timeoutMs}ms`,
@@ -602,7 +626,7 @@ export class Lenz {
     const timeoutMs = input.timeoutMs ?? 180_000;
     const accepted = await this.verifyBatch(input);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
-    const { terminal, timedOut } = await this._pollToTerminal(ids, timeoutMs);
+    const { terminal, timedOut } = await this._pollToTerminal(ids, timeoutMs, input.onProgress);
 
     return accepted.items.map((it): BatchItemResult => {
       const status = terminal.get(it.task_id);
@@ -654,6 +678,7 @@ export class Lenz {
   private async _pollToTerminal(
     taskIds: string[],
     timeoutMs: number,
+    onProgress?: OnProgress,
   ): Promise<{ terminal: Map<string, TaskStatus>; timedOut: Set<string> }> {
     let pending = [...taskIds];
     const terminal = new Map<string, TaskStatus>();
@@ -663,6 +688,7 @@ export class Lenz {
     while (pending.length > 0) {
       const settled = await Promise.allSettled(pending.map((id) => this.getStatus(id)));
       const stillPending: string[] = [];
+      let serverHintMs: number | undefined;
       settled.forEach((res, i) => {
         const id = pending[i]!;
         if (res.status === "fulfilled") {
@@ -671,6 +697,23 @@ export class Lenz {
             terminal.set(id, s);
           } else {
             stillPending.push(id);
+            const hint = pollHintMs(s.progress);
+            // The shortest hint wins: with a batch in flight, waiting the
+            // longest one would starve the fastest claim.
+            if (hint !== undefined && (serverHintMs === undefined || hint < serverHintMs)) {
+              serverHintMs = hint;
+            }
+            if (onProgress) {
+              try {
+                // A shallow copy — a caller must not be able to mutate our state.
+                onProgress(id, { ...(s.progress ?? { step: "" }) });
+              } catch {
+                // A caller's bug is not ours to raise, and it must not kill
+                // the poll. Swallowed with no console output: there is no
+                // established logger here, and inventing one is worse than
+                // silence for a library.
+              }
+            }
           }
         } else {
           // Poll errored this round (after _request exhausted its retries) —
@@ -685,7 +728,11 @@ export class Lenz {
         pending.forEach((id) => timedOut.add(id));
         break;
       }
-      await sleep(pollSleepMs(backoffIdx, remaining));
+      await sleep(
+        serverHintMs === undefined
+          ? pollSleepMs(backoffIdx, remaining)
+          : Math.min(serverHintMs, Math.max(0, remaining)),
+      );
       backoffIdx += 1;
     }
     return { terminal, timedOut };
