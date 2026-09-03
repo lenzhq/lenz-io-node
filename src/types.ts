@@ -155,7 +155,7 @@ export interface Verification {
  * the field itself stays `string` so the SDK never rejects a status the
  * server adds after this release was cut.
  */
-export type CoverageStatus = "covered" | "uncovered" | "pending_anchor";
+export type CoverageStatus = "covered" | "uncovered" | "pending_timestamp";
 
 /**
  * Closed set of `coverage.reasons` values — why a verdict is NOT covered.
@@ -216,7 +216,13 @@ export interface Coverage {
  * warranted, and `withdrawn_at` is on it.
  */
 export interface Certificate {
-  document_version?: string;
+  /**
+   * A NUMBER on the wire, unlike `record_version` which is a string. Not a
+   * tidy asymmetry, but it is what the server sends: `record_version` is part
+   * of the signed leaf and has always been a string, while `document_version`
+   * versions the envelope around it.
+   */
+  document_version?: number;
   certificate_id?: string;
   record_version?: string;
   /**
