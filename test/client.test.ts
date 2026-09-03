@@ -1749,3 +1749,145 @@ describe("usage", () => {
     expect(u.verify.remaining).toBe(10);
   });
 });
+
+describe("coverage", () => {
+  // Three states the SDK has to keep apart, because conflating the first two
+  // is the mistake a caller makes: `coverage` absent means the feature is not
+  // enabled for this account at all, `status === "uncovered"` means it IS
+  // enabled and this verdict did not qualify, and `"covered"` means a
+  // certificate exists. Only the third has a certificate to fetch.
+  const detail = (coverage?: unknown) => ({
+    verification_id: "vid_c",
+    claim: "x",
+    verdict: "True",
+    language: "en",
+    ...(coverage === undefined ? {} : { coverage }),
+  });
+
+  it("leaves coverage undefined when the feature is off", async () => {
+    // `undefined` and `status: "uncovered"` are different facts. A caller that
+    // reads the first as the second tells a user their verdict did not
+    // qualify, when in truth nothing was ever assessed.
+    const { fetch } = makeFetch([{ body: detail(undefined) }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.verifications.get("vid_c");
+    expect(v.coverage).toBeUndefined();
+  });
+
+  it("carries the certificate and both caps on a covered verdict", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: detail({
+          status: "covered",
+          reasons: [],
+          certificate_id: "9f2c",
+          certificate_url: "https://lenz.io/certificate/9f2c",
+          as_of: "2026-09-03T10:00:00+00:00",
+          currency: "EUR",
+          cap: 10000,
+          aggregate: 500000,
+          terms_version: "v1",
+        }),
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.verifications.get("vid_c");
+    expect(v.coverage?.status).toBe("covered");
+    expect(v.coverage?.certificate_id).toBe("9f2c");
+    expect(v.coverage?.reasons).toEqual([]);
+    // Major units, and the currency is read rather than assumed.
+    expect(v.coverage?.currency).toBe("EUR");
+    expect(v.coverage?.cap).toBe(10000);
+    expect(v.coverage?.aggregate).toBe(500000);
+  });
+
+  it("says why on an uncovered verdict", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: detail({
+          status: "uncovered",
+          reasons: ["plan", "verdict"],
+          certificate_id: null,
+          certificate_url: null,
+          as_of: null,
+          currency: "EUR",
+          cap: 10000,
+          aggregate: 500000,
+          terms_version: "v1",
+        }),
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.verifications.get("vid_c");
+    expect(v.coverage?.status).toBe("uncovered");
+    expect(v.coverage?.reasons).toEqual(["plan", "verdict"]);
+    expect(v.coverage?.certificate_id).toBeNull();
+  });
+
+  it("does not reject a status added after this release", async () => {
+    // `CoverageStatus` is exported for exhaustive matching, but the field
+    // stays `string` so a newer server cannot break an older SDK.
+    const { fetch } = makeFetch([{ body: detail({ status: "something_new", reasons: [] }) }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.verifications.get("vid_c");
+    expect(v.coverage?.status).toBe("something_new");
+  });
+
+  it("getCertificate returns the verifiable document, authenticated", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          document_version: "1",
+          certificate_id: "9f2c",
+          record_version: "1",
+          payload: { atomic_claim: "x", verdict: "True", currency: "EUR", cap: 10000 },
+          leaf: "0".repeat(64),
+          signature: "MEUCIQ",
+          key_id: "projects/.../cryptoKeyVersions/1",
+          anchors: { qualified_timestamp: { authority: "qtsp" }, opentimestamps: {} },
+          withdrawn_at: null,
+          keys_url: "https://lenz.io/.well-known/lenz-certificate-keys.json",
+          verifier_url: "https://lenz.io/verify_certificate.py",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const cert = await client.verifications.getCertificate("vid_c");
+
+    expect(calls[0]!.url).toContain("/verifications/vid_c/certificate");
+    // Resolved by (verification, ACCOUNT) — an anonymous fetch would be the
+    // wrong document or none, so the key must go on the wire.
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("authorization")).toBe("Bearer lenz_t");
+    expect(cert.certificate_id).toBe("9f2c");
+    expect(cert.leaf).toBe("0".repeat(64));
+    // The pointers that make it checkable WITHOUT Lenz.
+    expect(cert.verifier_url).toContain("verify_certificate.py");
+    expect(cert.keys_url).toContain("lenz-certificate-keys.json");
+  });
+
+  it("still returns a withdrawn certificate", async () => {
+    // It is the record of what WAS warranted, and use before the withdrawal
+    // notice can still be covered — so withdrawal is not an error.
+    const { fetch } = makeFetch([
+      {
+        body: {
+          certificate_id: "9f2c",
+          leaf: "0".repeat(64),
+          withdrawn_at: "2026-10-01T09:00:00+00:00",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const cert = await client.verifications.getCertificate("vid_c");
+    expect(cert.withdrawn_at).toBe("2026-10-01T09:00:00+00:00");
+  });
+
+  it("rejects rather than returning an empty certificate when there is none", async () => {
+    const { fetch } = makeFetch([{ status: 404, body: { detail: "Not found." } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.verifications.getCertificate("vid_c")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+});

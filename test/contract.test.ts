@@ -103,6 +103,31 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "language",
     "visibility",
     "depth",
+    "coverage",
+  ]),
+  Coverage: new Set([
+    "status",
+    "reasons",
+    "certificate_id",
+    "certificate_url",
+    "as_of",
+    "currency",
+    "cap",
+    "aggregate",
+    "terms_version",
+  ]),
+  Certificate: new Set([
+    "document_version",
+    "certificate_id",
+    "record_version",
+    "payload",
+    "leaf",
+    "signature",
+    "key_id",
+    "anchors",
+    "withdrawn_at",
+    "keys_url",
+    "verifier_url",
   ]),
   VerificationListItem: new Set([
     "verification_id",
@@ -173,6 +198,16 @@ const NESTED: Record<string, Record<string, string | null>> = {
     entities: "EntityRef",
     sources: "Source",
     audit: "Audit",
+    coverage: "Coverage",
+  },
+  Certificate: {
+    // Opaque on purpose. `payload` is the exact bytes the signature and both
+    // anchors are taken over — descending into it would invite the SDK to
+    // reconstruct it, and a reconstruction that differs by one byte produces
+    // a different leaf and a document that no longer verifies. Hand it to the
+    // verifier verbatim. `anchors` is opaque for the same reason.
+    payload: null,
+    anchors: null,
   },
   Audit: {
     assessments: "Assessment",
@@ -243,6 +278,13 @@ describe("contract", () => {
     // fixtures are the two halves of that contract.
     ["verify_status_processing.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
+    // Both halves of the coverage contract: the server omits `coverage`
+    // entirely when the feature is off (that is `verifications_detail`),
+    // emits a full block with a certificate when a verdict qualifies, and a
+    // full block with `reasons` and null certificate fields when it does not.
+    ["verifications_detail_covered.json", "Verification"],
+    ["verifications_detail_uncovered.json", "Verification"],
+    ["certificate.json", "Certificate"],
     ["usage.json", "Usage"],
   ];
 

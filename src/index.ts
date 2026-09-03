@@ -62,6 +62,7 @@ export {
 } from "./webhooks.js";
 export type {
   LenzWebhooksOptions,
+  CertificateTimestamped,
   VerificationCompleted,
   VerificationFailed,
   VerificationNeedsInput,
@@ -82,6 +83,10 @@ export type {
   BatchAccepted,
   BatchItemResult,
   CandidateClaim,
+  Certificate,
+  Coverage,
+  CoverageReason,
+  CoverageStatus,
   DebateSide,
   EntityRef,
   ExtractInput,
