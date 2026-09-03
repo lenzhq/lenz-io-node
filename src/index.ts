@@ -62,7 +62,7 @@ export {
 } from "./webhooks.js";
 export type {
   LenzWebhooksOptions,
-  CertificateAnchored,
+  CertificateTimestamped,
   VerificationCompleted,
   VerificationFailed,
   VerificationNeedsInput,

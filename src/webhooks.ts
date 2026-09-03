@@ -74,7 +74,7 @@ export type WebhookEventKind =
   | "verification.completed"
   | "verification.failed"
   | "verification.needs_input"
-  | "certificate.anchored"
+  | "certificate.timestamped"
   // The `string & NonNullable<unknown>` trick preserves the autocomplete
   // hints from the literal union while still permitting any future
   // event-kind string the server adds. `(string & {})` reads cleaner but
@@ -117,7 +117,7 @@ export interface VerificationNeedsInput extends WebhookEventBase {
 }
 
 /**
- * `event=certificate.anchored` — the qualified timestamp landed.
+ * `event=certificate.timestamped` — the qualified timestamp landed.
  *
  * **This is the event to publish on, not `verification.completed`.** The
  * warranty requires the certificate's timestamp to PRECEDE what you publish
@@ -129,8 +129,8 @@ export interface VerificationNeedsInput extends WebhookEventBase {
  * landed, not that a verdict was produced, so `result` is null here and
  * reading it will not give you the verification.
  */
-export interface CertificateAnchored extends WebhookEventBase {
-  event: "certificate.anchored";
+export interface CertificateTimestamped extends WebhookEventBase {
+  event: "certificate.timestamped";
   coverage: Coverage;
 }
 
@@ -138,7 +138,7 @@ export type WebhookEvent =
   | VerificationCompleted
   | VerificationFailed
   | VerificationNeedsInput
-  | CertificateAnchored
+  | CertificateTimestamped
   | WebhookEventBase; // catch-all for forward compatibility
 
 function buildEvent(payload: Record<string, unknown>): WebhookEvent {
@@ -178,10 +178,10 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       hint: String(needsInput["hint"] ?? ""),
     };
   }
-  if (event === "certificate.anchored") {
+  if (event === "certificate.timestamped") {
     return {
       ...base,
-      event: "certificate.anchored",
+      event: "certificate.timestamped",
       coverage: (payload["coverage"] as Coverage) ?? {},
     };
   }
