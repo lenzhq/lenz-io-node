@@ -6,7 +6,7 @@
  * the verifiable claims out of it (`extract`), gives you a fast verdict on
  * every one of them in a single trip (`assess({ claims })` — up to 20 per
  * call, one row per claim, same order), and you escalate only the
- * low-confidence rows to the full 8-model pipeline (`verifyBatchAndWait`).
+ * low-confidence rows to the full multi-model pipeline (`verifyBatchAndWait`).
  * Cheaper and faster than verifying every claim outright.
  *
  *   export LENZ_API_KEY=lenz_...

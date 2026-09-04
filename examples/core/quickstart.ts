@@ -7,7 +7,7 @@
  * The pattern: `extract` pulls claims out of any text, ONE `assess` call
  * returns a fast 3-model verdict on each of them (up to 20 per call, one
  * row per claim), `verify` escalates the low-confidence rows to the full
- * 8-model panel with citations, and `ask` lets you follow up on a
+ * multi-model panel with citations, and `ask` lets you follow up on a
  * verification.
  *
  * The demo claim is pre-cached, so the verify call returns in ~1.5s.
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   }
   console.log("");
 
-  // 3. verify — escalate the low-confidence rows to the full 8-model panel
+  // 3. verify — escalate the low-confidence rows to the full multi-model panel
   //    for citations + audit. The demo claim is pre-cached, so it stands in
   //    when nothing came back low-confidence and the demo stays fast.
   const doubtful = quick
