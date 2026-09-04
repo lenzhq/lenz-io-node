@@ -16,3 +16,7 @@ src/_version.ts
 *.tgz
 
 *.tgz
+
+# Claude Code session state, agent transcripts and worktrees. This repo is
+# PUBLIC — a stray `git add -A` here would publish internal notes.
+.claude/
