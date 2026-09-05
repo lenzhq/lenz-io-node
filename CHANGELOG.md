@@ -4,6 +4,49 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [2.12.0] - 2026-09-06
+
+**`assess` now defends against being charged twice for a call you never
+received.** Two changes that belong together. Lockstep release with Python
+2.12.0.
+
+The single form used the 30s client default while a list call got 45s. The
+server runs framing and then a 3-model panel inside one synchronous request
+and divides a single time budget between them, so a single-claim call can take
+as long as a list one — and when it overran, the client timed out _after_ the
+server had charged it. `assess` sent no `Idempotency-Key`, so the retry
+charged again.
+
+Both forms now wait up to 45s (or your client's `timeoutMs` when it is
+longer), and every `assess` call carries an auto-generated key that is reused
+across this client's own retries.
+
+Works against any server version: the key is simply honoured by newer servers
+and ignored by older ones, and a longer timeout only ever waits longer.
+
+### Added
+
+- **`AssessInput.idempotency` / `AssessInput.idempotencyKey`** — same shape
+  as `VerifyAndWaitInput`. On by default, generating a random key per
+  invocation that is reused across retries. Pin your own to make a retry from
+  another process replay too, or pass `idempotency: false` to send none.
+
+  Deliberately random rather than derived from the claim text: an identical
+  claim sent an hour later is a new question, and a content-derived key would
+  replay the first answer for 24h.
+
+- **`timeout`** joins the row `error_code` vocabulary — the call ran out of
+  its time budget before that item was done. It is free, and worth resending
+  as-is; sending fewer items per call makes it less likely.
+
+### Changed
+
+- **`assess({ claim })` waits up to 45s**, not 30s — the same floor the list
+  form already had, and still never shorter than a longer `timeoutMs`.
+- **The row `error_code` set is documented as OPEN.** Branch on the values you
+  know and fall through on the rest; surface `hint` to humans, since it is
+  written per cause and stays correct as causes are added.
+
 ## [2.11.0] - 2026-09-03
 
 **`progress` on `GET /verify/status` is now a documented object.** It was

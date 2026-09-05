@@ -334,9 +334,18 @@ export interface AssessClaim {
   verification_url?: string | null;
   /**
    * Why this row has no verdict — set only when `verdict === "Error"`:
-   * `no_claim` | `ambiguous` | `framing_failed` | `upstream_unavailable`
-   * (the last is the retryable one). `null` on a verdict row. Error rows
-   * are free.
+   * `no_claim` | `ambiguous` | `framing_failed` | `upstream_unavailable` |
+   * `timeout`. `null` on a verdict row. Error rows are free.
+   *
+   * An OPEN set, deliberately typed `string` rather than a union: the API may
+   * add a cause in a minor version, so branch on the ones you know and fall
+   * through on the rest.
+   *
+   * Worth resending as-is: `upstream_unavailable` (a provider was down) and
+   * `timeout` (the call ran out of its time budget before this item was done —
+   * fewer items per call makes it less likely). `framing_failed` is
+   * deterministic, so retrying the same text will not help; `no_claim` and
+   * `ambiguous` want a different input. Read `hint`.
    */
   error_code?: string | null;
   /** Specific readings when `error_code === "ambiguous"`; assess one of them. Else `[]`. */
@@ -837,6 +846,18 @@ export interface AssessInput {
   claims?: string[];
   /** Output language (ISO 639-1). See `VerifyInput.language`. */
   language?: string;
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop replays the
+   * first response instead of running — and paying for — the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
   /**
    * Per-call HTTP timeout. A list call runs one parallel panel wave
    * (~10-25s), so when omitted the list form waits at least 45s rather

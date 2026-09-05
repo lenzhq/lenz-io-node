@@ -59,8 +59,9 @@ console.log(reply.content);
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
 one row per item, in the order sent. A row with `verdict === "Error"` had no
-verdict: `error_code` says why (`no_claim`, `ambiguous`, `framing_failed`, or
-the retryable `upstream_unavailable`), `hint` says what to send next, and
+verdict: `error_code` says why (`no_claim`, `ambiguous`, `framing_failed`,
+`upstream_unavailable`, or `timeout` — an open set; the last two are the ones
+worth resending as-is), `hint` says what to send next, and
 `candidate_claims` carries the specific readings when it was ambiguous. Error
 rows are free. A compound item is assessed on its main claim and lists the
 rest in `identified_claims` — send those as their own items to check them.
