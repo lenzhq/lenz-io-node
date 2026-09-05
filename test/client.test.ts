@@ -603,10 +603,20 @@ describe("Assess per-call timeout", () => {
     await expectAbortAt(client.assess({ claims: ["a", "b"] }), signals, 45_000);
   });
 
-  it("single form keeps the client's 30s default", async () => {
+  // The server runs framing and then a 3-model panel inside one request,
+  // dividing a single budget between them, so a single-claim call can take as
+  // long as a list one. On the 30s default it timed out AFTER the server had
+  // charged it, and the retry charged again.
+  it("single form waits 45s too, not the client's 30s default", async () => {
     const { fetch, signals } = hangingFetch();
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    await expectAbortAt(client.assess({ claim: "a" }), signals, 30_000);
+    await expectAbortAt(client.assess({ claim: "a" }), signals, 45_000);
+  });
+
+  it("a longer client-wide timeoutMs is never shortened for the single form", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 90_000 });
+    await expectAbortAt(client.assess({ claim: "a" }), signals, 90_000);
   });
 
   it("per-call timeoutMs overrides the list default", async () => {
@@ -670,6 +680,58 @@ describe("verifyAndWait", () => {
     await client.verifyAndWait({ claim: "x", timeoutMs: 5_000, idempotency: false });
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Idempotency-Key")).toBeNull();
+  });
+
+  it("assess sends a random Idempotency-Key by default", async () => {
+    // A retry after a network drop must replay, not re-charge. Random per
+    // invocation, NOT derived from the claim: a content-derived key would
+    // replay a day-old verdict for an identical claim sent again.
+    const { fetch, calls } = makeFetch([
+      { body: { claims: [], error: null } },
+      { body: { claims: [], error: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.assess({ claim: "a" });
+    await client.assess({ claim: "a" });
+    const first = new Headers(calls[0]!.init.headers).get("Idempotency-Key");
+    const second = new Headers(calls[1]!.init.headers).get("Idempotency-Key");
+    expect(first).toBeTruthy();
+    expect(first!.length).toBeGreaterThanOrEqual(32);
+    expect(second).not.toBe(first);
+  });
+
+  it("assess idempotency can be pinned or disabled", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { claims: [], error: null } },
+      { body: { claims: [], error: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.assess({ claim: "a", idempotencyKey: "pinned-1" });
+    await client.assess({ claim: "a", idempotency: false });
+    expect(new Headers(calls[0]!.init.headers).get("Idempotency-Key")).toBe("pinned-1");
+    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toBeNull();
+  });
+
+  it("assess reuses one key across the retry ladder", async () => {
+    // The key exists for exactly this: a 5xx the client retries must be
+    // deduped server-side, so every attempt of one call carries the same key.
+    const { fetch, calls } = makeFetch([
+      { status: 500, body: { detail: "boom" } },
+      { body: { claims: [], error: null } },
+    ]);
+    // Fake timers: the first retry sleeps 1s for real otherwise.
+    vi.useFakeTimers();
+    try {
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const pending = client.assess({ claim: "a" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+    const keys = new Set(calls.map((c) => new Headers(c.init.headers).get("Idempotency-Key")));
+    expect(calls.length).toBe(2);
+    expect(keys.size).toBe(1);
   });
 
   it("forwards depth to the submit body, and omits it when unset", async () => {

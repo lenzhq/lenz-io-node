@@ -101,10 +101,19 @@ export const API_VERSION = "2026-05-13";
 export const DEFAULT_BASE_URL = "https://lenz.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 /**
- * Floor on the per-call timeout for `assess({ claims })`. A list runs one
- * parallel panel wave (~10-25s), which the 30s default leaves no margin for.
+ * Floor on the per-call timeout for `assess`, BOTH forms.
+ *
+ * The server runs framing and then a 3-model panel inside one synchronous
+ * request and divides a single budget between them, so a single-claim call
+ * can take as long as a list one. Typical calls answer in 10-25s; this is the
+ * ceiling the server sizes its own budget against.
+ *
+ * Applied to `assess({ claim })` as well as `assess({ claims })` since 2.12.0.
+ * Before that the single form used the 30s default, and a call whose framing
+ * was slow could time out client-side AFTER the server had charged it — and a
+ * retry with no idempotency key charged again.
  */
-const ASSESS_LIST_TIMEOUT_MS = 45_000;
+const ASSESS_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
@@ -528,6 +537,21 @@ export class Lenz {
    * the claim text in that language. Verdict labels stay English.
    */
   async assess(input: AssessInput): Promise<AssessResponse> {
+    // A random key per invocation, reused across this client's own retries so
+    // a 5xx retry is deduped server-side rather than charged twice.
+    //
+    // Deliberately NOT derived from the claim text: an identical claim sent an
+    // hour later is a new question, and a content-derived key would replay the
+    // first answer for 24h — including for a claim whose verdict the server
+    // would otherwise refresh.
+    const idempotencyKey =
+      input.idempotencyKey ??
+      (input.idempotency !== false ? (await generateUuid()).replace(/-/g, "") : undefined);
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+    // Never shortens a client configured with a longer timeout: the caller
+    // asked for it.
+    const timeoutMs = input.timeoutMs ?? Math.max(this.timeoutMs, ASSESS_TIMEOUT_MS);
     // `claim` is the documented name; `text` the alias. Either way the wire
     // key is `text`, which every server version accepts.
     const single = input.claim || input.text;
@@ -547,9 +571,8 @@ export class Lenz {
         method: "POST",
         path: "/assess",
         json: body,
-        // A list call is one parallel wave, so it needs more room than the
-        // default. Never shortens a client configured with a longer timeout.
-        timeoutMs: input.timeoutMs ?? Math.max(this.timeoutMs, ASSESS_LIST_TIMEOUT_MS),
+        timeoutMs,
+        headers,
       });
     }
     const body: Record<string, unknown> = { text: single };
@@ -558,7 +581,8 @@ export class Lenz {
       method: "POST",
       path: "/assess",
       json: body,
-      timeoutMs: input.timeoutMs,
+      timeoutMs,
+      headers,
     });
   }
 
