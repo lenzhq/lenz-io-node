@@ -26,11 +26,19 @@ maybe("smoke", () => {
     });
   }
 
-  it("quickstart claim returns via cache", async () => {
+  // The API's verdict cache lasts an hour, so this is usually a fresh run:
+  // depth "low" keeps it cheap and short (~15s), the 150s budget covers a slow
+  // one, and a cache hit inside the hour is a bonus. The vitest limit sits
+  // above the SDK's so LenzTimeoutError, not vitest, reports a stall.
+  it("quickstart claim verifies at low depth", async () => {
     const client = makeClient();
-    const v = await client.verifyAndWait({ claim: "Sharks don't get cancer", timeoutMs: 30_000 });
+    const v = await client.verifyAndWait({
+      claim: "Sharks don't get cancer",
+      depth: "low",
+      timeoutMs: 150_000,
+    });
     expect(v.verdict).toBeTruthy();
-  }, 35_000);
+  }, 160_000);
 
   it("assess returns typed claims", async () => {
     const client = makeClient();

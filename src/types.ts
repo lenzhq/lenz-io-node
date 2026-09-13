@@ -21,6 +21,11 @@ export interface Source {
   source_name?: string;
   title?: string;
   url?: string;
+  /**
+   * The passage around the quoted sentence(s) on the source page, in the
+   * page's own language: up to ~2,000 characters, and it may contain line
+   * breaks. `…` marks a cut paragraph, ` … ` separates two passages.
+   */
   snippet?: string;
   date?: string;
 }
@@ -31,16 +36,30 @@ export interface DebateSide {
   rebuttal?: string;
 }
 
+/**
+ * One reviewer's structured assessment.
+ *
+ * Current verifications carry three reviewers, `Reviewer A` to `Reviewer C`,
+ * all running the same checks over the evidence, plus `Reviewer D` and
+ * `Reviewer E` when those three disagree. Their `focus_area` reads
+ * `"Sources, evidence fit and wording"`.
+ *
+ * Older verifications carry specialist panelists instead, one warning
+ * category each: logical fallacies (Logic Examiner), precision issues
+ * (Precision Analyst), weakest sources (Source Auditor) and, before 2026-06,
+ * missing context (Context Analyst).
+ */
 export interface Assessment {
+  /** A display value, not a stable key — don't branch on it. */
   panelist_name?: string;
   focus_area?: string;
+  /** Reviewer-level 1-10 sub-score, distinct from the top-level `lenz_score`. */
   score?: number | null;
   reasoning?: string;
   /**
-   * Per-panelist warnings. Each panelist emits exactly one category
-   * (logical fallacies, precision issues, or weakest sources; verifications
-   * from before 2026-06 carry missing context from the retired Context
-   * Analyst); the kind is implicit in `focus_area`.
+   * The source issues, evidence gaps and precision issues this reviewer
+   * found, in one list. On an older verification, the one category that
+   * panelist covers.
    */
   warnings?: string[];
 }
@@ -310,6 +329,10 @@ export interface ExtractedClaims {
   status?: ExtractStatus;
   claim?: string;
   identified_claims?: string[];
+  /**
+   * @deprecated Always empty since 2026-09-12. Kept because the server still
+   * sends the key.
+   */
   candidate_claims?: string[];
   domain?: string;
   key_entities?: ExtractedEntity[];
@@ -324,6 +347,9 @@ export interface ExtractedClaims {
  * `verification_url` (when present) points at the full payload at
  * `GET /api/v1/verifications/{id}` for callers that want citations and
  * the full audit trail.
+ *
+ * A vague item is assessed on its most likely reading, which `claim`
+ * carries.
  */
 export interface AssessClaim {
   claim?: string;
@@ -334,8 +360,8 @@ export interface AssessClaim {
   verification_url?: string | null;
   /**
    * Why this row has no verdict — set only when `verdict === "Error"`:
-   * `no_claim` | `ambiguous` | `framing_failed` | `upstream_unavailable` |
-   * `timeout`. `null` on a verdict row. Error rows are free.
+   * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`.
+   * `null` on a verdict row. Error rows are free.
    *
    * An OPEN set, deliberately typed `string` rather than a union: the API may
    * add a cause in a minor version, so branch on the ones you know and fall
@@ -344,11 +370,15 @@ export interface AssessClaim {
    * Worth resending as-is: `upstream_unavailable` (a provider was down) and
    * `timeout` (the call ran out of its time budget before this item was done —
    * fewer items per call makes it less likely). `framing_failed` is
-   * deterministic, so retrying the same text will not help; `no_claim` and
-   * `ambiguous` want a different input. Read `hint`.
+   * deterministic, so retrying the same text will not help (a provider
+   * outage comes back as `upstream_unavailable` instead); `no_claim` wants a
+   * different input. Read `hint`.
    */
   error_code?: string | null;
-  /** Specific readings when `error_code === "ambiguous"`; assess one of them. Else `[]`. */
+  /**
+   * @deprecated Always empty since 2026-09-12, when the `ambiguous` cause
+   * that filled it was retired. Kept because the server still sends the key.
+   */
   candidate_claims?: string[];
   /**
    * Other claims found in this item that were NOT assessed — a compound
@@ -366,25 +396,28 @@ export interface AssessClaim {
 /**
  * Output of `POST /assess`.
  *
- * Single form (`claim`): `claims` is one entry per atomic_claim that
- * framing identified in the input. Multiclaim inputs return N entries.
- * `error` is set when framing returns zero claims.
+ * Single form (`claim`): `claims` is one entry per claim found in the
+ * input — up to 20, at 1 credit each. `error` is set when the input holds
+ * no checkable claim.
  *
  * List form (`claims`): exactly one entry per item sent, in the order
  * sent. An item that could not be given a verdict is still in position,
  * with `verdict: "Error"` and `error_code` / `hint` saying why; `error`
  * is `null`.
  *
- * When `claims` is empty, `error_code` disambiguates why: `'ambiguous'`
- * → the input was vague but framing produced specific readings in
- * `candidate_claims` (assess one of them); `'no_claim'` → genuinely not a
- * checkable claim. Both fields are optional, so older servers that don't
- * send them degrade to the plain `error` message.
+ * When `claims` is empty (single form), `error_code` is `'no_claim'`: the
+ * input holds no checkable claim (a vague input is assessed on its most
+ * likely reading instead). It is optional, so older servers that don't send
+ * it degrade to the plain `error` message.
  */
 export interface AssessResponse {
   claims: AssessClaim[];
   error?: string | null;
-  error_code?: string; // '' | 'ambiguous' | 'no_claim'
+  error_code?: string; // '' | 'no_claim'
+  /**
+   * @deprecated Always empty since 2026-09-12. Kept because the server still
+   * sends the key.
+   */
   candidate_claims?: string[];
 }
 
@@ -431,6 +464,7 @@ export interface TaskStatus {
    * omit it.
    */
   task_id?: string;
+  /** On `needs_input`: `multi_claim` | `duplicate_found`. */
   reason?: string;
   /**
    * Present on `processing`; absent on every terminal shape (the server
@@ -440,6 +474,11 @@ export interface TaskStatus {
   progress?: Progress;
   result?: Verification | null;
   claims?: CandidateClaim[];
+  /**
+   * @deprecated Always empty since 2026-09-12, when the
+   * `clarification_required` pause that filled it was retired. Kept because
+   * the server still sends the key.
+   */
   candidates?: string[];
   similar_claims?: SimilarVerification[];
   /**
@@ -463,9 +502,9 @@ export interface TaskStatus {
   docs_url?: string;
   /**
    * One sentence on how to resolve the interrupt: what was unclear and that
-   * `select` resolves it. Sent on `needs_input` (`multi_claim` /
-   * `clarification_required`) and on a `failed` status whose
-   * `failure_reason` is `not_a_claim`. Older servers omit it.
+   * `select` resolves it. Sent on a `multi_claim` `needs_input` and on a
+   * `failed` status whose `failure_reason` is `not_a_claim`. Older servers
+   * omit it.
    */
   hint?: string;
 }
@@ -877,7 +916,7 @@ export interface AskSendInput {
 
 export interface SelectInput {
   /**
-   * One or more claims chosen from a multi_claim / clarification interrupt.
+   * One or more claims chosen from a multi_claim interrupt.
    * Each must match a claim that was offered in the prior status response.
    * Each selected claim fans out into its own pipeline.
    */

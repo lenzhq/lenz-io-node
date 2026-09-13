@@ -59,13 +59,13 @@ console.log(reply.content);
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
 one row per item, in the order sent. A row with `verdict === "Error"` had no
-verdict: `error_code` says why (`no_claim`, `ambiguous`, `framing_failed`,
+verdict: `error_code` says why (`no_claim`, `framing_failed`,
 `upstream_unavailable`, or `timeout` — an open set; the last two are the ones
-worth resending as-is), `hint` says what to send next, and
-`candidate_claims` carries the specific readings when it was ambiguous. Error
-rows are free. A compound item is assessed on its main claim and lists the
-rest in `identified_claims` — send those as their own items to check them.
-The single form, `assess({ claim })`, is unchanged; the two are mutually
+worth resending as-is) and `hint` says what to send next. Error rows are
+free. A compound item is assessed on its main claim and lists the rest in
+`identified_claims` — send those as their own items to check them. The
+single form, `assess({ claim })`, takes one text and answers with a row per
+claim found in it, up to 20, at 1 credit each; the two are mutually
 exclusive.
 
 `assess` and `verify` share a result cache server-side: if a claim
@@ -75,7 +75,7 @@ already has a deep verification, `assess` returns it via
 ## How verification works
 
 Framing → Research → Debate (2 models, 2 rounds) → Panel Review
-(3 reviewers: source quality, logical structure, claim precision) → Conclusion. ~90 seconds wall-clock
+(3 reviewers running the same checks, 2 more when they disagree) → Conclusion. ~90 seconds wall-clock
 per claim. `assess` runs a leaner 3-model panel against the same
 framing for the ~10s pass.
 
@@ -95,8 +95,9 @@ for (const source of (v.sources ?? []).slice(0, 3)) {
 }
 ```
 
-The demo claim is pre-cached so this returns in ~1.5s. Your own claims
-hit the full pipeline (~60-90s) — use webhooks for production async flows.
+The demo claim is cached for an hour after anyone verifies it, so it can
+come back in seconds; otherwise it runs the full pipeline (~60-90s) like
+your own claims. Use webhooks for production async flows.
 
 > **Get your webhook secret here →** [lenz.io/api-credentials](https://lenz.io/api-credentials)
 

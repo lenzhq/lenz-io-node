@@ -10,9 +10,10 @@
  * multi-model panel with citations, and `ask` lets you follow up on a
  * verification.
  *
- * The demo claim is pre-cached, so the verify call returns in ~1.5s.
- * Your own claims hit the full pipeline (~60-90s) — use webhooks for
- * production async flows.
+ * The demo claim is cached for an hour after anyone verifies it, so the
+ * verify call can come back in seconds; otherwise it runs the full
+ * pipeline (~60-90s) like your own claims. Use webhooks for production
+ * async flows.
  */
 
 import { Lenz } from "lenz-io";
@@ -43,8 +44,8 @@ async function main(): Promise<void> {
   console.log("");
 
   // 3. verify — escalate the low-confidence rows to the full multi-model panel
-  //    for citations + audit. The demo claim is pre-cached, so it stands in
-  //    when nothing came back low-confidence and the demo stays fast.
+  //    for citations + audit. The demo claim stands in when nothing came
+  //    back low-confidence, so the walkthrough always reaches steps 3 and 4.
   const doubtful = quick
     .filter((c) => c.verdict !== "Error" && c.confidence === "low")
     .map((c) => ({ claim: c.claim ?? "" }));
