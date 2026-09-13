@@ -365,11 +365,13 @@ describe("contract", () => {
     // A compound item: verdict on the main claim, the rest on the row, with a hint.
     expect(rows[1]!["identified_claims"]).toHaveLength(1);
     expect(rows[1]!["hint"]).toBeTruthy();
-    // Error rows: error_code + hint always; candidate_claims only when ambiguous.
+    // Error rows: error_code + hint always; candidate_claims is still sent,
+    // always empty since 2026-09-12.
     expect(rows[2]!["error_code"]).toBe("no_claim");
-    expect(rows[2]!["candidate_claims"]).toEqual([]);
-    expect(rows[3]!["error_code"]).toBe("ambiguous");
-    expect(rows[3]!["candidate_claims"]).toHaveLength(2);
+    expect(rows[3]!["error_code"]).toBe("timeout");
+    for (const row of rows) {
+      expect(row["candidate_claims"]).toEqual([]);
+    }
     for (const row of rows.slice(2)) {
       expect(row["confidence"]).toBe("low");
       expect(row["verification_url"]).toBeNull();

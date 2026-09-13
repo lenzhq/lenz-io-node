@@ -327,21 +327,6 @@ describe("Marquee verbs", () => {
     expect(s.status).toBe("processing");
   });
 
-  it("getStatus clarification uses candidates not candidate_claims", async () => {
-    const { fetch } = makeFetch([
-      {
-        body: {
-          status: "needs_input",
-          reason: "clarification",
-          candidates: ["What did you mean by X?", "Or did you mean Y?"],
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const s = await client.getStatus("tsk_001");
-    expect(s.candidates).toEqual(["What did you mean by X?", "Or did you mean Y?"]);
-  });
-
   it("select requires a non-empty texts array", async () => {
     const client = new Lenz({ apiKey: "lenz_t" });
     await expect(() => client.select("tsk", { texts: [] })).rejects.toThrow(/non-empty/);
@@ -437,26 +422,22 @@ describe("Assess", () => {
     expect(out.error).toBe("no_atomic_claim_identified");
   });
 
-  it("ambiguous input returns error_code + candidate_claims", async () => {
+  it("a text with no checkable claim returns error_code no_claim", async () => {
     const { fetch } = makeFetch([
       {
         body: {
           claims: [],
-          error: "Claim is ambiguous — pick a specific reading",
-          error_code: "ambiguous",
-          candidate_claims: [
-            "DDR4 desktop RAM prices doubled 2021-2026.",
-            "DRAM contract prices doubled 2021-2026.",
-          ],
+          error: "No verifiable claim detected",
+          error_code: "no_claim",
+          candidate_claims: [],
         },
       },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const out = await client.assess({ text: "RAM prices have more than doubled in recent years" });
+    const out = await client.assess({ text: "this is fine" });
     expect(out.claims).toEqual([]);
-    expect(out.error_code).toBe("ambiguous");
-    expect(out.candidate_claims).toHaveLength(2);
-    expect(out.candidate_claims?.[0]).toContain("DDR4");
+    expect(out.error_code).toBe("no_claim");
+    expect(out.candidate_claims).toEqual([]);
   });
 
   it("requires api_key (auth-required)", async () => {
@@ -499,18 +480,15 @@ describe("Assess", () => {
               hint: "Assessed the main claim only. Send identified_claims as their own items to check the rest.",
             },
             {
-              claim: "RAM prices have more than doubled",
+              claim: "The Eiffel Tower is 330 metres tall.",
               language: "en",
               verdict: "Error",
               confidence: "low",
               verification_url: null,
-              error_code: "ambiguous",
-              candidate_claims: [
-                "Average U.S. retail prices for consumer DDR4 desktop RAM have more than doubled between 2021 and 2026.",
-                "Global DRAM contract prices have more than doubled between 2021 and 2026.",
-              ],
+              error_code: "timeout",
+              candidate_claims: [],
               identified_claims: [],
-              hint: "Ambiguous: Which memory market / form factor? Send one of candidate_claims as its own item.",
+              hint: "This item was not processed inside the call's time budget; nothing was charged.",
             },
           ],
           error: null,
@@ -521,7 +499,7 @@ describe("Assess", () => {
     const claims = [
       "Water boils at 100 °C at sea level.",
       "Bilingual children develop stronger executive function and learn to read later than monolingual peers.",
-      "RAM prices have more than doubled",
+      "The Eiffel Tower is 330 metres tall.",
     ];
     const out = await client.assess({ claims, language: "en" });
 
@@ -546,9 +524,8 @@ describe("Assess", () => {
     expect(compound!.hint).toContain("identified_claims");
     // An Error row stays in position and says why.
     expect(error!.verdict).toBe("Error");
-    expect(error!.error_code).toBe("ambiguous");
-    expect(error!.candidate_claims).toHaveLength(2);
-    expect(error!.hint).toContain("candidate_claims");
+    expect(error!.error_code).toBe("timeout");
+    expect(error!.hint).toContain("time budget");
   });
 
   it("list form with `claim` / `text` throws LenzValidationError before any request", async () => {

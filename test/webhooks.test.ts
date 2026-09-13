@@ -118,9 +118,16 @@ describe("LenzWebhooks", () => {
   });
 
   it("needs_input lifts the hint out of the needs_input block", () => {
-    const hint = "Ambiguous: which memory market? Pick one candidate and resolve via select.";
+    const hint = "The input holds two distinct claims. Pick the one to verify via /select.";
     const body = payload("verification.needs_input", {
-      needs_input: { reason: "clarification_required", candidate_claims: ["A", "B"], hint },
+      needs_input: {
+        reason: "multi_claim",
+        claims: [
+          { text: "A", domain: "X" },
+          { text: "B", domain: "X" },
+        ],
+        hint,
+      },
     });
     const wh = new LenzWebhooks({ secret: SECRET });
     const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationNeedsInput;

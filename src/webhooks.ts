@@ -110,8 +110,8 @@ export interface VerificationNeedsInput extends WebhookEventBase {
   event: "verification.needs_input";
   needsInput: Record<string, unknown>;
   /**
-   * One sentence on what was unclear and how `select` resolves it
-   * (`multi_claim` / `clarification_required`); "" when the server sent none.
+   * One sentence on what was unclear and how `select` resolves it (on a
+   * `multi_claim` pause); "" when the server sent none.
    */
   hint: string;
 }

@@ -509,8 +509,8 @@ export class Lenz {
   /**
    * Fast 3-model panel verdict. Sync, ~10s for one claim. Two forms:
    *
-   * - `assess({ claim })` — one claim; returns one entry per atomic_claim
-   *   framing identified in it.
+   * - `assess({ claim })` — one text; returns one entry per claim found in
+   *   it (up to 20, 1 credit each).
    * - `assess({ claims })` — up to 20 claims in one call (~10-25s); returns
    *   exactly one entry per item, in the order sent. This is the step after
    *   `extract` in the ladder. A row with `verdict === "Error"` has
