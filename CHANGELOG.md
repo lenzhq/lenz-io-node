@@ -29,6 +29,12 @@ working against the current API.
   older specialist panelists; `Source.snippet` is the passage around the
   quote, in the page's language; a single `assess` text answers with up to
   20 rows.
+- The demo claim is no longer described as pre-cached: the API's verdict
+  cache now lasts an hour, so it answers in seconds only when someone
+  verified it within the hour.
+- Release smoke: the `/verify` check runs the quickstart claim at
+  `depth: "low"` with a 150s budget instead of expecting a cache hit inside
+  30s, which a 1-hour cache no longer guarantees.
 
 ## [2.12.0] - 2026-09-06
 
