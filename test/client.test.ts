@@ -541,7 +541,7 @@ describe("Assess", () => {
   });
 });
 
-describe("Assess per-call timeout", () => {
+describe("Per-call timeout floors (assess, extract)", () => {
   /** A fetch that never answers — it settles only when the SDK aborts it. */
   function hangingFetch() {
     const signals: AbortSignal[] = [];
@@ -608,10 +608,31 @@ describe("Assess per-call timeout", () => {
     await expectAbortAt(client.assess({ claims: ["a"] }), signals, 90_000);
   });
 
-  it("other calls are untouched by the assess override", async () => {
+  // Extraction runs in one synchronous request and a long input can take
+  // longer than 30s; on a client timeout the SDK re-sends the call, which
+  // starts the same extraction over on the server.
+  it("extract waits 90s by default (the client default is 30s)", async () => {
     const { fetch, signals } = hangingFetch();
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    await expectAbortAt(client.extract({ text: "a" }), signals, 30_000);
+    await expectAbortAt(client.extract({ text: "a" }), signals, 90_000);
+  });
+
+  it("a longer client-wide timeoutMs is never shortened for extract", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 120_000 });
+    await expectAbortAt(client.extract({ text: "a" }), signals, 120_000);
+  });
+
+  it("per-call timeoutMs overrides the extract default", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expectAbortAt(client.extract({ text: "a", timeoutMs: 10_000 }), signals, 10_000);
+  });
+
+  it("other calls keep the client timeout", async () => {
+    const { fetch, signals } = hangingFetch();
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expectAbortAt(client.usage(), signals, 30_000);
   });
 });
 
