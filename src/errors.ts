@@ -237,6 +237,13 @@ export class LenzNeedsInputError extends LenzError {
   hint = "";
 }
 
+/**
+ * A verification run ended in a terminal `failed` state.
+ *
+ * Thrown by `verifyAndWait` / `wait`, and by `verifications.get` when it is
+ * handed the `taskId` of a run that failed (a 409 with `code`
+ * `verification_failed`).
+ */
 export class LenzPipelineError extends LenzError {
   taskId = "";
   failureReason = "";
@@ -249,6 +256,23 @@ export class LenzPipelineError extends LenzError {
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. `null` = server didn't say. */
   retryable: boolean | null = null;
   /** The server's one-sentence hint on what to send instead (e.g. `not_a_claim`); "" when absent. */
+  hint = "";
+}
+
+/**
+ * 409 — `verifications.get` was handed the `taskId` of a run that is still
+ * going, so there is no verification to return yet.
+ *
+ * Wait for the run with `client.wait(taskId)`, or poll
+ * `client.getStatus(taskId)`, which also carries the options a `needs_input`
+ * run offers. A run that FAILED throws {@link LenzPipelineError} instead: it
+ * will never be ready.
+ */
+export class LenzVerificationNotReadyError extends LenzError {
+  taskId = "";
+  /** `"processing"` or `"needs_input"`. */
+  status = "";
+  /** The server's one-sentence next step (also on `fix`); "" when absent. */
   hint = "";
 }
 
@@ -285,6 +309,25 @@ const STATUS_MAP: Record<number, StatusEntry> = {
     cls: LenzRateLimitError,
     message: "Rate limit exceeded",
     docUrl: `${DOCS_BASE}/rate-limits`,
+  },
+};
+
+/**
+ * The two 409s `GET /verifications/{id}` answers when handed the task_id of a
+ * run with no result yet. Keyed on `code`, not the status: every other 409 (an
+ * Idempotency-Key still in flight, a select with nothing pending) stays a
+ * plain {@link LenzError}, exactly as before.
+ */
+const VERIFICATION_409_CODES: Record<string, StatusEntry> = {
+  verification_not_ready: {
+    cls: LenzVerificationNotReadyError,
+    message: "Verification not ready",
+    docUrl: `${DOCS_BASE}/verify`,
+  },
+  verification_failed: {
+    cls: LenzPipelineError,
+    message: "Verification failed",
+    docUrl: `${DOCS_BASE}/errors`,
   },
 };
 
@@ -338,6 +381,11 @@ function optNumber(value: unknown): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
+/** String-typed only: anything else reads as absent, never as its string form. */
+function optString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 function parseBody(raw: string | undefined | null): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -365,6 +413,12 @@ export function mapResponseToError(
   let entry: StatusEntry;
   if (statusCode in STATUS_MAP) {
     entry = STATUS_MAP[statusCode]!;
+  } else if (
+    statusCode === 409 &&
+    // Own keys only: a `code` of "toString" must not match the prototype.
+    Object.prototype.hasOwnProperty.call(VERIFICATION_409_CODES, codeForClass)
+  ) {
+    entry = VERIFICATION_409_CODES[codeForClass]!;
   } else if (statusCode === 503 && UPSTREAM_503_CODES.includes(codeForClass)) {
     entry = {
       cls: LenzUpstreamUnavailableError,
@@ -401,6 +455,32 @@ export function mapResponseToError(
   });
 
   // Per-class enrichment
+  if (
+    statusCode === 409 &&
+    (err instanceof LenzVerificationNotReadyError || err instanceof LenzPipelineError)
+  ) {
+    // The generic 4xx advice ("retry; file an issue") is wrong for both: the
+    // server's own hint says what to do, with a class default behind it.
+    err.taskId = optString(parsed["task_id"]);
+    err.hint = optString(parsed["hint"]);
+    if (err instanceof LenzVerificationNotReadyError) {
+      err.status = optString(parsed["status"]);
+      err.fix = err.hint || "Wait for the run with client.wait(taskId), then read its result.";
+    } else {
+      err.failureReason = optString(parsed["failure_reason"]);
+      err.failureClass = optString(parsed["failure_class"]);
+      // Only a real boolean is a retry signal, as in the wait path.
+      const retryable = parsed["retryable"];
+      err.retryable = typeof retryable === "boolean" ? retryable : null;
+      err.docUrl = optString(parsed["docs_url"]) || err.docUrl;
+      err.fix =
+        err.hint ||
+        (err.retryable
+          ? "Transient provider outage — resubmit the same claim after a short wait."
+          : "This run will not produce a result. Resubmit with a different claim.");
+    }
+  }
+
   if (err instanceof LenzUpstreamUnavailableError) {
     // Body `retry_after` first (both 503 shapes carry it), header as the
     // fallback for any proxy that strips the body.

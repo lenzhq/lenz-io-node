@@ -4,15 +4,19 @@ import {
   LenzAPIError,
   LenzAuthError,
   LenzError,
+  LenzPipelineError,
   LenzQuotaExceededError,
   LenzRateLimitError,
   LenzValidationError,
+  LenzVerificationNotReadyError,
   mapResponseToError,
 } from "../src/errors.js";
 
 function body(obj: Record<string, unknown>): string {
   return JSON.stringify(obj);
 }
+
+const TASK_ID = "a".repeat(32);
 
 describe("mapResponseToError", () => {
   it("401 → LenzAuthError with requestId", () => {
@@ -267,6 +271,103 @@ describe("mapResponseToError", () => {
       "Retry-After": "",
     }) as LenzRateLimitError;
     expect(e.retryAfter).toBe(42);
+  });
+
+  it("409 verification_not_ready → LenzVerificationNotReadyError", () => {
+    const hint = `Poll GET /verify/status/${TASK_ID} until it completes, then read its result.`;
+    const e = mapResponseToError(
+      409,
+      body({
+        detail: "This check is still running.",
+        code: "verification_not_ready",
+        status: "processing",
+        task_id: TASK_ID,
+        hint,
+      }),
+      { "X-Request-ID": "rq9" },
+    ) as LenzVerificationNotReadyError;
+    expect(e).toBeInstanceOf(LenzVerificationNotReadyError);
+    expect(e.status).toBe("processing");
+    expect(e.taskId).toBe(TASK_ID);
+    expect(e.hint).toBe(hint);
+    // The server's advice, not the generic "retry; file an issue".
+    expect(e.fix).toBe(hint);
+    expect(e.code).toBe("verification_not_ready");
+    expect(e.message).toBe("This check is still running.");
+    expect(e.requestId).toBe("rq9");
+  });
+
+  it("409 verification_not_ready without a hint still says what to do", () => {
+    const e = mapResponseToError(
+      409,
+      body({ code: "verification_not_ready", status: "needs_input" }),
+      {},
+    ) as LenzVerificationNotReadyError;
+    expect(e).toBeInstanceOf(LenzVerificationNotReadyError);
+    expect(e.status).toBe("needs_input");
+    expect(e.fix).toContain("client.wait");
+  });
+
+  it("409 verification_failed → LenzPipelineError carrying the failure", () => {
+    const e = mapResponseToError(
+      409,
+      body({
+        detail: "This check failed and has no result.",
+        code: "verification_failed",
+        status: "failed",
+        task_id: TASK_ID,
+        hint: "Send one checkable statement.",
+        failure_reason: "not_a_claim",
+        failure_class: "invalid_input",
+        retryable: false,
+        docs_url: "https://lenz.io/docs/errors#invalid_input",
+      }),
+      {},
+    ) as LenzPipelineError;
+    expect(e).toBeInstanceOf(LenzPipelineError);
+    expect(e.taskId).toBe(TASK_ID);
+    expect(e.failureReason).toBe("not_a_claim");
+    expect(e.failureClass).toBe("invalid_input");
+    expect(e.retryable).toBe(false);
+    expect(e.hint).toBe("Send one checkable statement.");
+    expect(e.fix).toBe("Send one checkable statement.");
+    expect(e.docUrl).toBe("https://lenz.io/docs/errors#invalid_input");
+  });
+
+  it("409 verification_failed without a hint follows retryable", () => {
+    const retryable = mapResponseToError(
+      409,
+      body({ code: "verification_failed", retryable: true }),
+      {},
+    );
+    const final = mapResponseToError(
+      409,
+      body({ code: "verification_failed", retryable: false }),
+      {},
+    );
+    expect(retryable.fix).toContain("resubmit the same claim");
+    expect(final.fix).toContain("different claim");
+  });
+
+  it("409 verification_failed reads only a boolean retryable", () => {
+    const e = mapResponseToError(
+      409,
+      body({ code: "verification_failed", retryable: "true" }),
+      {},
+    ) as LenzPipelineError;
+    expect(e).toBeInstanceOf(LenzPipelineError);
+    expect(e.retryable).toBeNull();
+  });
+
+  it("other 409s stay a plain LenzError", () => {
+    for (const payload of [
+      { detail: "A request with this Idempotency-Key is already in progress.", task_id: TASK_ID },
+      { detail: "This task has no pending claim selection.", code: "no_selection_pending" },
+      { detail: "prototype key", code: "toString" },
+    ]) {
+      const e = mapResponseToError(409, body(payload), {});
+      expect(e.constructor).toBe(LenzError);
+    }
   });
 
   it("5xx → LenzAPIError", () => {
