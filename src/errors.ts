@@ -476,7 +476,8 @@ export function mapResponseToError(
       err.fix =
         err.hint ||
         (err.retryable
-          ? "Transient provider outage — resubmit the same claim after a short wait."
+          ? // Same words as the wait path's LenzPipelineError (client.ts).
+            "Transient provider outage — retry the same request after a short wait."
           : "This run will not produce a result. Resubmit with a different claim.");
     }
   }

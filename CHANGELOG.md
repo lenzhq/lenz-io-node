@@ -8,9 +8,9 @@ All notable changes to this SDK are documented here. Format follows
 
 Three behaviour changes — an opt-in `Idempotency-Key` on `ask.send`,
 `extract`'s default timeout, and typed errors for the 409s
-`verifications.get` answers on a task id (all below); the rest is docs.
-Nothing the SDK parses changes, and 2.12.0 keeps working against the current
-API.
+`verifications.get` answers on a task id (all below); the rest is docs. The
+only new parsing is that 409 error body, and 2.12.0 keeps working against the
+current API.
 
 ### Added
 
@@ -24,7 +24,6 @@ API.
   `LenzError` whose advice was to retry and file an issue, which is wrong for
   both. Every other 409 is still a plain `LenzError`. Against an API older
   than lenzhq/Lenz#680 the call behaves as before.
-
 - **`idempotencyKey`** on `AskSendInput`, sent as the `Idempotency-Key`
   header. With a key, a retry of a question that already got a reply replays
   that reply instead of spending a second credit and leaving the question plus

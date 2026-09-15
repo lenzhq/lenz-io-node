@@ -345,7 +345,7 @@ describe("mapResponseToError", () => {
       body({ code: "verification_failed", retryable: false }),
       {},
     );
-    expect(retryable.fix).toContain("resubmit the same claim");
+    expect(retryable.fix).toContain("retry the same request");
     expect(final.fix).toContain("different claim");
   });
 
