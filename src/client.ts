@@ -311,6 +311,12 @@ class VerificationsNamespace {
    * Fetch a single verification. Accepts anon callers — any non-hidden
    * public claim resolves without an API key (the old `library.get`
    * endpoint merged into this one).
+   *
+   * With a key, also accepts the `taskId` that `verify` returned: a completed
+   * run resolves to its verification. A run with no result yet throws
+   * {@link LenzVerificationNotReadyError} while it is running or waiting for
+   * input, and {@link LenzPipelineError} when it failed. To wait for a run,
+   * use `client.wait(taskId)`.
    */
   get(verificationId: string): Promise<Verification> {
     return this.client.request<Verification>({

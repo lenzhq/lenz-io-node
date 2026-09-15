@@ -6,13 +6,25 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
-Two behaviour changes — an opt-in `Idempotency-Key` on `ask.send` and
-`extract`'s default timeout — and a new name for the non-expiring balance,
-`credits.extra` (all below); the rest is docs. 2.12.0 keeps working against
-the current API.
+Three behaviour changes — an opt-in `Idempotency-Key` on `ask.send`,
+`extract`'s default timeout, and typed errors for the 409s
+`verifications.get` answers on a task id — and a new name for the
+non-expiring balance, `credits.extra` (all below); the rest is docs. The
+only new parsing is that 409 error body and `credits.extra`, and 2.12.0
+keeps working against the current API.
 
 ### Added
 
+- **`LenzVerificationNotReadyError`**, thrown by `verifications.get` when it
+  is handed the `taskId` of a run that is still processing or waiting for
+  input (a 409 with `code` `verification_not_ready`). It carries `taskId`,
+  `status` and the server's `hint`, which is also its `fix`. A run that
+  failed throws `LenzPipelineError` from the same call (`code`
+  `verification_failed`), carrying `taskId`, `failureReason`,
+  `failureClass`, `retryable` and `hint`. Both used to surface as a generic
+  `LenzError` whose advice was to retry and file an issue, which is wrong for
+  both. Every other 409 is still a plain `LenzError`. Against an API older
+  than lenzhq/Lenz#680 the call behaves as before.
 - **`idempotencyKey`** on `AskSendInput`, sent as the `Idempotency-Key`
   header. With a key, a retry of a question that already got a reply replays
   that reply instead of spending a second credit and leaving the question plus
