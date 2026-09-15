@@ -57,6 +57,7 @@ const USAGE_BODY = {
     total: 100,
     used: 0,
     remaining: 100,
+    extra: 0,
     bonus: 0,
     resets_at: "2026-07-01T00:00:00+00:00",
   },
@@ -1731,7 +1732,7 @@ describe("usage", () => {
     // The pool is the balance; the capability blocks divide it by the cost.
     expect(u.credits.total).toBe(100);
     expect(u.credits.remaining).toBe(100);
-    expect(u.credits.bonus).toBe(0);
+    expect(u.credits.extra).toBe(0);
     expect(u.credits.resets_at).toBe("2026-07-01T00:00:00+00:00");
     expect(u.verify.quota_total).toBe(10); // 100 credits / 10 per verify
     expect(u.verify.remaining).toBe(10);
@@ -1795,7 +1796,8 @@ describe("usage", () => {
     const { fetch } = makeFetch([{ body }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
-    expect(u.credits.bonus).toBe(25);
+    // This body carries only `bonus`; `usage()` fills `extra` from it.
+    expect(u.credits.extra).toBe(25);
     expect(u.credits.resets_at).toBeNull();
     expect(u.verify.bonus).toBe(2);
     expect(u.assess.bonus).toBe(25);
@@ -1803,6 +1805,15 @@ describe("usage", () => {
     // the server drops it on 2026-11-29.
     expect(u.verify.credits).toBe(u.verify.bonus);
     expect(u.assess.credits).toBe(u.assess.bonus);
+  });
+
+  it("fills credits.bonus from credits.extra once the server stops sending bonus", async () => {
+    const credits = { total: 100, used: 0, remaining: 100, extra: 30, resets_at: null };
+    const { fetch } = makeFetch([{ body: { ...USAGE_BODY, credits } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const u = await client.usage();
+    expect(u.credits.extra).toBe(30);
+    expect(u.credits.bonus).toBe(30);
   });
 
   it("parses a response that has already dropped the deprecated credits alias", async () => {

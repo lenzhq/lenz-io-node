@@ -68,7 +68,7 @@ maybe("smoke", () => {
     expect(typeof u.plan).toBe("string");
     // The pool is the balance; everything else divides it.
     expect(typeof u.credits.remaining).toBe("number");
-    expect(typeof u.credits.bonus).toBe("number");
+    expect(typeof u.credits.extra).toBe("number");
     expect(typeof u.costs["verify"]).toBe("number");
     for (const cap of [u.verify, u.ask, u.assess]) {
       expect(typeof cap.quota_remaining).toBe("number");
