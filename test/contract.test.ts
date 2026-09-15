@@ -167,7 +167,9 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "extract",
     "has_webhook_secret",
   ]),
-  UsageCredits: new Set(["total", "used", "remaining", "bonus", "resets_at"]),
+  // `bonus` is the deprecated old name of `extra`; the server stops sending
+  // it on 2026-11-29 and this entry goes with it.
+  UsageCredits: new Set(["total", "used", "remaining", "extra", "bonus", "resets_at"]),
   // The block's `credits` is the deprecated alias of `bonus`; the server
   // stops sending it on 2026-11-29 and this entry goes with it.
   UsageCapacity: new Set([

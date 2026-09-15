@@ -550,7 +550,7 @@ export interface BatchItemResult {
  *
  * Two buckets:
  * - the monthly allowance for the current plan, which resets at `resets_at`;
- * - `bonus`, non-expiring credits from grants and top-ups, spent only once
+ * - `extra`, non-expiring credits from grants and top-ups, spent only once
  *   the allowance is gone.
  *
  * `remaining` is the sum of both and is what a call is checked against.
@@ -567,6 +567,13 @@ export interface UsageCredits {
   total: number;
   used: number;
   remaining: number;
+  /** The non-expiring part of `remaining`: credits from grants and top-ups. */
+  extra: number;
+  /**
+   * @deprecated Old name of {@link UsageCredits.extra}, the same number. The
+   * server removes it on **2026-11-29**; read `extra` instead. `usage()` fills
+   * it from `extra` once the server stops sending it.
+   */
   bonus: number;
   resets_at: string | null;
 }
@@ -587,8 +594,8 @@ export interface UsageCredits {
  * - `quota_used`: derived as `quota_total - quota_remaining`, so
  *   `used + remaining === total` always holds. It is therefore a ceiling —
  *   one `/ask` credit moves the verify block's `quota_used` from 0 to 1.
- * - `bonus`: the non-expiring bucket in this capability's unit. A user
- *   holding 5 bonus credits sees `verify.bonus === 0` and `assess.bonus === 5`
+ * - `bonus`: {@link UsageCredits.extra} in this capability's unit. A user
+ *   holding 5 extra credits sees `verify.bonus === 0` and `assess.bonus === 5`
  *   — 5 credits doesn't buy a verification.
  * - `remaining`: equals `quota_remaining` (it already spans both buckets).
  */
@@ -596,7 +603,7 @@ export interface UsageCapacity {
   quota_used: number;
   quota_total: number;
   quota_remaining: number;
-  /** The non-expiring bonus bucket, in this capability's unit. */
+  /** {@link UsageCredits.extra}, in this capability's unit. */
   bonus: number;
   /**
    * @deprecated Alias of {@link UsageCapacity.bonus}. The server removes it on

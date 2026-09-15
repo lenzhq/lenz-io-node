@@ -7,8 +7,9 @@ All notable changes to this SDK are documented here. Format follows
 ## [Unreleased]
 
 Two behaviour changes — an opt-in `Idempotency-Key` on `ask.send` and
-`extract`'s default timeout (both below); the rest is docs. Nothing the SDK
-parses changes, and 2.12.0 keeps working against the current API.
+`extract`'s default timeout — and a new name for the non-expiring balance,
+`credits.extra` (all below); the rest is docs. 2.12.0 keeps working against
+the current API.
 
 ### Added
 
@@ -23,9 +24,17 @@ parses changes, and 2.12.0 keeps working against the current API.
   without a key behaves exactly as before.
 - **`timeoutMs`** on `ExtractInput`: a per-call HTTP timeout, like the one
   `assess` takes.
+- **`UsageCredits.extra`**: the non-expiring part of the balance, credits
+  from grants and top-ups that are spent only once the monthly allowance is
+  gone. It is the new name of `UsageCredits.bonus` and carries the same
+  number. `usage()` fills whichever of the two the server did not send, so
+  both read correctly against any server version.
 
 ### Deprecated
 
+- **`UsageCredits.bonus`** (JSDoc `@deprecated`), the old name of
+  `UsageCredits.extra`. The API removes it on 2026-11-29, along with the
+  per-capability `credits` alias.
 - **`candidate_claims`** on `ExtractedClaims`, `AssessClaim` and
   `AssessResponse`, and **`candidates`** on `TaskStatus` (JSDoc
   `@deprecated`). The API has sent them empty since 2026-09-12, when

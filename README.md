@@ -244,7 +244,7 @@ One balance per account, spent by every billable call:
 const u = await client.usage();
 
 u.credits.remaining; // 5070 — the balance, in credits
-u.credits.bonus; // 200 — the non-expiring part of it
+u.credits.extra; // 200 — the non-expiring part of it
 u.credits.resets_at; // when the monthly allowance refills, or null
 
 u.costs["verify"]; // 10 credits per verification
@@ -264,9 +264,10 @@ it for you, flooring (5 credits is 5 assessments and 0 verifications).
 Read `costs` as a map rather than destructuring known names: a new capability
 appears in it without an SDK release, and the keys are the server's own.
 
-The per-capability `credits` field is **deprecated** — it was always that
-capability's one-off top-up balance, which is now `bonus`. It disappears from
-the API on **2026-11-29**; read `bonus`.
+`credits.bonus` is the **deprecated** old name of `credits.extra`, the same
+number; it disappears from the API on **2026-11-29**. So does the
+per-capability `credits` field, which was always that capability's one-off
+top-up balance and is now `bonus`.
 
 ### Depth pricing
 

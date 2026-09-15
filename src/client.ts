@@ -636,7 +636,19 @@ export class Lenz {
   }
 
   async usage(): Promise<Usage> {
-    return this.request<Usage>({ method: "GET", path: "/me/usage" });
+    const usage = await this.request<Usage>({ method: "GET", path: "/me/usage" });
+    // `credits.extra` and its deprecated old name `credits.bonus` are the same
+    // number. Fill whichever one the server did not send, so both read
+    // correctly against a server that sends only one of them.
+    const credits = usage.credits as unknown as Record<string, unknown> | undefined;
+    if (credits && typeof credits === "object") {
+      if (credits["extra"] == null && credits["bonus"] != null) {
+        credits["extra"] = credits["bonus"];
+      } else if (credits["bonus"] == null && credits["extra"] != null) {
+        credits["bonus"] = credits["extra"];
+      }
+    }
+    return usage;
   }
 
   // ── Headline ergonomic ──
