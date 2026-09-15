@@ -6,8 +6,14 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
-Docs only; nothing the SDK sends or parses changes, and 2.12.0 keeps
-working against the current API.
+One behaviour change, `extract`'s default timeout (below); the rest is docs.
+Nothing the SDK sends or parses changes, and 2.12.0 keeps working against
+the current API.
+
+### Added
+
+- **`timeoutMs`** on `ExtractInput`: a per-call HTTP timeout, like the one
+  `assess` takes.
 
 ### Deprecated
 
@@ -21,6 +27,12 @@ working against the current API.
 
 ### Changed
 
+- **`extract` waits up to 90s per attempt by default** instead of the client's 30s. The
+  slowest extractions take 30-60s, and on a client timeout the SDK re-sent
+  the call, which ran the same extraction again. A longer client-wide
+  `timeoutMs` is never shortened.
+- Docs: `assess`'s 45s default is described as covering both forms, as it
+  has since 2.12.0 (README and `AssessInput.timeoutMs`).
 - Docs: `ambiguous` and `clarification_required` are gone from the
   documented values. The `/assess` row causes are `no_claim` /
   `framing_failed` / `upstream_unavailable` / `timeout`, and the `needs_input`

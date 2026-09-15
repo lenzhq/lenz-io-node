@@ -863,6 +863,12 @@ export interface ExtractInput {
    * A focused call costs the same single unit of the daily cap.
    */
   focus?: string;
+  /**
+   * Per-call HTTP timeout. When omitted, `extract` waits at least 90s rather
+   * than the client's default: a long input can take more than 30s to
+   * extract.
+   */
+  timeoutMs?: number;
 }
 
 export interface AssessInput {
@@ -898,9 +904,9 @@ export interface AssessInput {
    */
   idempotencyKey?: string;
   /**
-   * Per-call HTTP timeout. A list call runs one parallel panel wave
-   * (~10-25s), so when omitted the list form waits at least 45s rather
-   * than the client's default; the single form uses the client's timeout.
+   * Per-call HTTP timeout. When omitted, both forms wait at least 45s rather
+   * than the client's default: the server finds the claims and runs a
+   * 3-model panel inside one request (~10-25s).
    */
   timeoutMs?: number;
 }

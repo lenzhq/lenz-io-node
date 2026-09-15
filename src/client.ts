@@ -114,6 +114,15 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * retry with no idempotency key charged again.
  */
 const ASSESS_TIMEOUT_MS = 45_000;
+/**
+ * Floor on the per-call timeout for `extract`.
+ *
+ * Extraction reads the whole input and enumerates its claims inside one
+ * synchronous request. Most calls answer in 3-17s, but the slowest take
+ * 30-60s, past the 30s default, and a client timeout makes the SDK re-send
+ * the call, which runs the same extraction again. 90s leaves room above them.
+ */
+const EXTRACT_TIMEOUT_MS = 90_000;
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
@@ -503,6 +512,9 @@ export class Lenz {
       method: "POST",
       path: "/extract",
       json: body,
+      // Never shortens a client configured with a longer timeout: the caller
+      // asked for it.
+      timeoutMs: input.timeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
     });
   }
 
