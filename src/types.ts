@@ -648,12 +648,13 @@ export interface UsageExtract {
  */
 export interface Usage {
   /**
-   * The tier slug — `"free" | "plus" | "developer" | "scale"`. This is the
-   * field to branch on; it is stable.
+   * The tier slug — `"free" | "plus" | "pro" | "scale"`. This is the
+   * field to branch on; it is stable. The Pro plan's slug was `"developer"`
+   * until 2026-09-15.
    */
   plan: string;
   /**
-   * The same tier as display copy (`"Developer"`). Separate from
+   * The same tier as display copy (`"Pro"`). Separate from
    * {@link Usage.plan} on purpose: this one is copy and may be reworded, so
    * comparing against it breaks on a rename that ought to be free. Empty
    * string on servers predating this field — fall back to `plan`.

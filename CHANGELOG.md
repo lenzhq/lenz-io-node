@@ -57,6 +57,11 @@ keeps working against the current API.
 
 ### Changed
 
+- **`Usage.plan` is `"pro"` for the Pro plan.** The API renamed the slug on
+  2026-09-15; it was `"developer"`. Nothing in the SDK branches on it, so the
+  change is the JSDoc and the test fixture. If your code compares `plan` to
+  `"developer"`, compare it to `"pro"` (or read `plan_label`, which has read
+  `"Pro"` throughout).
 - **`extract` waits up to 90s per attempt by default** instead of the client's 30s. The
   slowest extractions take 30-60s, and on a client timeout the SDK re-sent
   the call, which ran the same extraction again. A longer client-wide
