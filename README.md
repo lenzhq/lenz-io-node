@@ -395,7 +395,26 @@ if (status.status === "completed") {
 `verifyAndWait` sends an auto-generated `Idempotency-Key` on every call by
 default, so a network drop after submit doesn't spawn a duplicate verification
 or charge a second credit. Override with `idempotencyKey: "..."` to pin a
-specific key, or `idempotency: false` to opt out.
+specific key, or `idempotency: false` to opt out. `assess` does the same.
+
+`ask.send` takes a key too, but only pins one you choose:
+
+```ts
+const reply = await client.ask.send(verificationId, {
+  message: "Which source says that?",
+  idempotencyKey: `${conversationId}:turn-4`,
+});
+```
+
+With a key, a retry of a question that already got a reply replays that reply
+instead of spending a second credit and leaving the question plus a second
+answer in the conversation. A retry sent while the first call is still running
+gets a 409 (`LenzError`, `statusCode` 409) — there is no reply to replay yet.
+
+No key is ever generated for you here, and none is derived from the message: a
+reply depends on the conversation so far, so asking the same question again is
+a normal thing to do. Without a key the call behaves exactly as before — a
+retry asks again, and pays again.
 
 ## Steering extract
 

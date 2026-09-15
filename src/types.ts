@@ -918,6 +918,20 @@ export interface AskSendInput {
    * uses the claim's stored language as the default.
    */
   language?: string;
+  /**
+   * Pin an `Idempotency-Key` so a retry of a question that already got a
+   * reply replays that reply instead of spending a second credit and leaving
+   * the question plus a second answer in the conversation. A retry sent while
+   * the first call is still running gets a 409 — there is no reply to replay
+   * yet.
+   *
+   * Never generated for you and never derived from the message, unlike
+   * `assess`: a reply depends on the conversation so far, so asking the same
+   * question again is a normal thing to do, and a key you did not choose would
+   * replay a stale answer. Without one, the call behaves exactly as before:
+   * a retry asks again.
+   */
+  idempotencyKey?: string;
 }
 
 export interface SelectInput {
