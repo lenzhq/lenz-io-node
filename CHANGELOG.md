@@ -6,12 +6,21 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
-One behaviour change, `extract`'s default timeout (below); the rest is docs.
-Nothing the SDK sends or parses changes, and 2.12.0 keeps working against
-the current API.
+Two behaviour changes — an opt-in `Idempotency-Key` on `ask.send` and
+`extract`'s default timeout (both below); the rest is docs. Nothing the SDK
+parses changes, and 2.12.0 keeps working against the current API.
 
 ### Added
 
+- **`idempotencyKey`** on `AskSendInput`, sent as the `Idempotency-Key`
+  header. With a key, a retry of a question that already got a reply replays
+  that reply instead of spending a second credit and leaving the question plus
+  a second answer in the conversation that `ask.history` returns and the next
+  turn reads as context; a retry sent while the first call is still running
+  gets a 409. `ask.send` never generates a key for you and never derives one
+  from the message, unlike `assess`: a reply depends on the conversation so
+  far, so asking the same question again is a normal thing to do. A call
+  without a key behaves exactly as before.
 - **`timeoutMs`** on `ExtractInput`: a per-call HTTP timeout, like the one
   `assess` takes.
 

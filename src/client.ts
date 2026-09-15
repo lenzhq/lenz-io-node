@@ -390,13 +390,23 @@ class AskNamespace {
     });
   }
 
+  /**
+   * Ask a follow-up question about a verification. Paid, one credit per turn.
+   *
+   * Pass `idempotencyKey` to make a retry safe: with a key, a retry of a
+   * question that already got a reply replays that reply rather than asking
+   * again. It is never generated here — see {@link AskSendInput.idempotencyKey}.
+   */
   send(verificationId: string, input: AskSendInput): Promise<AskReply> {
     const body: Record<string, unknown> = { message: input.message };
     if (input.language) body.language = input.language;
+    const headers: Record<string, string> = {};
+    if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
     return this.client.request<AskReply>({
       method: "POST",
       path: `/ask/${verificationId}`,
       json: body,
+      headers,
     });
   }
 
