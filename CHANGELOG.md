@@ -6,11 +6,12 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
-Three behaviour changes — an opt-in `Idempotency-Key` on `ask.send`,
-`extract`'s default timeout, and typed errors for the 409s
-`verifications.get` answers on a task id — and a new name for the
-non-expiring balance, `credits.extra` (all below); the rest is docs. The
-only new parsing is that 409 error body and `credits.extra`, and 2.12.0
+## [2.14.0] - 2026-09-15
+
+Two behaviour changes — an opt-in `Idempotency-Key` on `ask.send`, and typed
+errors for the 409s `verifications.get` answers on a task id — and a new name
+for the non-expiring balance, `credits.extra` (all below); the rest is docs.
+The only new parsing is that 409 error body and `credits.extra`, and 2.13.0
 keeps working against the current API.
 
 ### Added
@@ -23,8 +24,8 @@ keeps working against the current API.
   `verification_failed`), carrying `taskId`, `failureReason`,
   `failureClass`, `retryable` and `hint`. Both used to surface as a generic
   `LenzError` whose advice was to retry and file an issue, which is wrong for
-  both. Every other 409 is still a plain `LenzError`. Against an API older
-  than lenzhq/Lenz#680 the call behaves as before.
+  both. Every other 409 is still a plain `LenzError`. Against an older API
+  the call behaves as before.
 - **`idempotencyKey`** on `AskSendInput`, sent as the `Idempotency-Key`
   header. With a key, a retry of a question that already got a reply replays
   that reply instead of spending a second credit and leaving the question plus
@@ -34,8 +35,6 @@ keeps working against the current API.
   from the message, unlike `assess`: a reply depends on the conversation so
   far, so asking the same question again is a normal thing to do. A call
   without a key behaves exactly as before.
-- **`timeoutMs`** on `ExtractInput`: a per-call HTTP timeout, like the one
-  `assess` takes.
 - **`UsageCredits.extra`**: the non-expiring part of the balance, credits
   from grants and top-ups that are spent only once the monthly allowance is
   gone. It is the new name of `UsageCredits.bonus` and carries the same
@@ -47,6 +46,28 @@ keeps working against the current API.
 - **`UsageCredits.bonus`** (JSDoc `@deprecated`), the old name of
   `UsageCredits.extra`. The API removes it on 2026-11-29, along with the
   per-capability `credits` alias.
+
+### Changed
+
+- **`Usage.plan` is `"pro"` for the Pro plan.** The API renamed the slug on
+  2026-09-15; it was `"developer"`. Nothing in the SDK branches on it, so the
+  change is the JSDoc and the test fixture. If your code compares `plan` to
+  `"developer"`, compare it to `"pro"` (or read `plan_label`, which has read
+  `"Pro"` throughout).
+
+## [2.13.0] - 2026-09-15
+
+One behaviour change, `extract`'s default timeout (below); the rest is docs.
+Nothing the SDK sends or parses changes, and 2.12.0 keeps working against
+the current API.
+
+### Added
+
+- **`timeoutMs`** on `ExtractInput`: a per-call HTTP timeout, like the one
+  `assess` takes.
+
+### Deprecated
+
 - **`candidate_claims`** on `ExtractedClaims`, `AssessClaim` and
   `AssessResponse`, and **`candidates`** on `TaskStatus` (JSDoc
   `@deprecated`). The API has sent them empty since 2026-09-12, when
@@ -57,11 +78,6 @@ keeps working against the current API.
 
 ### Changed
 
-- **`Usage.plan` is `"pro"` for the Pro plan.** The API renamed the slug on
-  2026-09-15; it was `"developer"`. Nothing in the SDK branches on it, so the
-  change is the JSDoc and the test fixture. If your code compares `plan` to
-  `"developer"`, compare it to `"pro"` (or read `plan_label`, which has read
-  `"Pro"` throughout).
 - **`extract` waits up to 90s per attempt by default** instead of the client's 30s. The
   slowest extractions take 30-60s, and on a client timeout the SDK re-sent
   the call, which ran the same extraction again. A longer client-wide
