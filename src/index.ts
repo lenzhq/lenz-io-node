@@ -49,6 +49,7 @@ export {
   LenzTimeoutError,
   LenzUpstreamUnavailableError,
   LenzValidationError,
+  LenzVerificationNotReadyError,
   LenzWebhookSignatureError,
   MAX_RETRY_AFTER_SLEEP,
   mapResponseToError,
