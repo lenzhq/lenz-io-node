@@ -359,6 +359,19 @@ export interface AssessClaim {
   confidence?: string; // "high" | "medium" | "low"
   verification_url?: string | null;
   /**
+   * The reasoning of a reviewer who agrees with the panel's verdict. A
+   * reviewer's note, not a checked source; for sourced evidence, call
+   * `verify`. Optional: `null` on an `"Error"` row, and absent on a response
+   * replayed from before the API added it.
+   */
+  rationale?: string | null;
+  /**
+   * When set, the reasoning of the reviewer farthest from the panel's
+   * verdict. A reviewer's note, not a checked source. `null` or absent
+   * otherwise.
+   */
+  dissent?: string | null;
+  /**
    * Why this row has no verdict — set only when `verdict === "Error"`:
    * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`.
    * `null` on a verdict row. Error rows are free.

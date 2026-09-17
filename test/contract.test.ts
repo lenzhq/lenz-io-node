@@ -27,6 +27,7 @@ import {
   LenzUpstreamUnavailableError,
   mapResponseToError,
 } from "../src/index.js";
+import type { AssessClaim } from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
 import type { VerificationFailed } from "../src/webhooks.js";
 import { createHmac } from "node:crypto";
@@ -59,6 +60,8 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "verdict",
     "confidence",
     "verification_url",
+    "rationale",
+    "dissent",
     "language",
     "error_code",
     "candidate_claims",
@@ -345,6 +348,29 @@ describe("contract", () => {
       throw new Error(
         `webhook_payload_completed.json → Verification (via .result):\n${errors.join("\n")}`,
       );
+    }
+  });
+
+  it("assess rows carry the reviewers' notes, and rows without them still fit", () => {
+    const rows = loadFixture("assess_claims_list.json")["claims"] as AssessClaim[];
+    // A verdict row carries a rationale; a dissent only sometimes.
+    expect(rows[0]!.rationale).toBeTruthy();
+    expect(rows[0]!.dissent).toBeNull();
+    expect(rows[1]!.rationale).toBeTruthy();
+    expect(rows[1]!.dissent).toBeTruthy();
+    // An Error row carries neither.
+    for (const row of rows.slice(2)) {
+      expect(row.rationale).toBeNull();
+      expect(row.dissent).toBeNull();
+    }
+    // A response stored before the API gained the two fields is replayed as it
+    // was stored: neither key is present, and both read `undefined`.
+    const old = loadFixture("assess_single_claim.json")["claims"] as AssessClaim[];
+    expect(old.length).toBeGreaterThan(0);
+    for (const row of old) {
+      expect(row).not.toHaveProperty("rationale");
+      expect(row.rationale ?? null).toBeNull();
+      expect(row.dissent ?? null).toBeNull();
     }
   });
 

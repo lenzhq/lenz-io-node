@@ -35,6 +35,7 @@ const claims = out.identified_claims?.length ? out.identified_claims : [out.clai
 const quick = (await client.assess({ claims })).claims;
 for (const c of quick) {
   console.log(c.verdict, c.confidence, c.claim);
+  if (c.rationale) console.log("  ", c.rationale);
 }
 
 // 3. verify — escalate the low-confidence rows to the full panel + citations
@@ -67,6 +68,12 @@ free. A compound item is assessed on its main claim and lists the rest in
 single form, `assess({ claim })`, takes one text and answers with a row per
 claim found in it, up to 20, at 1 credit each; the two are mutually
 exclusive.
+
+Each verdict row also carries two optional notes. `rationale` is the
+reasoning of a reviewer who agrees with the panel's verdict; `dissent`, when
+set, is the reasoning of the reviewer farthest from it. Both are reviewers'
+notes, not checked sources; for sourced evidence, call `verify`. Read them as
+optional: either can be `null` or absent.
 
 `assess` and `verify` share a result cache server-side: if a claim
 already has a deep verification, `assess` returns it via
