@@ -66,7 +66,7 @@ export class LenzError extends Error {
 }
 
 /**
- * 401 / 403 — the API key is missing, invalid, or revoked.
+ * 401 / 403 — the credential is missing, invalid, expired, or revoked.
  *
  * Note: an out-of-credits response is NOT this error. It used to be — the API
  * returned 403 for quota, which landed here — but the API now returns 402 and
@@ -332,7 +332,7 @@ const VERIFICATION_409_CODES: Record<string, StatusEntry> = {
 };
 
 const FIX_HINTS: Record<number, string> = {
-  401: "Generate a new key at https://lenz.io/api-credentials.",
+  401: "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
   403: "This key doesn't have access to that resource.",
   402: "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
   422: "Check the request body against the OpenAPI spec.",
