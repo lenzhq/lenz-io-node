@@ -10,6 +10,7 @@ import {
   Lenz,
   LenzAPIError,
   LenzAuthError,
+  LenzGoneError,
   LenzNeedsInputError,
   LenzPipelineError,
   LenzQuotaExceededError,
@@ -19,6 +20,7 @@ import {
   LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
 } from "../src/index.js";
+import type { CoverageReason } from "../src/index.js";
 
 interface FetchCall {
   url: string;
@@ -937,6 +939,21 @@ describe("wait", () => {
     await expect(client.wait("t", { timeoutMs: 5_000 })).rejects.toThrow(/research_empty/);
   });
 
+  it("stops on 410 purged instead of polling to the deadline", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        status: 410,
+        body: { detail: "gone", code: "purged", purged_at: "2026-09-25T10:00:00+00:00" },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const err = await client.wait("t", { timeoutMs: 10_000 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LenzGoneError);
+    expect((err as LenzGoneError).purgedAt).toBe("2026-09-25T10:00:00+00:00");
+    expect(calls).toHaveLength(1);
+  });
+
   it("timeout rejects with task_id", async () => {
     const { fetch } = makeFetch([
       { body: { status: "processing", progress: {} } },
@@ -976,6 +993,29 @@ describe("verifyBatchAndWait", () => {
     });
     expect(results.map((r) => r.task_id)).toEqual(["t1", "t2"]);
     expect(results.every((r) => r.status === "completed" && r.verification)).toBe(true);
+  });
+
+  it("reports a purged item as failed without polling it again", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        body: {
+          batch_id: "b",
+          items: [
+            { task_id: "t1", claim_text: "a" },
+            { task_id: "t2", claim_text: "b" },
+          ],
+        },
+      },
+      { body: { status: "completed", result: COMPLETED_RESULT } },
+      { status: 410, body: { detail: "gone", code: "purged", purged_at: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const results = await client.verifyBatchAndWait({
+      claims: [{ text: "a" }, { text: "b" }],
+      timeoutMs: 10_000,
+    });
+    expect(results.map((r) => r.status)).toEqual(["completed", "failed"]);
+    expect(calls).toHaveLength(3);
   });
 
   it("captures mixed per-item outcomes", async () => {
@@ -1910,6 +1950,18 @@ describe("coverage", () => {
     expect(v.coverage?.status).toBe("uncovered");
     expect(v.coverage?.reasons).toEqual(["plan", "verdict"]);
     expect(v.coverage?.certificate_id).toBeNull();
+  });
+
+  it("names the account switch as a reason", async () => {
+    // A Pro or Scale account that turned certificates off reads `account`,
+    // after `plan` when the account has since moved off those plans.
+    const reasons: CoverageReason[] = ["plan", "account"];
+    const { fetch } = makeFetch([
+      { body: detail({ status: "uncovered", reasons, certificate_id: null, certificate_url: null }) },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.verifications.get("vid_c");
+    expect(v.coverage?.reasons).toEqual(["plan", "account"]);
   });
 
   it("does not reject a status added after this release", async () => {

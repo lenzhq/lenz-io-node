@@ -4,6 +4,7 @@ import {
   LenzAPIError,
   LenzAuthError,
   LenzError,
+  LenzGoneError,
   LenzPipelineError,
   LenzQuotaExceededError,
   LenzRateLimitError,
@@ -308,6 +309,33 @@ describe("mapResponseToError", () => {
     expect(e.fix).toContain("client.wait");
   });
 
+  it("410 purged → LenzGoneError carrying code and purgedAt", () => {
+    const e = mapResponseToError(
+      410,
+      body({
+        detail: "This verification is no longer available.",
+        code: "purged",
+        purged_at: "2026-09-25T10:00:00+00:00",
+      }),
+      { "X-Request-ID": "rq_gone" },
+    ) as LenzGoneError;
+    expect(e).toBeInstanceOf(LenzGoneError);
+    expect(e).toBeInstanceOf(LenzError);
+    expect(e.statusCode).toBe(410);
+    expect(e.code).toBe("purged");
+    expect(e.purgedAt).toBe("2026-09-25T10:00:00+00:00");
+    expect(e.requestId).toBe("rq_gone");
+    expect(e.message).toBe("This verification is no longer available.");
+    // Retrying does not bring it back: the advice must not say to retry.
+    expect(e.fix).not.toMatch(/retry/i);
+  });
+
+  it("410 without purged_at reads null, never the empty string", () => {
+    const e = mapResponseToError(410, body({ code: "purged", purged_at: null }), {}) as LenzGoneError;
+    expect(e).toBeInstanceOf(LenzGoneError);
+    expect(e.purgedAt).toBeNull();
+  });
+
   it("409 verification_failed → LenzPipelineError carrying the failure", () => {
     const e = mapResponseToError(
       409,
@@ -405,6 +433,7 @@ describe.each([
   [402, LenzQuotaExceededError],
   [422, LenzValidationError],
   [429, LenzRateLimitError],
+  [410, LenzGoneError],
   [500, LenzAPIError],
   [502, LenzAPIError],
   [503, LenzAPIError],
