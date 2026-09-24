@@ -58,6 +58,7 @@ import {
   LenzAPIError,
   LenzAuthError,
   LenzError,
+  LenzGoneError,
   LenzNeedsInputError,
   LenzPipelineError,
   LenzTimeoutError,
@@ -682,8 +683,9 @@ export class Lenz {
    * `Verification`. `task` is a `task_id` string OR the `TaskAccepted` returned
    * by `verify` / `select` — so `client.wait(await client.verify({claim}))`
    * reads naturally. Throws for an empty id, `LenzNeedsInputError` /
-   * `LenzPipelineError` on terminal non-success, and `LenzTimeoutError` on
-   * deadline.
+   * `LenzPipelineError` on terminal non-success, `LenzGoneError` when the
+   * verification was removed under its account's retention period, and
+   * `LenzTimeoutError` on deadline.
    */
   async wait(task: string | TaskAccepted, opts: WaitOptions = {}): Promise<Verification> {
     const taskId = typeof task === "string" ? task : task.task_id;
@@ -691,7 +693,13 @@ export class Lenz {
       throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
     }
     const timeoutMs = opts.timeoutMs ?? 120_000;
-    const { terminal, timedOut } = await this._pollToTerminal([taskId], timeoutMs, opts.onProgress);
+    const { terminal, timedOut, gone } = await this._pollToTerminal(
+      [taskId],
+      timeoutMs,
+      opts.onProgress,
+    );
+    const goneErr = gone.get(taskId);
+    if (goneErr) throw goneErr;
     if (timedOut.has(taskId)) {
       const err = new LenzTimeoutError({
         message: `wait timed out after ${timeoutMs}ms`,
@@ -709,16 +717,25 @@ export class Lenz {
    * Submit a batch and poll every item to a terminal state. Returns one
    * `BatchItemResult` per task the batch accepted, in input order. Never throws
    * on a per-item outcome — a claim that fails, pauses, or times out becomes a
-   * `BatchItemResult` with the matching `status`. (Transport/auth errors on the
-   * initial submit still throw.)
+   * `BatchItemResult` with the matching `status`. A claim removed under the
+   * account's retention period reads `"failed"` with no `status_detail`.
+   * (Transport/auth errors on the initial submit still throw.)
    */
   async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
     const timeoutMs = input.timeoutMs ?? 180_000;
     const accepted = await this.verifyBatch(input);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
-    const { terminal, timedOut } = await this._pollToTerminal(ids, timeoutMs, input.onProgress);
+    const { terminal, timedOut, gone } = await this._pollToTerminal(
+      ids,
+      timeoutMs,
+      input.onProgress,
+    );
 
     return accepted.items.map((it): BatchItemResult => {
+      // Removed under the account's retention period: final, with no result.
+      if (gone.has(it.task_id)) {
+        return { task_id: it.task_id, claim_text: it.claim_text, status: "failed" };
+      }
       const status = terminal.get(it.task_id);
       if (!it.task_id || timedOut.has(it.task_id) || !status) {
         return { task_id: it.task_id, claim_text: it.claim_text, status: "timeout" };
@@ -769,10 +786,17 @@ export class Lenz {
     taskIds: string[],
     timeoutMs: number,
     onProgress?: OnProgress,
-  ): Promise<{ terminal: Map<string, TaskStatus>; timedOut: Set<string> }> {
+  ): Promise<{
+    terminal: Map<string, TaskStatus>;
+    timedOut: Set<string>;
+    gone: Map<string, LenzGoneError>;
+  }> {
     let pending = [...taskIds];
     const terminal = new Map<string, TaskStatus>();
     const timedOut = new Set<string>();
+    // A 410 is final: the run finished and its account's retention period has
+    // since removed it. Polling again would only spin to the deadline.
+    const gone = new Map<string, LenzGoneError>();
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
     while (pending.length > 0) {
@@ -805,6 +829,8 @@ export class Lenz {
               }
             }
           }
+        } else if (res.reason instanceof LenzGoneError) {
+          gone.set(id, res.reason);
         } else {
           // Poll errored this round (after _request exhausted its retries) —
           // keep pending and retry next round rather than aborting the batch.
@@ -825,7 +851,7 @@ export class Lenz {
       );
       backoffIdx += 1;
     }
-    return { terminal, timedOut };
+    return { terminal, timedOut, gone };
   }
 
   /**

@@ -1957,7 +1957,9 @@ describe("coverage", () => {
     // after `plan` when the account has since moved off those plans.
     const reasons: CoverageReason[] = ["plan", "account"];
     const { fetch } = makeFetch([
-      { body: detail({ status: "uncovered", reasons, certificate_id: null, certificate_url: null }) },
+      {
+        body: detail({ status: "uncovered", reasons, certificate_id: null, certificate_url: null }),
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifications.get("vid_c");

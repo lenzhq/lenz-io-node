@@ -331,9 +331,19 @@ describe("mapResponseToError", () => {
   });
 
   it("410 without purged_at reads null, never the empty string", () => {
-    const e = mapResponseToError(410, body({ code: "purged", purged_at: null }), {}) as LenzGoneError;
+    const e = mapResponseToError(
+      410,
+      body({ code: "purged", purged_at: null }),
+      {},
+    ) as LenzGoneError;
     expect(e).toBeInstanceOf(LenzGoneError);
     expect(e.purgedAt).toBeNull();
+    // No detail on the wire: the class default, the same words as the Python SDK.
+    expect(e.message).toBe("Verification removed");
+    expect(e.fix).toBe(
+      "Its account's retention period removed it. A certificate issued for it is still available.",
+    );
+    expect(e.docUrl).toBe("https://lenz.io/docs/errors");
   });
 
   it("409 verification_failed → LenzPipelineError carrying the failure", () => {

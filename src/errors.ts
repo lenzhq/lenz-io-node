@@ -276,6 +276,22 @@ export class LenzVerificationNotReadyError extends LenzError {
   hint = "";
 }
 
+/**
+ * 410 — the verification is no longer available (`code` `"purged"`).
+ *
+ * An account on Pro or Scale can set a retention period; once a verification
+ * is older than it, its content is removed and every read of it answers 410.
+ * Nothing brings it back, so retrying will not help. The certificate of a
+ * covered verification is kept and stays downloadable.
+ *
+ * A caller who could not read the verification gets a plain 404 instead,
+ * never this error.
+ */
+export class LenzGoneError extends LenzError {
+  /** ISO-8601 timestamp of the removal, or `null` when the server sent none. */
+  purgedAt: string | null = null;
+}
+
 export class LenzWebhookSignatureError extends LenzError {}
 
 // ── Mapping table ────────────────────────────────────────────────────────
@@ -299,6 +315,11 @@ const STATUS_MAP: Record<number, StatusEntry> = {
     cls: LenzQuotaExceededError,
     message: "Payment required",
     docUrl: `${DOCS_BASE}/billing`,
+  },
+  410: {
+    cls: LenzGoneError,
+    message: "Verification removed",
+    docUrl: `${DOCS_BASE}/errors`,
   },
   422: {
     cls: LenzValidationError,
@@ -335,6 +356,7 @@ const FIX_HINTS: Record<number, string> = {
   401: "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
   403: "This key doesn't have access to that resource.",
   402: "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
+  410: "Its account's retention period removed it. A certificate issued for it is still available.",
   422: "Check the request body against the OpenAPI spec.",
   429: "Wait Retry-After seconds and retry.",
 };
@@ -480,6 +502,11 @@ export function mapResponseToError(
             "Transient provider outage — retry the same request after a short wait."
           : "This run will not produce a result. Resubmit with a different claim.");
     }
+  }
+
+  if (err instanceof LenzGoneError) {
+    const purgedAt = parsed["purged_at"];
+    err.purgedAt = typeof purgedAt === "string" && purgedAt ? purgedAt : null;
   }
 
   if (err instanceof LenzUpstreamUnavailableError) {

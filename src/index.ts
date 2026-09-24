@@ -42,6 +42,7 @@ export {
   LenzAPIError,
   LenzAuthError,
   LenzError,
+  LenzGoneError,
   LenzNeedsInputError,
   LenzPipelineError,
   LenzQuotaExceededError,

@@ -6,6 +6,21 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`LenzGoneError` for a verification that is no longer available.** An
+  account on Pro or Scale can set a retention period; a verification older
+  than it answers HTTP 410 with `code` `"purged"` on every read. The SDK now
+  throws `LenzGoneError` (a `LenzError`) carrying `code` and `purgedAt`,
+  instead of a plain `LenzError`. `wait`, `verifyAndWait` and
+  `verifyBatchAndWait` stop polling a task that answers 410 rather than
+  retrying it until the deadline; in a batch, such an item reads `"failed"`
+  with no `status_detail`. The certificate of a covered verification stays
+  available.
+- **`"account"` in `CoverageReason`**: the account turned certificates off.
+  It applies to checks submitted after the change; a verification that
+  already carries a certificate keeps it. Types only.
+
 ### Changed
 
 - **The 401 fix hint is neutral about the credential.** It used to say only
