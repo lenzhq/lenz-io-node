@@ -6,6 +6,12 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-24
+
+A new error, `LenzGoneError`, for a verification removed by its account's
+retention period, and a new coverage reason, `account`. Nothing the SDK sends
+changes, and 2.15.0 keeps working against the current API.
+
 ### Added
 
 - **`LenzGoneError` for a verification that is no longer available.** An
