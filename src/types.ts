@@ -179,13 +179,16 @@ export type CoverageStatus = "covered" | "uncovered" | "pending_timestamp";
 /**
  * Closed set of `coverage.reasons` values — why a verdict is NOT covered.
  * Deliberately smaller than the internal gate's vocabulary: `plan` and
- * `depth` are actionable, `verdict` is a product rule you design around,
+ * `depth` are actionable, `account` means the account turned certificates off
+ * (a verification that already carries one keeps it), `verdict` is a product
+ * rule you design around,
  * `quality` covers everything you can neither act on nor define, and
  * `withdrawn` / `issue_failed` are statements about Lenz rather than about
  * your claim.
  */
 export type CoverageReason =
   | "plan"
+  | "account"
   | "depth"
   | "verdict"
   | "quality"
@@ -549,6 +552,11 @@ export type FailureClass =
  * - `needs_input` — paused for caller input; inspect `status_detail`.
  * - `failed`      — terminal failure (or completed-without-result); `status_detail` carries the diagnostic.
  * - `timeout`     — the deadline elapsed before this task reached a terminal state; `status_detail` is `undefined`.
+ */
+/**
+ * One item of `verifyBatchAndWait`. A claim removed under its account's
+ * retention period while the batch was polled reads `"failed"` with no
+ * `status_detail`.
  */
 export interface BatchItemResult {
   task_id: string;

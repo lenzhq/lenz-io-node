@@ -37,8 +37,8 @@ export class LenzError extends Error {
   statusCode: number;
   /**
    * The server's machine-readable error code, e.g. `"no_credits"`. Present on
-   * 402, 403 and 429; `""` when the server sent none. Branch on this rather
-   * than on message text.
+   * 402, 403, 409, 410 (`"purged"`), 429 and a typed 503; `""` when the
+   * server sent none. Branch on this rather than on message text.
    */
   code: string;
   body: Record<string, unknown> | null;
@@ -276,6 +276,22 @@ export class LenzVerificationNotReadyError extends LenzError {
   hint = "";
 }
 
+/**
+ * 410 with `code` `"purged"` — the verification is no longer available.
+ *
+ * An account on Pro or Scale can set a retention period; once a verification
+ * is older than it, its content is removed and every read of it answers 410.
+ * Nothing brings it back, so retrying will not help. The certificate of a
+ * covered verification is kept and stays downloadable.
+ *
+ * A caller who could not read the verification gets a plain 404 instead,
+ * never this error.
+ */
+export class LenzGoneError extends LenzError {
+  /** ISO-8601 timestamp of the removal, or `null` when the server sent none. */
+  purgedAt: string | null = null;
+}
+
 export class LenzWebhookSignatureError extends LenzError {}
 
 // ── Mapping table ────────────────────────────────────────────────────────
@@ -330,6 +346,19 @@ const VERIFICATION_409_CODES: Record<string, StatusEntry> = {
     docUrl: `${DOCS_BASE}/errors`,
   },
 };
+
+/**
+ * The 410 every reader of a verification answers once its account's retention
+ * period has removed it. Keyed on `code`, like the 409s: a 410 without it
+ * stays a plain {@link LenzError}.
+ */
+const GONE_410: StatusEntry = {
+  cls: LenzGoneError,
+  message: "Verification removed",
+  docUrl: `${DOCS_BASE}/errors`,
+};
+const GONE_FIX =
+  "Its account's retention period removed it. A certificate issued for it is still available.";
 
 const FIX_HINTS: Record<number, string> = {
   401: "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
@@ -419,6 +448,8 @@ export function mapResponseToError(
     Object.prototype.hasOwnProperty.call(VERIFICATION_409_CODES, codeForClass)
   ) {
     entry = VERIFICATION_409_CODES[codeForClass]!;
+  } else if (statusCode === 410 && codeForClass === "purged") {
+    entry = GONE_410;
   } else if (statusCode === 503 && UPSTREAM_503_CODES.includes(codeForClass)) {
     entry = {
       cls: LenzUpstreamUnavailableError,
@@ -480,6 +511,13 @@ export function mapResponseToError(
             "Transient provider outage — retry the same request after a short wait."
           : "This run will not produce a result. Resubmit with a different claim.");
     }
+  }
+
+  if (err instanceof LenzGoneError) {
+    // Retrying does not bring it back; the generic hint says to.
+    err.fix = GONE_FIX;
+    const purgedAt = parsed["purged_at"];
+    err.purgedAt = typeof purgedAt === "string" && purgedAt ? purgedAt : null;
   }
 
   if (err instanceof LenzUpstreamUnavailableError) {

@@ -154,6 +154,10 @@ for (const r of results) {
 }
 ```
 
+A `failed` item with no `status_detail` is a verification its account's
+retention period has removed (HTTP 410, see [Retention](#retention)); every
+other failure carries a `status_detail`.
+
 A verify takes ~90 seconds, so show your users where it is. `onProgress` fires
 once per poll while the run is going — it takes the `taskId` as well, because
 the batch helper round-robins several ids in one loop:
@@ -188,6 +192,15 @@ Every claim-shaped response shares these fields at top level:
 | `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Mixed"` \| `"Mostly False"` \| `"False"` \| `"Error"`. |
 | `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                         |
 | `lenz_score` | `number \| null` | Integer 1–10 (deep verdicts and list endpoints; `assess` omits it).                     |
+
+### Coverage reasons
+
+On an account with the warranty, a verification carries `coverage`. When
+`coverage.status` is `"uncovered"`, `coverage.reasons` says why, from a closed
+set (`CoverageReason`): `plan`, `account`, `depth`, `verdict`, `quality`,
+`withdrawn`, `issue_failed`. `account` means the account turned certificates
+off; it applies to checks submitted after the change, and a verification that
+already carries a certificate keeps it.
 
 ### Webhooks
 
@@ -365,6 +378,11 @@ A failed _verification_ (as opposed to a failed HTTP call) throws
 a transient provider-side exhaustion where resubmitting the same claim is the
 right move; older servers leave it `null`.
 
+A read of a verification removed under its account's retention period throws
+`LenzGoneError` (HTTP 410, `code` `"purged"`, with `purgedAt`), and `wait` /
+`verifyAndWait` stop on it instead of polling to the deadline. See
+[Retention](#retention).
+
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
 checking `LenzAuthError` to handle an empty balance, that branch stops firing;
@@ -397,6 +415,29 @@ if (status.status === "completed") {
   console.log(status.result?.verdict, status.result?.lenz_score);
 }
 ```
+
+## Retention
+
+An account on the Pro or Scale plan can set a retention period on its
+[API credentials page](https://lenz.io/api-credentials). Verifications older than the period are removed, and every
+read of one — `verifications.get`, `wait` / `getStatus` on its task, related
+claims, follow-up questions — throws `LenzGoneError`:
+
+```ts
+import { LenzGoneError } from "lenz-io";
+
+try {
+  await client.verifications.get("a1b2c3d4");
+} catch (exc) {
+  if (exc instanceof LenzGoneError) {
+    console.error(exc.code, exc.purgedAt); // "purged", "2026-10-01T09:00:00+00:00"
+  }
+}
+```
+
+It also disappears from `verifications.list()`. Retrying does not bring a
+removed verification back. The certificate of a
+covered verification is kept and can still be downloaded.
 
 ## Idempotency
 

@@ -4,6 +4,7 @@ import {
   LenzAPIError,
   LenzAuthError,
   LenzError,
+  LenzGoneError,
   LenzPipelineError,
   LenzQuotaExceededError,
   LenzRateLimitError,
@@ -308,6 +309,60 @@ describe("mapResponseToError", () => {
     expect(e.fix).toContain("client.wait");
   });
 
+  it("410 purged → LenzGoneError carrying code and purgedAt", () => {
+    const e = mapResponseToError(
+      410,
+      body({
+        detail: "This verification is no longer available.",
+        code: "purged",
+        purged_at: "2026-09-25T10:00:00+00:00",
+      }),
+      { "X-Request-ID": "rq_gone" },
+    ) as LenzGoneError;
+    expect(e).toBeInstanceOf(LenzGoneError);
+    expect(e).toBeInstanceOf(LenzError);
+    expect(e.statusCode).toBe(410);
+    expect(e.code).toBe("purged");
+    expect(e.purgedAt).toBe("2026-09-25T10:00:00+00:00");
+    expect(e.requestId).toBe("rq_gone");
+    expect(e.message).toBe("This verification is no longer available.");
+    // Retrying does not bring it back: the advice must not say to retry.
+    expect(e.fix).not.toMatch(/retry/i);
+  });
+
+  it("a malformed purged_at reads null", () => {
+    const e = mapResponseToError(410, body({ code: "purged", purged_at: 42 }), {}) as LenzGoneError;
+    expect(e).toBeInstanceOf(LenzGoneError);
+    expect(e.purgedAt).toBeNull();
+  });
+
+  it.each([
+    ["{}", "{}"],
+    ["another code", body({ code: "something_else" })],
+    ["no code", body({ detail: "Gone." })],
+  ])("a 410 without code purged stays a plain LenzError (%s)", (_label, raw) => {
+    const e = mapResponseToError(410, raw, {});
+    expect(e).not.toBeInstanceOf(LenzGoneError);
+    expect(e.constructor).toBe(LenzError);
+    expect(e.fix).toBe("Retry; if the error persists, file an issue with the Request ID.");
+  });
+
+  it("410 without purged_at reads null, never the empty string", () => {
+    const e = mapResponseToError(
+      410,
+      body({ code: "purged", purged_at: null }),
+      {},
+    ) as LenzGoneError;
+    expect(e).toBeInstanceOf(LenzGoneError);
+    expect(e.purgedAt).toBeNull();
+    // No detail on the wire: the class default, the same words as the Python SDK.
+    expect(e.message).toBe("Verification removed");
+    expect(e.fix).toBe(
+      "Its account's retention period removed it. A certificate issued for it is still available.",
+    );
+    expect(e.docUrl).toBe("https://lenz.io/docs/errors");
+  });
+
   it("409 verification_failed → LenzPipelineError carrying the failure", () => {
     const e = mapResponseToError(
       409,
@@ -413,4 +468,8 @@ describe.each([
   it(`maps to ${cls.name}`, () => {
     expect(mapResponseToError(status, "{}", {})).toBeInstanceOf(cls);
   });
+});
+
+it("410 with code purged → LenzGoneError", () => {
+  expect(mapResponseToError(410, body({ code: "purged" }), {})).toBeInstanceOf(LenzGoneError);
 });
