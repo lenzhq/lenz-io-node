@@ -553,6 +553,11 @@ export type FailureClass =
  * - `failed`      — terminal failure (or completed-without-result); `status_detail` carries the diagnostic.
  * - `timeout`     — the deadline elapsed before this task reached a terminal state; `status_detail` is `undefined`.
  */
+/**
+ * One item of `verifyBatchAndWait`. A claim removed under its account's
+ * retention period while the batch was polled reads `"failed"` with no
+ * `status_detail`.
+ */
 export interface BatchItemResult {
   task_id: string;
   claim_text?: string;

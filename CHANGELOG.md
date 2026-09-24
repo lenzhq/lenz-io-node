@@ -19,7 +19,10 @@ All notable changes to this SDK are documented here. Format follows
   available.
 - **`"account"` in `CoverageReason`**: the account turned certificates off.
   It applies to checks submitted after the change; a verification that
-  already carries a certificate keeps it. Types only.
+  already carries a certificate keeps it. Types only: the `CoverageReason`
+  union gained a member, so an exhaustive `switch` over it needs a case for
+  `"account"`; older versions read the value fine, since `reasons` stays
+  `string[]` on the wire.
 
 ### Changed
 

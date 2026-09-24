@@ -318,6 +318,8 @@ class VerificationsNamespace {
    * {@link LenzVerificationNotReadyError} while it is running or waiting for
    * input, and {@link LenzPipelineError} when it failed. To wait for a run,
    * use `client.wait(taskId)`.
+   *
+   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
   get(verificationId: string): Promise<Verification> {
     return this.client.request<Verification>({
@@ -372,6 +374,8 @@ class VerificationsNamespace {
    * Server clamps `limit` to 10. Excludes the verification itself and
    * editorially-hidden claims. Keyless like the library/detail reads; a
    * key additionally unlocks the caller's own verifications.
+   *
+   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
   related(
     verificationId: string,
@@ -390,6 +394,11 @@ class VerificationsNamespace {
 class AskNamespace {
   constructor(private readonly client: Lenz) {}
 
+  /**
+   * The follow-up conversation on a verification.
+   *
+   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
+   */
   history(verificationId: string): Promise<AskHistory> {
     return this.client.request<AskHistory>({
       method: "GET",
@@ -403,6 +412,8 @@ class AskNamespace {
    * Pass `idempotencyKey` to make a retry safe: with a key, a retry of a
    * question that already got a reply replays that reply rather than asking
    * again. It is never generated here — see {@link AskSendInput.idempotencyKey}.
+   *
+   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
   send(verificationId: string, input: AskSendInput): Promise<AskReply> {
     const body: Record<string, unknown> = { message: input.message };
@@ -635,6 +646,13 @@ export class Lenz {
     });
   }
 
+  /**
+   * One non-blocking poll of a task.
+   *
+   * On a completed task, throws {@link LenzGoneError} (HTTP 410) when the
+   * account's retention period has removed the verification. A running task
+   * never answers 410.
+   */
   async getStatus(taskId: string): Promise<TaskStatus> {
     return this.request<TaskStatus>({
       method: "GET",
@@ -771,8 +789,11 @@ export class Lenz {
 
   /**
    * Round-robin poll `taskIds` until each reaches a terminal state or the
-   * deadline elapses. Returns `{terminal, timedOut}`; a timed-out task has no
-   * `TaskStatus` (`"timeout"` is client-side, never a wire status).
+   * deadline elapses. Returns `{terminal, timedOut, gone}`; a timed-out task
+   * has no `TaskStatus` (`"timeout"` is client-side, never a wire status), and
+   * a task whose poll threw {@link LenzGoneError} (removed under its account's
+   * retention period) is in `gone`, final and never polled again. Any other
+   * poll error keeps the task pending.
    *
    * Each round polls every still-pending id once (via `Promise.allSettled`, so
    * one poll's transport failure doesn't abort the batch — that id stays

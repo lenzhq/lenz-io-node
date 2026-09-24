@@ -37,8 +37,8 @@ export class LenzError extends Error {
   statusCode: number;
   /**
    * The server's machine-readable error code, e.g. `"no_credits"`. Present on
-   * 402, 403 and 429; `""` when the server sent none. Branch on this rather
-   * than on message text.
+   * 402, 403, 409, 410 (`"purged"`), 429 and a typed 503; `""` when the
+   * server sent none. Branch on this rather than on message text.
    */
   code: string;
   body: Record<string, unknown> | null;
@@ -277,7 +277,7 @@ export class LenzVerificationNotReadyError extends LenzError {
 }
 
 /**
- * 410 — the verification is no longer available (`code` `"purged"`).
+ * 410 with `code` `"purged"` — the verification is no longer available.
  *
  * An account on Pro or Scale can set a retention period; once a verification
  * is older than it, its content is removed and every read of it answers 410.
@@ -316,11 +316,6 @@ const STATUS_MAP: Record<number, StatusEntry> = {
     message: "Payment required",
     docUrl: `${DOCS_BASE}/billing`,
   },
-  410: {
-    cls: LenzGoneError,
-    message: "Verification removed",
-    docUrl: `${DOCS_BASE}/errors`,
-  },
   422: {
     cls: LenzValidationError,
     message: "Validation failed",
@@ -352,11 +347,23 @@ const VERIFICATION_409_CODES: Record<string, StatusEntry> = {
   },
 };
 
+/**
+ * The 410 every reader of a verification answers once its account's retention
+ * period has removed it. Keyed on `code`, like the 409s: a 410 without it
+ * stays a plain {@link LenzError}.
+ */
+const GONE_410: StatusEntry = {
+  cls: LenzGoneError,
+  message: "Verification removed",
+  docUrl: `${DOCS_BASE}/errors`,
+};
+const GONE_FIX =
+  "Its account's retention period removed it. A certificate issued for it is still available.";
+
 const FIX_HINTS: Record<number, string> = {
   401: "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
   403: "This key doesn't have access to that resource.",
   402: "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
-  410: "Its account's retention period removed it. A certificate issued for it is still available.",
   422: "Check the request body against the OpenAPI spec.",
   429: "Wait Retry-After seconds and retry.",
 };
@@ -441,6 +448,8 @@ export function mapResponseToError(
     Object.prototype.hasOwnProperty.call(VERIFICATION_409_CODES, codeForClass)
   ) {
     entry = VERIFICATION_409_CODES[codeForClass]!;
+  } else if (statusCode === 410 && codeForClass === "purged") {
+    entry = GONE_410;
   } else if (statusCode === 503 && UPSTREAM_503_CODES.includes(codeForClass)) {
     entry = {
       cls: LenzUpstreamUnavailableError,
@@ -505,6 +514,8 @@ export function mapResponseToError(
   }
 
   if (err instanceof LenzGoneError) {
+    // Retrying does not bring it back; the generic hint says to.
+    err.fix = GONE_FIX;
     const purgedAt = parsed["purged_at"];
     err.purgedAt = typeof purgedAt === "string" && purgedAt ? purgedAt : null;
   }

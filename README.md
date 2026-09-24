@@ -154,6 +154,10 @@ for (const r of results) {
 }
 ```
 
+A `failed` item with no `status_detail` is a verification its account's
+retention period has removed (HTTP 410, see [Retention](#retention)); every
+other failure carries a `status_detail`.
+
 A verify takes ~90 seconds, so show your users where it is. `onProgress` fires
 once per poll while the run is going — it takes the `taskId` as well, because
 the batch helper round-robins several ids in one loop:
@@ -414,8 +418,8 @@ if (status.status === "completed") {
 
 ## Retention
 
-An account on the Pro or Scale plan can set a retention period on its API
-credentials page. Verifications older than the period are removed, and every
+An account on the Pro or Scale plan can set a retention period on its
+[API credentials page](https://lenz.io/api-credentials). Verifications older than the period are removed, and every
 read of one — `verifications.get`, `wait` / `getStatus` on its task, related
 claims, follow-up questions — throws `LenzGoneError`:
 
@@ -423,7 +427,7 @@ claims, follow-up questions — throws `LenzGoneError`:
 import { LenzGoneError } from "lenz-io";
 
 try {
-  await client.verifications.get("vid_abc123");
+  await client.verifications.get("a1b2c3d4");
 } catch (exc) {
   if (exc instanceof LenzGoneError) {
     console.error(exc.code, exc.purgedAt); // "purged", "2026-10-01T09:00:00+00:00"
@@ -431,7 +435,8 @@ try {
 }
 ```
 
-Retrying does not bring a removed verification back. The certificate of a
+It also disappears from `verifications.list()`. Retrying does not bring a
+removed verification back. The certificate of a
 covered verification is kept and can still be downloaded.
 
 ## Idempotency
