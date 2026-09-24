@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LenzAPIError,
+  LenzGoneError,
   LenzQuotaExceededError,
   LenzRateLimitError,
   LenzUpstreamUnavailableError,
@@ -448,6 +449,20 @@ describe("contract", () => {
     // `doc_url` is intentionally not mapped: the SDK sets its own docUrl from
     // the status table so the link is right even on an older server.
     handled.add("doc_url");
+    const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
+    expect(unhandled).toEqual([]);
+  });
+
+  it("410 purged envelope maps every field onto LenzGoneError", () => {
+    const fixture = loadFixture("error_purged_410.json");
+    const err = mapResponseToError(410, JSON.stringify(fixture), {}) as LenzGoneError;
+
+    expect(err).toBeInstanceOf(LenzGoneError);
+    expect(err.message).toBe(fixture["detail"]);
+    expect(err.code).toBe(fixture["code"]);
+    expect(err.purgedAt).toBe(fixture["purged_at"]);
+
+    const handled = new Set(["detail", "code", "purged_at"]);
     const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
     expect(unhandled).toEqual([]);
   });

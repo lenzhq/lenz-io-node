@@ -330,6 +330,23 @@ describe("mapResponseToError", () => {
     expect(e.fix).not.toMatch(/retry/i);
   });
 
+  it("a malformed purged_at reads null", () => {
+    const e = mapResponseToError(410, body({ code: "purged", purged_at: 42 }), {}) as LenzGoneError;
+    expect(e).toBeInstanceOf(LenzGoneError);
+    expect(e.purgedAt).toBeNull();
+  });
+
+  it.each([
+    ["{}", "{}"],
+    ["another code", body({ code: "something_else" })],
+    ["no code", body({ detail: "Gone." })],
+  ])("a 410 without code purged stays a plain LenzError (%s)", (_label, raw) => {
+    const e = mapResponseToError(410, raw, {});
+    expect(e).not.toBeInstanceOf(LenzGoneError);
+    expect(e.constructor).toBe(LenzError);
+    expect(e.fix).toBe("Retry; if the error persists, file an issue with the Request ID.");
+  });
+
   it("410 without purged_at reads null, never the empty string", () => {
     const e = mapResponseToError(
       410,
@@ -443,7 +460,6 @@ describe.each([
   [402, LenzQuotaExceededError],
   [422, LenzValidationError],
   [429, LenzRateLimitError],
-  [410, LenzGoneError],
   [500, LenzAPIError],
   [502, LenzAPIError],
   [503, LenzAPIError],
@@ -452,4 +468,8 @@ describe.each([
   it(`maps to ${cls.name}`, () => {
     expect(mapResponseToError(status, "{}", {})).toBeInstanceOf(cls);
   });
+});
+
+it("410 with code purged → LenzGoneError", () => {
+  expect(mapResponseToError(410, body({ code: "purged" }), {})).toBeInstanceOf(LenzGoneError);
 });
