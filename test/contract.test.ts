@@ -372,6 +372,24 @@ describe("contract", () => {
     expect(older.suggested_revision ?? null).toBeNull();
   });
 
+  it("list items carry suggested_revision: a string on a False row, null on a True one", () => {
+    // The same bytes as the Python SDK's copy; `verifications.list` and
+    // `library.list` return this page shape.
+    const page = loadFixture("verifications_list.json");
+    const items = page["items"] as Record<string, unknown>[];
+    for (const [i, item] of items.entries()) {
+      const errors = walk(item, "VerificationListItem", `items[${i}]`);
+      if (errors.length > 0) {
+        throw new Error(`verifications_list.json → VerificationListItem:\n${errors.join("\n")}`);
+      }
+    }
+    const byVerdict = Object.fromEntries(
+      items.map((it) => [it["verdict"], it["suggested_revision"]]),
+    );
+    expect(typeof byVerdict["False"]).toBe("string");
+    expect(byVerdict["True"]).toBeNull();
+  });
+
   it("assess rows carry the reviewers' notes, and rows without them still fit", () => {
     const rows = loadFixture("assess_claims_list.json")["claims"] as AssessClaim[];
     // A verdict row carries a rationale; a dissent only sometimes.
