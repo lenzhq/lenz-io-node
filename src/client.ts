@@ -855,11 +855,11 @@ export class Lenz {
           {},
           {
             maxRetries: 0,
-            // Cut at what is left; only the first poll after a submit that
-            // used the whole budget gets the 5 s floor, so `partial` can fill.
+            // Cut at what is left. Only when the submit used the whole
+            // budget does the first poll get 5 s, so `partial` can fill.
             timeoutMs: Math.min(
               this.timeoutMs,
-              poll === 0 ? Math.max(budget, REVIEW_POLL_FLOOR_S * 1000) : budget,
+              poll === 0 && budget <= 0 ? REVIEW_POLL_FLOOR_S * 1000 : budget,
             ),
           },
         )) as unknown;
@@ -873,12 +873,11 @@ export class Lenz {
           current = body as ReviewFull;
         }
       } catch (exc) {
-        // Keep waiting through what a later poll can outlast (a 5xx, a
-        // network drop, a rate limit); anything else (auth, 404, a purged
-        // review) will not change by waiting.
-        // A 2xx whose body does not decode (a proxy's HTML page, truncated
-        // JSON, an empty body) is a failed poll too.
-        if (!(exc instanceof LenzAPIError) && !isRateLimit(exc) && !(exc instanceof SyntaxError)) {
+        // Keep waiting through what a later poll can outlast: a 5xx, a rate
+        // limit, and anything that is not a Lenz answer at all (a network
+        // drop, a body that stops or does not decode). A Lenz answer that
+        // waiting will not change (auth, 404, a purged review) ends the wait.
+        if (exc instanceof LenzError && !(exc instanceof LenzAPIError) && !isRateLimit(exc)) {
           throw exc;
         }
         // A wait the server stated outranks the poll hint, capped like every
