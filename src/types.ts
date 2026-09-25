@@ -175,11 +175,11 @@ export interface Verification {
    *
    * `null` for a true claim, when no correction is established, and on
    * verifications that predate the field. Absent on responses from an API
-   * that predates it, so read it as `v.suggested_revision ?? null`. On every
+   * that predates it, so read it as `v.suggested_rewrite ?? null`. On every
    * verification, single or listed (`VerificationListItem` carries it too);
    * not on `assess` rows.
    */
-  suggested_revision?: string | null;
+  suggested_rewrite?: string | null;
 }
 
 /**
@@ -297,9 +297,9 @@ export interface VerificationListItem {
   language?: string;
   /**
    * A suggested rewrite of `claim`, not verified itself. `null` on a true
-   * claim and on older rows. See `Verification.suggested_revision`.
+   * claim and on older rows. See `Verification.suggested_rewrite`.
    */
-  suggested_revision?: string | null;
+  suggested_rewrite?: string | null;
 }
 
 export interface VerificationList {

@@ -204,7 +204,7 @@ already carries a certificate keeps it.
 
 ### Suggested rewrite
 
-A verification can carry `suggested_revision`, a string: a suggested rewrite
+A verification can carry `suggested_rewrite`, a string: a suggested rewrite
 of `claim` that the verification's findings support, to use in place of the
 original sentence. It has not been verified itself: before using it, review
 it or run it through `client.verify({ claim })`. It is `null` for a true
@@ -215,9 +215,9 @@ the field, and absent on responses from an API that predates it. It is on every 
 `assess` rows.
 
 ```ts
-const revision = v.suggested_revision ?? null;
-if (revision) {
-  console.log("Suggested rewrite:", revision);
+const rewrite = v.suggested_rewrite ?? null;
+if (rewrite) {
+  console.log("Suggested rewrite:", rewrite);
 }
 ```
 
