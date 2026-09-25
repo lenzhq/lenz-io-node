@@ -197,6 +197,8 @@ interface RequestOptions {
   authRequired?: boolean;
   /** Per-call override of the client's `timeoutMs` (each attempt's AbortController). */
   timeoutMs?: number;
+  /** Per-call override of the client's `maxRetries`. */
+  maxRetries?: number;
   /**
    * Optional-auth endpoint: don't fail when no key, but DO send the key when
    * we have one. The server returns a caller's own private/hidden rows only to
@@ -765,6 +767,14 @@ export class Lenz {
   getReview(reviewId: string, opts: { view: "full" }): Promise<ReviewFull>;
   getReview(reviewId: string, opts?: GetReviewOptions): Promise<ReviewFull | ReviewIssues>;
   getReview(reviewId: string, opts: GetReviewOptions = {}): Promise<ReviewFull | ReviewIssues> {
+    return this._getReview(reviewId, opts);
+  }
+
+  private _getReview(
+    reviewId: string,
+    opts: GetReviewOptions,
+    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries"> = {},
+  ): Promise<ReviewFull | ReviewIssues> {
     if (!reviewId) {
       throw new Error("getReview() requires a non-empty review_id.");
     }
@@ -772,6 +782,7 @@ export class Lenz {
       method: "GET",
       path: `/reviews/${encodeURIComponent(reviewId)}`,
       query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
+      ...transport,
     });
   }
 
@@ -785,8 +796,7 @@ export class Lenz {
    * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
    * a transient poll error is retried on the next poll, after the wait the
    * server stated when it stated one. The deadline is checked before every
-   * poll, so no poll starts after it; one already in flight may finish a
-   * little past it.
+   * poll and bounds each poll's request, so the wait ends at the deadline.
    */
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
@@ -795,11 +805,19 @@ export class Lenz {
     let last: ReviewFull | null = null;
     let lastJson = "";
     for (;;) {
-      if (deadline - Date.now() <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
+      const budget = deadline - Date.now();
+      if (budget <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
       let current: ReviewFull | null = null;
       let statedWaitMs = 0;
       try {
-        current = await this.getReview(reviewId);
+        // One attempt per poll, bounded by what is left: this loop owns the
+        // waits, so a retry ladder inside the request cannot outlive the
+        // deadline.
+        current = (await this._getReview(
+          reviewId,
+          {},
+          { maxRetries: 0, timeoutMs: Math.min(this.timeoutMs, budget) },
+        )) as ReviewFull;
       } catch (exc) {
         // Keep waiting through what a later poll can outlast (a 5xx after
         // this client's own retries, a network drop, a rate limit); anything
@@ -1143,8 +1161,9 @@ export class Lenz {
       headers["Content-Type"] = "application/json";
     }
 
+    const maxRetries = opts.maxRetries ?? this.maxRetries;
     let lastErr: unknown = undefined;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? this.timeoutMs);
       let response: Response;
@@ -1158,7 +1177,7 @@ export class Lenz {
       } catch (exc) {
         lastErr = exc;
         clearTimeout(timer);
-        if (attempt >= this.maxRetries) {
+        if (attempt >= maxRetries) {
           throw new LenzAPIError({
             message: `${opts.method} ${opts.path} failed after ${attempt + 1} attempts: ${String(exc)}`,
             cause: String(exc),
@@ -1204,7 +1223,7 @@ export class Lenz {
         response.status === 429 && THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
       if (
         !throwAtOnce &&
-        attempt < this.maxRetries &&
+        attempt < maxRetries &&
         (response.status >= 500 || response.status === 429)
       ) {
         const stated = await statedRetryAfterSeconds(response);

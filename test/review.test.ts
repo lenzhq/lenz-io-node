@@ -409,6 +409,28 @@ describe("reviewAndWait()", () => {
     expect((await pending).status).toBe("completed");
   });
 
+  it("with the default retries, a poll's internal retry cannot outlive the deadline", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 202, body: ACCEPTED },
+      {
+        status: 429,
+        body: { detail: "Slow down.", code: "rate_limited" },
+        headers: { "Retry-After": "60" },
+      },
+      { body: COMPLETED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch }); // default maxRetries
+    let settled: unknown = "pending";
+    const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 20_000 }).then(
+      (r) => (settled = r),
+      (e: unknown) => (settled = e),
+    );
+    await vi.advanceTimersByTimeAsync(20_001);
+    expect(settled).toBeInstanceOf(ReviewTimeoutError);
+    expect(calls).toHaveLength(2);
+    await pending;
+  });
+
   it("a poll's Retry-After never sleeps past the deadline", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: ACCEPTED },
