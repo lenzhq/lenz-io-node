@@ -215,6 +215,28 @@ interface RequestOptions {
   authOptional?: boolean;
 }
 
+const REVIEW_STATUSES: readonly string[] = [
+  "queued",
+  "assessing",
+  "verifying",
+  "completed",
+  "failed",
+];
+
+/** The full view of THIS review: its id, a known status, and every list. */
+function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  return (
+    b["review_id"] === reviewId &&
+    typeof b["status"] === "string" &&
+    REVIEW_STATUSES.includes(b["status"]) &&
+    Array.isArray(b["issues"]) &&
+    Array.isArray(b["failures"]) &&
+    Array.isArray(b["claims"])
+  );
+}
+
 function isRateLimit(exc: unknown): boolean {
   return exc instanceof LenzError && exc.statusCode === 429;
 }
@@ -865,15 +887,10 @@ export class Lenz {
             ),
           },
         )) as unknown;
-        // A 2xx that is not a review (an empty body, a proxy's page) is a
-        // failed poll, never an update and never `partial`.
-        if (
-          body &&
-          typeof body === "object" &&
-          typeof (body as { status?: unknown }).status === "string"
-        ) {
-          current = body as ReviewFull;
-        }
+        // A 2xx that is not this review (an empty body, a proxy's error
+        // object, another id, a body missing its lists) is a failed poll,
+        // never an update and never `partial`.
+        if (isReviewBody(body, reviewId)) current = body;
       } catch (exc) {
         // Keep waiting through what a later poll can outlast: a 5xx, a rate
         // limit, and anything that is not a Lenz answer at all (a network
@@ -1278,9 +1295,9 @@ export class Lenz {
           clearTimeout(timer);
         }
       }
-      clearTimeout(timer);
-
-      // Error path. Retry on 5xx + 429; otherwise throw.
+      // Error path. Retry on 5xx + 429; otherwise throw. The attempt's
+      // timer stays armed while the error body is read, and is cleared
+      // before any retry sleep.
       //
       // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that,
       // whether we abort or keep retrying is decided by the typed body `code`
@@ -1312,18 +1329,29 @@ export class Lenz {
         const stated = await statedRetryAfterSeconds(response);
         if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
           if (fits(stated * 1000)) {
+            clearTimeout(timer);
             await sleep(stated * 1000);
             continue;
           }
         } else if (stated === null || !(await abortsOnLongStatedWait(response))) {
           if (fits(retrySleepMs(attempt))) {
+            clearTimeout(timer);
             await sleep(retrySleepMs(attempt));
             continue;
           }
         }
       }
 
-      const rawBody = await response.text();
+      let rawBody = "";
+      try {
+        rawBody = await response.text();
+      } catch (exc) {
+        // A body that stalled until the timer fired: the status stands, the
+        // body is lost.
+        if (!controller.signal.aborted) throw exc;
+      } finally {
+        clearTimeout(timer);
+      }
       const respHeaders: Record<string, string> = {};
       response.headers.forEach((v, k) => {
         respHeaders[k] = v;

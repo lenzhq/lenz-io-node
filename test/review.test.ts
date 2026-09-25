@@ -556,6 +556,11 @@ describe("reviewAndWait()", () => {
     ["an empty body", {}],
     ["a body with no status", { review_id: "442b6aa9" }],
     ["a body whose status is not a string", { status: 3 }],
+    ["a proxy's error object", { status: "error" }],
+    ["a bare completed status", { status: "completed" }],
+    ["another review's body", { ...COMPLETED, review_id: "deadbeef" }],
+    ["a review without its arrays", { ...COMPLETED, issues: undefined, claims: undefined }],
+    ["an unknown status", { ...COMPLETED, status: "exploded" }],
   ] as const) {
     it(`a 2xx poll with ${label} is a transient failure, not a review`, async () => {
       const { fetch } = makeFetch([
@@ -569,7 +574,7 @@ describe("reviewAndWait()", () => {
       const review = await drain(
         client.reviewAndWait({ text: DRAFT }, { onUpdate: (r) => seen.push(r.status) }),
       );
-      expect(review.status).toBe("completed");
+      expect(review).toEqual(COMPLETED);
       expect(seen).toEqual(["verifying", "completed"]);
     });
   }
@@ -750,7 +755,10 @@ describe("reviewAndWait()", () => {
 
   it("a failed review with no failure block reads neutrally", async () => {
     const body = { ...NO_CLAIM, failure: null };
-    const { fetch } = makeFetch([{ status: 202, body: ACCEPTED }, { body }]);
+    const { fetch } = makeFetch([
+      { status: 202, body: { review_id: body.review_id, status: "queued" } },
+      { body },
+    ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const err = (await drain(
       client.reviewAndWait({ text: DRAFT }).catch((e: unknown) => e),
@@ -780,7 +788,10 @@ describe("reviewAndWait()", () => {
   ];
   for (const [code, body, retryable] of failures) {
     it(`a failed review (${code}) throws ReviewFailedError with the review`, async () => {
-      const { fetch } = makeFetch([{ status: 202, body: ACCEPTED }, { body }]);
+      const { fetch } = makeFetch([
+        { status: 202, body: { review_id: body.review_id, status: "queued" } },
+        { body },
+      ]);
       const client = new Lenz({ apiKey: "lenz_t", fetch });
       const err = await drain(client.reviewAndWait({ text: DRAFT }).catch((e: unknown) => e));
       expect(err).toBeInstanceOf(ReviewFailedError);
