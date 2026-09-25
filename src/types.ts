@@ -167,6 +167,19 @@ export interface Verification {
    * qualify carries the block with `status: "uncovered"` and the reasons why.
    */
   coverage?: Coverage | null;
+  /**
+   * A suggested rewrite of `claim` that this verification's findings
+   * support, to use in place of the original sentence. It has not been
+   * verified itself: before using it, review it or run it through
+   * `client.verify({ claim })`.
+   *
+   * `null` for a true claim, when no correction is established, and on
+   * verifications that predate the field. Absent on responses from an API
+   * that predates it, so read it as `v.suggested_revision ?? null`. On every
+   * verification, single or listed (`VerificationListItem` carries it too);
+   * not on `assess` rows.
+   */
+  suggested_revision?: string | null;
 }
 
 /**
@@ -282,6 +295,11 @@ export interface VerificationListItem {
   modified_at?: string | null;
   /** Output language (ISO 639-1). See `Verification.language`. */
   language?: string;
+  /**
+   * A suggested rewrite of `claim`, not verified itself. `null` on a true
+   * claim and on older rows. See `Verification.suggested_revision`.
+   */
+  suggested_revision?: string | null;
 }
 
 export interface VerificationList {

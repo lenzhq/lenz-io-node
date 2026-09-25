@@ -7,6 +7,7 @@ import {
   LenzWebhookSignatureError,
   verifySignature,
   type CertificateTimestamped,
+  type Verification,
   type VerificationCompleted,
   type VerificationFailed,
   type VerificationNeedsInput,
@@ -81,6 +82,25 @@ describe("LenzWebhooks", () => {
     expect(result["confidence_score"]).toBeUndefined();
     // published_at is no longer part of the contract
     expect(result["published_at"]).toBeUndefined();
+  });
+
+  it("verification.completed carries suggested_revision in its result", () => {
+    const body = payload("verification.completed", {
+      verification_id: "vid_1",
+      status: "completed",
+      result: {
+        verification_id: "vid_1",
+        claim: "The Amazon produces 20% of the world's oxygen.",
+        verdict: "False",
+        suggested_revision: "The Amazon produces roughly 6-9% of the world's oxygen.",
+      },
+    });
+    const wh = new LenzWebhooks({ secret: SECRET });
+    const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationCompleted;
+    const result = event.result as Verification;
+    expect(result.suggested_revision).toBe(
+      "The Amazon produces roughly 6-9% of the world's oxygen.",
+    );
   });
 
   it("parses verification.failed", () => {

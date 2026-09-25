@@ -28,7 +28,7 @@ import {
   LenzUpstreamUnavailableError,
   mapResponseToError,
 } from "../src/index.js";
-import type { AssessClaim } from "../src/types.js";
+import type { AssessClaim, Verification } from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
 import type { VerificationFailed } from "../src/webhooks.js";
 import { createHmac } from "node:crypto";
@@ -108,6 +108,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "visibility",
     "depth",
     "coverage",
+    "suggested_revision",
   ]),
   Coverage: new Set([
     "status",
@@ -146,6 +147,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "modified_at",
     "language",
+    "suggested_revision",
   ]),
   EntityRef: new Set(["name", "qid"]),
   Source: new Set(["source_name", "title", "url", "snippet", "date"]),
@@ -350,6 +352,42 @@ describe("contract", () => {
         `webhook_payload_completed.json → Verification (via .result):\n${errors.join("\n")}`,
       );
     }
+  });
+
+  it("suggested_revision: a rewrite on a False verdict, null on a True one, absent on an older one", () => {
+    // Three states, one reading: a caller writes `v.suggested_revision ?? null`.
+    const completed = loadFixture("verify_status_completed.json")["result"] as Verification;
+    expect(completed.verdict).toBe("False");
+    expect(typeof completed.suggested_revision).toBe("string");
+    expect(completed.suggested_revision).toMatch(/photoelectric effect/);
+
+    const detail = loadFixture("verifications_detail.json") as Verification;
+    expect(detail.verdict).toBe("True");
+    expect(detail.suggested_revision).toBeNull();
+
+    // A response from an API that predates the field carries no key.
+    const older: Partial<Verification> = { ...detail };
+    delete older.suggested_revision;
+    expect(older).not.toHaveProperty("suggested_revision");
+    expect(older.suggested_revision ?? null).toBeNull();
+  });
+
+  it("list items carry suggested_revision: a string on a False row, null on a True one", () => {
+    // The same bytes as the Python SDK's copy; `verifications.list` and
+    // `library.list` return this page shape.
+    const page = loadFixture("verifications_list.json");
+    const items = page["items"] as Record<string, unknown>[];
+    for (const [i, item] of items.entries()) {
+      const errors = walk(item, "VerificationListItem", `items[${i}]`);
+      if (errors.length > 0) {
+        throw new Error(`verifications_list.json → VerificationListItem:\n${errors.join("\n")}`);
+      }
+    }
+    const byVerdict = Object.fromEntries(
+      items.map((it) => [it["verdict"], it["suggested_revision"]]),
+    );
+    expect(typeof byVerdict["False"]).toBe("string");
+    expect(byVerdict["True"]).toBeNull();
   });
 
   it("assess rows carry the reviewers' notes, and rows without them still fit", () => {
