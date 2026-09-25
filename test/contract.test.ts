@@ -108,7 +108,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "visibility",
     "depth",
     "coverage",
-    "suggested_revision",
+    "suggested_rewrite",
   ]),
   Coverage: new Set([
     "status",
@@ -147,7 +147,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "modified_at",
     "language",
-    "suggested_revision",
+    "suggested_rewrite",
   ]),
   EntityRef: new Set(["name", "qid"]),
   Source: new Set(["source_name", "title", "url", "snippet", "date"]),
@@ -354,25 +354,25 @@ describe("contract", () => {
     }
   });
 
-  it("suggested_revision: a rewrite on a False verdict, null on a True one, absent on an older one", () => {
-    // Three states, one reading: a caller writes `v.suggested_revision ?? null`.
+  it("suggested_rewrite: a rewrite on a False verdict, null on a True one, absent on an older one", () => {
+    // Three states, one reading: a caller writes `v.suggested_rewrite ?? null`.
     const completed = loadFixture("verify_status_completed.json")["result"] as Verification;
     expect(completed.verdict).toBe("False");
-    expect(typeof completed.suggested_revision).toBe("string");
-    expect(completed.suggested_revision).toMatch(/photoelectric effect/);
+    expect(typeof completed.suggested_rewrite).toBe("string");
+    expect(completed.suggested_rewrite).toMatch(/photoelectric effect/);
 
     const detail = loadFixture("verifications_detail.json") as Verification;
     expect(detail.verdict).toBe("True");
-    expect(detail.suggested_revision).toBeNull();
+    expect(detail.suggested_rewrite).toBeNull();
 
     // A response from an API that predates the field carries no key.
     const older: Partial<Verification> = { ...detail };
-    delete older.suggested_revision;
-    expect(older).not.toHaveProperty("suggested_revision");
-    expect(older.suggested_revision ?? null).toBeNull();
+    delete older.suggested_rewrite;
+    expect(older).not.toHaveProperty("suggested_rewrite");
+    expect(older.suggested_rewrite ?? null).toBeNull();
   });
 
-  it("list items carry suggested_revision: a string on a False row, null on a True one", () => {
+  it("list items carry suggested_rewrite: a string on a False row, null on a True one", () => {
     // The same bytes as the Python SDK's copy; `verifications.list` and
     // `library.list` return this page shape.
     const page = loadFixture("verifications_list.json");
@@ -384,7 +384,7 @@ describe("contract", () => {
       }
     }
     const byVerdict = Object.fromEntries(
-      items.map((it) => [it["verdict"], it["suggested_revision"]]),
+      items.map((it) => [it["verdict"], it["suggested_rewrite"]]),
     );
     expect(typeof byVerdict["False"]).toBe("string");
     expect(byVerdict["True"]).toBeNull();

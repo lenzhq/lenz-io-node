@@ -1878,47 +1878,47 @@ describe("usage", () => {
   });
 });
 
-describe("suggested_revision", () => {
+describe("suggested_rewrite", () => {
   // A suggested rewrite of `claim`, not verified itself. Three states: a
   // string, `null` (a true claim, no correction established, or a
   // verification that predates the field), and absent (an API that predates
   // the field). `?? null` reads the last two the same way.
   const REWRITE = "The Amazon produces roughly 6-9% of the world's oxygen.";
-  const detail = (revision?: unknown) => ({
+  const detail = (rewrite?: unknown) => ({
     verification_id: "vid_r",
     claim: "The Amazon produces 20% of the world's oxygen.",
     verdict: "False",
     language: "en",
-    ...(revision === undefined ? {} : { suggested_revision: revision }),
+    ...(rewrite === undefined ? {} : { suggested_rewrite: rewrite }),
   });
 
   it("carries the rewrite as a string", async () => {
     const { fetch } = makeFetch([{ body: detail(REWRITE) }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifications.get("vid_r");
-    const revision: string | null = v.suggested_revision ?? null;
-    expect(revision).toBe(REWRITE);
+    const rewrite: string | null = v.suggested_rewrite ?? null;
+    expect(rewrite).toBe(REWRITE);
   });
 
   it("reads null as no suggested rewrite", async () => {
     const { fetch } = makeFetch([{ body: detail(null) }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifications.get("vid_r");
-    expect(v.suggested_revision).toBeNull();
+    expect(v.suggested_rewrite).toBeNull();
   });
 
   it("leaves it undefined on a response from an API that predates the field", async () => {
     const { fetch } = makeFetch([{ body: detail(undefined) }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.verifications.get("vid_r");
-    expect(v.suggested_revision).toBeUndefined();
-    expect(v.suggested_revision ?? null).toBeNull();
+    expect(v.suggested_rewrite).toBeUndefined();
+    expect(v.suggested_rewrite ?? null).toBeNull();
   });
 
   it("is on list items too: string, null, absent", async () => {
-    const row = (revision?: unknown) => ({
-      ...detail(revision),
-      verification_id: `vid_${String(revision)}`,
+    const row = (rewrite?: unknown) => ({
+      ...detail(rewrite),
+      verification_id: `vid_${String(rewrite)}`,
     });
     const body = {
       items: [row(REWRITE), { ...row(null), verdict: "True" }, row(undefined)],
@@ -1930,10 +1930,10 @@ describe("suggested_revision", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     for (const page of [await client.verifications.list(), await client.library.list()]) {
       const [withRewrite, trueRow, olderRow] = page.items;
-      expect(withRewrite!.suggested_revision).toBe(REWRITE);
-      expect(trueRow!.suggested_revision).toBeNull();
-      expect(olderRow!.suggested_revision).toBeUndefined();
-      expect(olderRow!.suggested_revision ?? null).toBeNull();
+      expect(withRewrite!.suggested_rewrite).toBe(REWRITE);
+      expect(trueRow!.suggested_rewrite).toBeNull();
+      expect(olderRow!.suggested_rewrite).toBeUndefined();
+      expect(olderRow!.suggested_rewrite ?? null).toBeNull();
     }
   });
 
@@ -1941,7 +1941,7 @@ describe("suggested_revision", () => {
     const { fetch } = makeFetch([{ body: { status: "completed", result: detail(REWRITE) } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const v = await client.wait("t", { timeoutMs: 5_000 });
-    expect(v.suggested_revision).toBe(REWRITE);
+    expect(v.suggested_rewrite).toBe(REWRITE);
   });
 });
 
