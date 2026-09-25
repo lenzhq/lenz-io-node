@@ -6,6 +6,19 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`suggested_revision` on `Verification`**, a string or `null`: a
+  suggested rewrite of `claim` that the verification's findings support, for
+  a person to review before using it. It has not been verified itself. It is
+  `null` for a true claim, when no correction is established, and on
+  verifications that predate the field, and absent on responses from an API
+  that predates it, so read it as `v.suggested_revision ?? null`. It arrives
+  on `verifications.get`, `wait` / `verifyAndWait`, and the
+  `verification.completed` webhook's `result`; list items, `assess` and
+  `library` rows do not carry it. Types only; earlier SDK versions ignore the
+  key and keep working.
+
 ## [2.16.0] - 2026-09-24
 
 A new error, `LenzGoneError`, for a verification removed by its account's

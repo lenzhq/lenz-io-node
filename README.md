@@ -202,6 +202,23 @@ set (`CoverageReason`): `plan`, `account`, `depth`, `verdict`, `quality`,
 off; it applies to checks submitted after the change, and a verification that
 already carries a certificate keeps it.
 
+### Suggested rewrite
+
+A full verification (`verifyAndWait`, `wait`, `verifications.get`, and the
+`verification.completed` webhook's `result`) can carry `suggested_revision`, a
+string: a suggested rewrite of `claim` that the verification's findings
+support, for a person to review before using it. It has not been verified
+itself. It is `null` for a true claim, when no correction is established, and
+on verifications that predate the field, and absent on responses from an API
+that predates it. List items, `assess` and `library` rows never carry it.
+
+```ts
+const revision = v.suggested_revision ?? null;
+if (revision) {
+  console.log("Suggested rewrite:", revision);
+}
+```
+
 ### Webhooks
 
 ```ts

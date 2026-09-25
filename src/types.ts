@@ -167,6 +167,18 @@ export interface Verification {
    * qualify carries the block with `status: "uncovered"` and the reasons why.
    */
   coverage?: Coverage | null;
+  /**
+   * A suggested rewrite of `claim` that this verification's findings
+   * support, for a person to review before using it in place of the
+   * original sentence. It has not been verified itself.
+   *
+   * `null` for a true claim, when no correction is established, and on
+   * verifications that predate the field. Absent on responses from an API
+   * that predates it, so read it as `v.suggested_revision ?? null`. Only on
+   * the full verification: list items, `assess` and `library` rows never
+   * carry it.
+   */
+  suggested_revision?: string | null;
 }
 
 /**
