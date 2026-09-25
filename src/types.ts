@@ -169,8 +169,9 @@ export interface Verification {
   coverage?: Coverage | null;
   /**
    * A suggested rewrite of `claim` that this verification's findings
-   * support, for a person to review before using it in place of the
-   * original sentence. It has not been verified itself.
+   * support, to use in place of the original sentence. It has not been
+   * verified itself: before using it, review it or run it through
+   * `client.verify({ claim })`.
    *
    * `null` for a true claim, when no correction is established, and on
    * verifications that predate the field. Absent on responses from an API

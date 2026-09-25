@@ -207,8 +207,9 @@ already carries a certificate keeps it.
 A full verification (`verifyAndWait`, `wait`, `verifications.get`, and the
 `verification.completed` webhook's `result`) can carry `suggested_revision`, a
 string: a suggested rewrite of `claim` that the verification's findings
-support, for a person to review before using it. It has not been verified
-itself. It is `null` for a true claim, when no correction is established, and
+support, to use in place of the original sentence. It has not been verified
+itself: before using it, review it or run it through `client.verify({ claim })`.
+It is `null` for a true claim, when no correction is established, and
 on verifications that predate the field, and absent on responses from an API
 that predates it. List items, `assess` and `library` rows never carry it.
 

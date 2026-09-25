@@ -9,8 +9,9 @@ All notable changes to this SDK are documented here. Format follows
 ### Added
 
 - **`suggested_revision` on `Verification`**, a string or `null`: a
-  suggested rewrite of `claim` that the verification's findings support, for
-  a person to review before using it. It has not been verified itself. It is
+  suggested rewrite of `claim` that the verification's findings support, to
+  use in place of the original sentence. It has not been verified itself:
+  before using it, review it or run it through `client.verify({ claim })`. It is
   `null` for a true claim, when no correction is established, and on
   verifications that predate the field, and absent on responses from an API
   that predates it, so read it as `v.suggested_revision ?? null`. It arrives
