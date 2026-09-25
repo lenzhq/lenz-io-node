@@ -573,6 +573,50 @@ describe("reviewAndWait()", () => {
     });
   }
 
+  for (const [label, raw] of [
+    ["an HTML proxy page", "<html>502 Bad Gateway</html>"],
+    ["truncated JSON", '{"review_id": "442b'],
+    ["an empty body with no Content-Length: 0", ""],
+  ] as const) {
+    it(`a 200 poll carrying ${label} is a failed poll, not the end of the wait`, async () => {
+      const queue: Array<() => Response> = [
+        () => new Response(JSON.stringify(ACCEPTED), { status: 202 }),
+        () => new Response(JSON.stringify(VERIFYING), { status: 200 }),
+        () => new Response(raw, { status: 200, headers: { "content-type": "text/html" } }),
+        () => new Response(JSON.stringify(COMPLETED), { status: 200 }),
+      ];
+      const fetchImpl = vi.fn(async () => queue.shift()!()) as unknown as typeof fetch;
+      const client = new Lenz({ apiKey: "lenz_t", fetch: fetchImpl });
+      const review = await drain(client.reviewAndWait({ text: DRAFT }));
+      expect(review.status).toBe("completed");
+    });
+  }
+
+  it("a later poll's request is cut at the remaining budget, not the 5 s floor", async () => {
+    // Poll 1 answers at once; poll 2 hangs. With 2 s left at poll 2 its
+    // request must abort at the deadline, not 5 s later.
+    let n = 0;
+    const fetchImpl = vi.fn((_u: string | URL | Request, init?: RequestInit) => {
+      n += 1;
+      if (n === 1) return Promise.resolve(new Response(JSON.stringify(ACCEPTED), { status: 202 }));
+      if (n === 2) return Promise.resolve(new Response(JSON.stringify(VERIFYING), { status: 200 }));
+      return new Promise<Response>((_res, rej) => {
+        init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
+      });
+    }) as unknown as typeof fetch;
+    const client = new Lenz({ apiKey: "lenz_t", fetch: fetchImpl });
+    let settled: unknown = "pending";
+    const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 17_000 }).then(
+      (r) => (settled = r),
+      (e: unknown) => (settled = e),
+    );
+    // 15 s poll hint → poll 2 at 15 s, 2 s before the deadline.
+    await vi.advanceTimersByTimeAsync(17_001);
+    expect(settled).toBeInstanceOf(ReviewTimeoutError);
+    expect((settled as ReviewTimeoutError).partial?.status).toBe("verifying");
+    await pending;
+  });
+
   it("a non-review 2xx body is never stored as partial", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: ACCEPTED },
