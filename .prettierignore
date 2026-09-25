@@ -9,3 +9,7 @@ test/fixtures/contract/assess_claims_list.json
 
 # Generated bundle
 dist/
+
+# The recorded /review fixtures — the SAME bytes as the Python SDK's copies.
+test/fixtures/contract/review_*.json
+test/fixtures/contract/error_review_*.json

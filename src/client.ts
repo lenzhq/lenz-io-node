@@ -64,6 +64,8 @@ import {
   LenzTimeoutError,
   LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
+  ReviewFailedError,
+  ReviewTimeoutError,
   UPSTREAM_503_CODES,
   mapResponseToError,
 } from "./errors.js";
@@ -82,7 +84,13 @@ import type {
   LibraryListInput,
   OnProgress,
   Progress,
+  GetReviewOptions,
   RelatedVerifications,
+  ReviewAndWaitOptions,
+  ReviewFull,
+  ReviewInput,
+  ReviewIssues,
+  ReviewStarted,
   SelectInput,
   TaskAccepted,
   TaskStatus,
@@ -131,6 +139,18 @@ const POLL_BACKOFF_CAP_MS = 10_000;
 // Bounds on the server's `progress.poll_after_seconds` (see `pollHintMs`).
 const POLL_HINT_MIN_S = 1;
 const POLL_HINT_MAX_S = 30;
+// `reviewAndWait`: a review takes minutes, so its polls are never tighter
+// than this, whatever the body says.
+const REVIEW_POLL_FLOOR_S = 5;
+const REVIEW_DEFAULT_TIMEOUT_MS = 600_000;
+
+/**
+ * 429 codes that throw at once instead of sleeping the stated wait.
+ * `review_in_flight` means the account already runs its maximum number of
+ * reviews, each of which takes minutes: sleeping inside the call would block
+ * the caller silently, so it gets the error and its `retryAfter` instead.
+ */
+const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 
 // Generated at build time from package.json#version — see
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
@@ -185,6 +205,10 @@ interface RequestOptions {
    * key never reaches an endpoint that doesn't need it.
    */
   authOptional?: boolean;
+}
+
+function isRateLimit(exc: unknown): boolean {
+  return exc instanceof LenzError && exc.statusCode === 429;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -267,6 +291,16 @@ async function bodyErrorCode(response: Response): Promise<string> {
  * shed/exhaustion response. An untyped 503 — the ordinary proxy / maintenance
  * shape — is deliberately false: it keeps the ladder.
  */
+/** Seconds to wait before the next review poll: the body's hint, floored. */
+function reviewPollMs(review: { poll_after_seconds?: unknown } | null): number {
+  const hint = review?.poll_after_seconds;
+  const seconds =
+    typeof hint === "number" && Number.isFinite(hint)
+      ? Math.max(hint, REVIEW_POLL_FLOOR_S)
+      : REVIEW_POLL_FLOOR_S;
+  return seconds * 1000;
+}
+
 async function abortsOnLongStatedWait(response: Response): Promise<boolean> {
   if (response.status === 429) return true;
   if (response.status !== 503) return false;
@@ -676,6 +710,119 @@ export class Lenz {
     return usage;
   }
 
+  // ── Review: the whole recipe in one call ──
+
+  /**
+   * Start a review of a draft: Lenz reads its claims, gives each a quick
+   * verdict, and deep-checks the ones that look wrong or uncertain.
+   * Returns the receipt at once; read the review with `getReview`, wait with
+   * `reviewAndWait`, or receive `review.completed` at your webhook.
+   *
+   * The flat options are sent as the request's `escalate` policy, and only
+   * the ones you set: an omitted option takes the server's default. It
+   * spends what the calls it makes spend: 1 credit per claim assessed, and
+   * 10 (5 at `depth: "low"`) per deep check.
+   *
+   * A resend with the same `idempotencyKey` within 24 hours returns the same
+   * review; a new key is a new review.
+   */
+  async review(input: ReviewInput): Promise<ReviewStarted> {
+    const body: Record<string, unknown> = { text: input.text };
+    if (input.language) body.language = input.language;
+    // Three states: omitted or null → the credential's default URL;
+    // "" → no webhook for this review; a URL → that URL.
+    if (input.webhookUrl !== undefined && input.webhookUrl !== null) {
+      body.webhook_url = input.webhookUrl;
+    }
+    body.visibility = input.visibility ?? "private";
+    const escalate: Record<string, unknown> = {};
+    if (input.verdicts !== undefined) escalate.verdicts = input.verdicts;
+    if (input.confidence !== undefined) escalate.confidence = input.confidence;
+    if (input.maxAssessments !== undefined) escalate.max_assessments = input.maxAssessments;
+    if (input.maxVerifications !== undefined) escalate.max_verifications = input.maxVerifications;
+    if (input.depth !== undefined) escalate.depth = input.depth;
+    if (Object.keys(escalate).length > 0) body.escalate = escalate;
+    // Always keyed: this client retries a failed POST, and a retry without a
+    // key could start a second review. Random per call, never derived from
+    // the text: the same draft submitted again later is a new review.
+    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
+    return this.request<ReviewStarted>({
+      method: "POST",
+      path: "/review",
+      json: body,
+      headers: { "Idempotency-Key": idempotencyKey },
+    });
+  }
+
+  /**
+   * Read a review. `{ view: "issues" }` returns the envelope without
+   * `claims[]`: the issues, the failures and the summary.
+   *
+   * Throws {@link LenzGoneError} (HTTP 410) when the review was purged.
+   */
+  getReview(reviewId: string): Promise<ReviewFull>;
+  getReview(reviewId: string, opts: { view: "issues" }): Promise<ReviewIssues>;
+  getReview(reviewId: string, opts: { view: "full" }): Promise<ReviewFull>;
+  getReview(reviewId: string, opts?: GetReviewOptions): Promise<ReviewFull | ReviewIssues>;
+  getReview(reviewId: string, opts: GetReviewOptions = {}): Promise<ReviewFull | ReviewIssues> {
+    if (!reviewId) {
+      throw new Error("getReview() requires a non-empty review_id.");
+    }
+    return this.request<ReviewFull | ReviewIssues>({
+      method: "GET",
+      path: `/reviews/${encodeURIComponent(reviewId)}`,
+      query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
+    });
+  }
+
+  /**
+   * Start a review and poll it until it ends; returns the completed review.
+   *
+   * Polls on the review's `poll_after_seconds` (never tighter than 5 s) and
+   * calls `onUpdate` with the review on every poll whose body changed, so a
+   * caller can show the quick verdicts as soon as they land. Throws
+   * {@link ReviewFailedError} when the review ends `failed` and
+   * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
+   * a transient poll error is retried on the next poll.
+   */
+  async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
+    const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    const { review_id: reviewId } = await this.review(input);
+    let last: ReviewFull | null = null;
+    let lastJson = "";
+    for (;;) {
+      let current: ReviewFull | null = null;
+      try {
+        current = await this.getReview(reviewId);
+      } catch (exc) {
+        // Keep waiting through what a later poll can outlast (a 5xx after
+        // this client's own retries, a network drop, a rate limit); anything
+        // else (auth, 404, a purged review) will not change by waiting.
+        if (!(exc instanceof LenzAPIError) && !isRateLimit(exc)) throw exc;
+      }
+      if (current) {
+        const json = JSON.stringify(current);
+        if (json !== lastJson) {
+          lastJson = json;
+          last = current;
+          if (opts.onUpdate) {
+            try {
+              opts.onUpdate(current);
+            } catch {
+              // A caller's bug must not end the wait.
+            }
+          }
+        }
+        if (current.status === "completed") return current;
+        if (current.status === "failed") throw new ReviewFailedError(current);
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
+      await sleep(Math.min(reviewPollMs(current ?? last), remaining));
+    }
+  }
+
   // ── Headline ergonomic ──
 
   /**
@@ -1043,7 +1190,13 @@ export class Lenz {
       //    code; the server is down, not pacing us, so an hour-long
       //    Retry-After must become backoff — not an hour-long sleep, and not
       //    an abort of a request our ladder might still satisfy.
-      if (attempt < this.maxRetries && (response.status >= 500 || response.status === 429)) {
+      const throwAtOnce =
+        response.status === 429 && THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
+      if (
+        !throwAtOnce &&
+        attempt < this.maxRetries &&
+        (response.status >= 500 || response.status === 429)
+      ) {
         const stated = await statedRetryAfterSeconds(response);
         if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
           await sleep(stated * 1000);

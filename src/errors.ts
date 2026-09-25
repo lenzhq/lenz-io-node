@@ -17,6 +17,8 @@
  *     Request ID: {id}
  */
 
+import type { ReviewFull } from "./types.js";
+
 export interface LenzErrorContext {
   message?: string;
   cause?: string;
@@ -294,6 +296,67 @@ export class LenzGoneError extends LenzError {
 
 export class LenzWebhookSignatureError extends LenzError {}
 
+/**
+ * `reviewAndWait` reached its deadline before the review finished.
+ *
+ * The review keeps running server-side: read it later with
+ * `client.getReview(reviewId)`. `partial` is the last body the wait saw, or
+ * `null` when no poll answered.
+ */
+export class ReviewTimeoutError extends LenzTimeoutError {
+  reviewId: string;
+  partial: ReviewFull | null;
+
+  constructor(reviewId: string, partial: ReviewFull | null, timeoutMs: number) {
+    super({
+      message: `Review ${reviewId} did not finish within ${timeoutMs}ms`,
+      cause: "The review is still running server-side.",
+      fix: `Read it later with client.getReview('${reviewId}'), or wait on the review.completed webhook.`,
+      docUrl: `${DOCS_BASE}/quickstart`,
+    });
+    this.reviewId = reviewId;
+    this.partial = partial;
+  }
+}
+
+/**
+ * `reviewAndWait` read a review that ended `failed`.
+ *
+ * `errorCode` is the failure's `failure_reason` (`no_claim`,
+ * `insufficient_credits`, `upstream_unavailable`, …: an open set), `hint`
+ * says what to send next, and `review` is the failed review itself. A
+ * subclass of {@link LenzPipelineError}, so `failureClass` and `retryable`
+ * are set too.
+ */
+export class ReviewFailedError extends LenzPipelineError {
+  reviewId: string;
+  errorCode: string;
+  review: ReviewFull;
+
+  constructor(review: ReviewFull) {
+    const failure = review.failure;
+    const errorCode = failure?.failure_reason ?? "";
+    const hint = failure?.hint ?? "";
+    super({
+      message: `Review ${review.review_id} failed: ${errorCode || "unknown"}`,
+      cause: errorCode || "unknown",
+      fix:
+        hint ||
+        (failure?.retryable
+          ? "Transient provider outage — resubmit the same draft after a short wait."
+          : "Resubmit with a different draft."),
+      docUrl: failure?.docs_url || `${DOCS_BASE}/errors`,
+    });
+    this.reviewId = review.review_id;
+    this.errorCode = errorCode;
+    this.review = review;
+    this.failureReason = errorCode;
+    this.failureClass = failure?.failure_class ?? "";
+    this.retryable = typeof failure?.retryable === "boolean" ? failure.retryable : null;
+    this.hint = hint;
+  }
+}
+
 // ── Mapping table ────────────────────────────────────────────────────────
 //
 // Single source of truth for HTTP status → exception class + default
@@ -551,9 +614,11 @@ export function mapResponseToError(
     // Header first, then the body. `reset_in_seconds` is what the server
     // actually sends; `retry_after` was an SDK-side invention the server has
     // never emitted — kept last purely as a defensive read.
+    // `retry_after_seconds` is the /review in-flight 429's name for it.
     err.retryAfter =
       optNumber(getHeader(headers, "Retry-After")) ??
       optNumber(parsed["reset_in_seconds"]) ??
+      optNumber(parsed["retry_after_seconds"]) ??
       optNumber(parsed["retry_after"]) ??
       0;
   }

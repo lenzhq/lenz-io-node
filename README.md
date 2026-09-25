@@ -2,8 +2,9 @@
 
 Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://lenz.io/developers).
 
-**Four API primitives, one research-depth ladder.**
+**Five API calls: one research-depth ladder, and one call that runs it on a whole draft.**
 
+- `review` — the whole ladder on a draft in one async call: its claims, a quick verdict on each, a deep check on the doubtful ones, the issues with suggested rewrites. 2-4 min.
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
@@ -17,6 +18,80 @@ not real-time copilots — pipeline runs are the wrong shape for those.
 ```bash
 npm install lenz-io
 ```
+
+## Review a draft
+
+```ts
+import { Lenz } from "lenz-io";
+
+const client = new Lenz({ apiKey: "lenz_..." });
+
+const draft = `
+The EU AI Act entered into force on 1 August 2024, and its obligations for
+general-purpose models applied from 2 August 2025. Fines for prohibited
+practices reach 7% of global annual turnover. About 40% of European
+companies had started compliance work by the end of 2024.
+`;
+
+// One call: extract, assess, and verify the doubtful claims (async, 2–4 min)
+const review = await client.reviewAndWait({ text: draft });
+console.log(review.outcome); // clean | issues_found | incomplete | unchecked
+for (const i of review.issues) {
+  console.log(i.verdict, i.confidence, i.claim);
+  if (i.suggested_rewrite) console.log("  Suggested rewrite:", i.suggested_rewrite);
+}
+
+// Past the cap: send the remaining claims to /verify in one batch
+const capped = review.claims
+  .filter((c) => c.escalation?.disposition === "cap")
+  .map((c) => ({ claim: c.claim }));
+const results = capped.length ? await client.verifyBatchAndWait({ claims: capped }) : [];
+```
+
+`review` reads the draft's claims (up to 20, most check-worthy first), gives
+each a quick `assess` verdict, and sends the ones whose quick verdict is
+`False`, `Mostly False` or `Mixed`, or whose confidence is `low`, through the
+full `verify` pipeline, up to five. Change the rule with the flat options:
+
+```ts
+await client.review({
+  text: draft,
+  verdicts: ["False", "Mostly False"], // quick labels that get a deep check ([] = none)
+  confidence: ["low", "medium"], // quick confidence bands that do ([] = none)
+  maxAssessments: 10, // how many claims get a quick verdict (1-20)
+  maxVerifications: 3, // the deep-check cap (0 = quick verdicts only)
+  depth: "low", // depth of every deep check
+});
+```
+
+- **`outcome`** is the field to branch on once the review ends: `clean`,
+  `issues_found`, `incomplete` (a check failed) or `unchecked` (the review
+  failed before it assessed anything). `clean` covers the claims the review
+  selected, at the depth its policy chose.
+- **`issues`** are the claims whose final verdict is `False`, `Mostly False`
+  or `Mixed`; a completed deep check overrides the quick verdict. A deep-checked
+  issue carries `key_finding`, `verification_id` and `suggested_rewrite`; an
+  issue that stayed on its quick verdict carries `rationale` and an
+  `escalation` saying why it stayed quick (`cap`, `credits`, …).
+- **`suggested_rewrite`** comes from a `verify` run, so a quick-only issue has
+  none. It is not verified itself: review it, or run it through `verify`,
+  before you use it.
+- **`failures`** lists the claims outside the issues whose check failed.
+
+`reviewAndWait` polls on the review's own `poll_after_seconds` and takes
+`{ timeoutMs, onUpdate }`: `onUpdate(review)` fires on every poll that changed
+the review, so you can show the quick verdicts as they land. It throws
+`ReviewFailedError` (`errorCode`, `hint`, `review`) when the review fails and
+`ReviewTimeoutError` (`reviewId`, `partial`) at the deadline (10 minutes by
+default); the review keeps running, so read it later with
+`client.getReview(reviewId)`. Without waiting: `client.review(...)` returns
+`{ review_id }`, and `client.getReview(reviewId, { view: "issues" })` returns
+the review without its `claims`.
+
+Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check;
+`review.credits.charged` says what the review cost. A resend with the same
+`idempotencyKey` within 24 hours returns the same review; a new key is a new
+review.
 
 ## Quickstart — the canonical integration
 
@@ -225,7 +300,12 @@ if (rewrite) {
 
 ```ts
 import { LenzWebhooks } from "lenz-io";
-import type { VerificationCompleted, VerificationFailed, VerificationNeedsInput } from "lenz-io";
+import type {
+  ReviewCompleted,
+  VerificationCompleted,
+  VerificationFailed,
+  VerificationNeedsInput,
+} from "lenz-io";
 
 const webhooks = new LenzWebhooks({ secret: "whsec_..." });
 
@@ -255,10 +335,26 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
       }
       break;
     }
+    case "review.completed": {
+      const done = event as ReviewCompleted;
+      // Dedupe on eventId: a retry of the same delivery keeps it.
+      if (alreadyHandled(done.eventId)) break;
+      for (const i of done.review.issues) flagIssue(i.claim, i.verdict, i.suggested_rewrite);
+      break;
+    }
+    default:
+      // An event you do not recognise: ignore it. New kinds are added
+      // without a major release.
+      break;
   }
   res.status(200).send();
 });
 ```
+
+`review.completed` and `review.failed` carry the whole review under `review`,
+as `client.getReview` returns it; a review's own deep checks fire no
+`verification.*` events. Dedupe on `eventId`, which stays the same across
+retries while `attempt` changes.
 
 Signature verification is HMAC-SHA256 over the raw bytes; the SDK does it for
 you and rejects tampered or replayed payloads.
@@ -464,6 +560,10 @@ covered verification is kept and can still be downloaded.
 default, so a network drop after submit doesn't spawn a duplicate verification
 or charge a second credit. Override with `idempotencyKey: "..."` to pin a
 specific key, or `idempotency: false` to opt out. `assess` does the same.
+
+`review` always sends one: a random key per call unless you pass
+`idempotencyKey`. A resend with the same key within 24 hours returns the same
+review; a new key is a new review.
 
 `ask.send` takes a key too, but only pins one you choose:
 

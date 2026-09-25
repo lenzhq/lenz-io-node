@@ -8,6 +8,44 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
+- **`client.review`, `client.getReview` and `client.reviewAndWait`** for
+  `POST /review`: the whole extract → assess → verify recipe on a draft in
+  one async call. `review({ text, verdicts?, confidence?, maxAssessments?,
+maxVerifications?, depth?, language?, webhookUrl?, visibility?,
+idempotencyKey? })` returns `{ review_id, status: "queued" }`; the flat
+  options are sent as the request's `escalate` policy, and only the ones you
+  set. `webhookUrl` omitted or `null` uses the credential's default URL, `""`
+  sends no webhook for this review. `getReview(id)` returns a `ReviewFull`
+  and `getReview(id, { view: "issues" })` a `ReviewIssues` (no `claims`).
+  `reviewAndWait(params, { timeoutMs?, onUpdate? })` polls on the review's
+  `poll_after_seconds` (never tighter than 5 s), calls `onUpdate` on every
+  poll that changed the review, and throws `ReviewFailedError` (a
+  `LenzPipelineError` carrying `reviewId`, `errorCode`, `hint`, `review`) or
+  `ReviewTimeoutError` (a `LenzTimeoutError` carrying `reviewId` and
+  `partial`). `review` always sends an `Idempotency-Key`: a resend with the
+  same key within 24 hours returns the same review, and a new key is a new
+  review. Needs an API that serves `POST /review`; an older one answers 404.
+- **Review types**: `ReviewFull`, `ReviewIssues`, `ReviewEnvelope`,
+  `ReviewClaim`, `ReviewIssue`, `ReviewFailure`, `ReviewAssessment`,
+  `ReviewVerification`, `ReviewResult`, `ReviewSummary`, `ReviewCredits`,
+  `ReviewFailureBlock`, `EscalationPolicy`, `Escalation`, `ReviewStarted`,
+  `ReviewInput`, and the `VerdictLabel`, `ConfidenceBand`, `ReviewStatus`,
+  `ReviewOutcome` and `EscalationDisposition` unions. `issues` and
+  `failures` are always arrays.
+- **`review.completed` / `review.failed` webhooks**: `LenzWebhooks.parse`
+  returns a `ReviewCompleted` / `ReviewFailed` (with `eventId`, `reviewId`
+  and the whole `review`) in the `WebhookEvent` union. Dedupe on `eventId`;
+  ignore events you do not recognise.
+- **A 429 `review_in_flight`** (the account already has its maximum number
+  of reviews running) throws `LenzRateLimitError` at once, with `retryAfter`
+  read from `Retry-After` or the body's `retry_after_seconds`, instead of
+  sleeping the wait inside the call.
+
+### Changed
+
+- `VerifyBatchItem.claim` and `.text` accept `null`, so a review's
+  `claims[].claim` passes straight into `verifyBatchAndWait`.
+
 - **`suggested_rewrite` on `Verification` and `VerificationListItem`**, a
   string or `null`: a suggested rewrite of `claim` that the verification's
   findings support, to use in place of the original sentence. It has not been

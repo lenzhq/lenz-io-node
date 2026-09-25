@@ -20,7 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
-import type { Coverage, FailureClass } from "./types.js";
+import type { Coverage, FailureClass, ReviewFull } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
@@ -75,6 +75,8 @@ export type WebhookEventKind =
   | "verification.failed"
   | "verification.needs_input"
   | "certificate.timestamped"
+  | "review.completed"
+  | "review.failed"
   // The `string & NonNullable<unknown>` trick preserves the autocomplete
   // hints from the literal union while still permitting any future
   // event-kind string the server adds. `(string & {})` reads cleaner but
@@ -135,7 +137,44 @@ export interface CertificateTimestamped extends WebhookEventBase {
   coverage: Coverage;
 }
 
+/**
+ * `event=review.completed` / `review.failed` — a review ended.
+ *
+ * `review` is the whole review (`view: "full"`), exactly as
+ * `client.getReview` returns it. **Dedupe on `eventId`**: it is stable for
+ * the review and event across every retry, while `attempt` changes. A
+ * review's own deep checks fire no `verification.*` events.
+ *
+ * `taskId` is the delivery's identity, not a task you can poll on
+ * `/verify/status`; read the review with `client.getReview(reviewId)`.
+ */
+export interface ReviewEventBase extends WebhookEventBase {
+  event: "review.completed" | "review.failed";
+  eventId: string;
+  reviewId: string;
+  review: ReviewFull;
+}
+
+export interface ReviewCompleted extends ReviewEventBase {
+  event: "review.completed";
+}
+
+/** The review's `failure` block says why; `review.outcome` is `unchecked` or `incomplete`. */
+export interface ReviewFailed extends ReviewEventBase {
+  event: "review.failed";
+}
+
+/** Either review event. */
+export type ReviewEvent = ReviewCompleted | ReviewFailed;
+
+/**
+ * Every event `parse` returns, discriminated on `event`. Ignore an event you
+ * do not recognise: new kinds are added without a major release and arrive
+ * as the base shape.
+ */
 export type WebhookEvent =
+  | ReviewCompleted
+  | ReviewFailed
   | VerificationCompleted
   | VerificationFailed
   | VerificationNeedsInput
@@ -185,6 +224,20 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       event: "certificate.timestamped",
       coverage: (payload["coverage"] as Coverage) ?? {},
     };
+  }
+  if (event === "review.completed" || event === "review.failed") {
+    const review = payload["review"];
+    // A review event without its review is not one we can type; hand it
+    // over as the base shape rather than as a half-built event.
+    if (review && typeof review === "object" && !Array.isArray(review)) {
+      return {
+        ...base,
+        event,
+        eventId: String(payload["event_id"] ?? ""),
+        reviewId: String(payload["review_id"] ?? ""),
+        review: review as ReviewFull,
+      };
+    }
   }
   return base;
 }
