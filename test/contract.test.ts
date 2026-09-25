@@ -263,6 +263,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ReviewFailure: new Set(["claim_index", "claim", "stage", "failure"]),
   ReviewClaim: new Set(["index", "claim", "result", "assessment", "escalation", "verification"]),
   ReviewResult: new Set(["verdict", "confidence", "source", "is_issue"]),
+  ReviewEntity: new Set(["name", "qid"]),
   ReviewAssessment: new Set([
     "status",
     "verdict",
@@ -340,7 +341,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
     verification: "ReviewVerification",
   },
   ReviewAssessment: { failure: "ReviewFailureBlock" },
-  ReviewVerification: { entities: "EntityRef", failure: "ReviewFailureBlock" },
+  ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
   ReviewWebhookPayload: { review: "ReviewFull" },
   ExtractedClaims: { key_entities: "ExtractedEntity" },
   AssessResponse: { claims: "AssessClaim" },

@@ -61,6 +61,7 @@ export type {
   ReviewAssessmentCounts,
   ReviewClaim,
   ReviewCredits,
+  ReviewEntity,
   ReviewEnvelope,
   ReviewFailure,
   ReviewFailureBlock,

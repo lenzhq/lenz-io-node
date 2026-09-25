@@ -24,7 +24,7 @@ import {
   ReviewFailedError,
   ReviewTimeoutError,
 } from "../src/index.js";
-import type { ReviewFull, ReviewIssues, VerdictLabel } from "../src/index.js";
+import type { ReviewEntity, ReviewFull, ReviewIssues, VerdictLabel } from "../src/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -376,6 +376,57 @@ describe("reviewAndWait()", () => {
     expect(review.status).toBe("completed");
   });
 
+  it("does not poll once the deadline passed during submit", async () => {
+    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }, { body: COMPLETED }]);
+    // The submit itself eats the whole budget.
+    const slowFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      await new Promise((res) => setTimeout(res, 50));
+      return fetch(url, init);
+    }) as typeof globalThis.fetch;
+    const slow = new Lenz({ apiKey: "lenz_t", fetch: slowFetch });
+    const pending = slow.reviewAndWait({ text: DRAFT }, { timeoutMs: 10 }).catch((e: unknown) => e);
+    const err = await drain(pending, 1_000);
+    expect(err).toBeInstanceOf(ReviewTimeoutError);
+    expect((err as ReviewTimeoutError).partial).toBeNull();
+    expect(calls).toHaveLength(1); // the POST, and no GET after the deadline
+  });
+
+  it("honours a poll's stated Retry-After instead of the 5 s floor", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 202, body: ACCEPTED },
+      {
+        status: 503,
+        body: { detail: "Busy.", code: "capacity", retry_after: 90 },
+        headers: { "Retry-After": "90" },
+      },
+      { body: COMPLETED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const pending = client.reviewAndWait({ text: DRAFT });
+    await vi.advanceTimersByTimeAsync(89_999);
+    expect(calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).status).toBe("completed");
+  });
+
+  it("a poll's Retry-After never sleeps past the deadline", async () => {
+    const { fetch } = makeFetch([
+      { status: 202, body: ACCEPTED },
+      {
+        status: 429,
+        body: { detail: "Slow down.", code: "rate_limited" },
+        headers: { "Retry-After": "300" },
+      },
+      { body: VERIFYING },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const pending = client
+      .reviewAndWait({ text: DRAFT }, { timeoutMs: 20_000 })
+      .catch((e: unknown) => e);
+    const err = await drain(pending, 30_000);
+    expect(err).toBeInstanceOf(ReviewTimeoutError);
+  });
+
   it("a purged review mid-wait throws LenzGoneError, not a timeout", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: ACCEPTED },
@@ -448,5 +499,17 @@ companies had started compliance work by the end of 2024.
     expect(lines[2]![0]).toBe("  Suggested rewrite:");
     expect(results).toEqual([]);
     expect(deep?.verification_id).toBe("86ea9355");
+  });
+});
+
+describe("review types", () => {
+  it("a review entity's name may be null, as the API documents", () => {
+    const completed = fixture<ReviewFull>("review_completed.json");
+    const entity = completed.claims[3]!.verification!.entities[0]!;
+    // Compile-time check: `name` is nullable, so this must narrow first.
+    const name: string = entity.name ?? "";
+    expect(name).toBe("EU AI Act");
+    const nullable: ReviewEntity = { name: null, qid: null };
+    expect(nullable.name).toBeNull();
   });
 });

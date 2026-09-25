@@ -783,7 +783,10 @@ export class Lenz {
    * caller can show the quick verdicts as soon as they land. Throws
    * {@link ReviewFailedError} when the review ends `failed` and
    * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
-   * a transient poll error is retried on the next poll.
+   * a transient poll error is retried on the next poll, after the wait the
+   * server stated when it stated one. The deadline is checked before every
+   * poll, so no poll starts after it; one already in flight may finish a
+   * little past it.
    */
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
@@ -792,7 +795,9 @@ export class Lenz {
     let last: ReviewFull | null = null;
     let lastJson = "";
     for (;;) {
+      if (deadline - Date.now() <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
       let current: ReviewFull | null = null;
+      let statedWaitMs = 0;
       try {
         current = await this.getReview(reviewId);
       } catch (exc) {
@@ -800,6 +805,11 @@ export class Lenz {
         // this client's own retries, a network drop, a rate limit); anything
         // else (auth, 404, a purged review) will not change by waiting.
         if (!(exc instanceof LenzAPIError) && !isRateLimit(exc)) throw exc;
+        // A wait the server stated outranks the poll hint.
+        const retryAfter = (exc as { retryAfter?: unknown }).retryAfter;
+        if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+          statedWaitMs = retryAfter * 1000;
+        }
       }
       if (current) {
         const json = JSON.stringify(current);
@@ -819,7 +829,7 @@ export class Lenz {
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
-      await sleep(Math.min(reviewPollMs(current ?? last), remaining));
+      await sleep(Math.min(Math.max(reviewPollMs(current ?? last), statedWaitMs), remaining));
     }
   }
 

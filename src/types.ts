@@ -1174,6 +1174,13 @@ export interface ReviewAssessment {
   failure: ReviewFailureBlock | null;
 }
 
+/** An entity a deep check named. Either field may be `null`. */
+export interface ReviewEntity {
+  name: string | null;
+  /** The Wikidata id, when one was matched. */
+  qid: string | null;
+}
+
 /** The deep check (`/verify`) on one claim. */
 export interface ReviewVerification {
   status: "processing" | "completed" | "failed";
@@ -1192,7 +1199,7 @@ export interface ReviewVerification {
   /** EFFECTIVE: a cache hit may serve `standard` for a `low` request. */
   depth: string | null;
   domain: string | null;
-  entities: EntityRef[];
+  entities: ReviewEntity[];
   verdict: VerdictLabel | null;
   confidence: ConfidenceBand | null;
   lenz_score: number | null;
