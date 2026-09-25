@@ -253,9 +253,11 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
       // under `retry_after`. Fall through on an EMPTY value too, not just on
       // null/undefined — `??` alone would let `reset_in_seconds: ""` mask a
       // real `retry_after`, which is not what the Python SDK does.
-      let candidate: unknown = bag ? bag["reset_in_seconds"] : null;
-      if (candidate === null || candidate === undefined || String(candidate).trim() === "") {
-        candidate = bag ? bag["retry_after"] : null;
+      // `retry_after_seconds` is the /review endpoints' name for the same wait.
+      let candidate: unknown = null;
+      for (const key of ["reset_in_seconds", "retry_after", "retry_after_seconds"]) {
+        candidate = bag ? bag[key] : null;
+        if (candidate !== null && candidate !== undefined && String(candidate).trim() !== "") break;
       }
       raw = candidate ?? null;
     } catch {
@@ -1253,14 +1255,30 @@ export class Lenz {
         await sleep(retrySleepMs(attempt));
         continue;
       }
-      clearTimeout(timer);
-
       if (response.status < 400) {
-        if (response.status === 204 || response.headers.get("content-length") === "0") {
-          return {} as T;
+        // The attempt's timer stays armed until the body is read: headers
+        // arriving is not the response arriving, and a body that stalls
+        // after them must not hang the call.
+        try {
+          if (response.status === 204 || response.headers.get("content-length") === "0") {
+            return {} as T;
+          }
+          return (await response.json()) as T;
+        } catch (exc) {
+          if (controller.signal.aborted) {
+            throw new LenzAPIError({
+              message: `${opts.method} ${opts.path} timed out reading the response body`,
+              cause: String(exc),
+              fix: "Retry; if it persists, check the network between you and baseUrl.",
+              docUrl: "https://lenz.io/docs/errors",
+            });
+          }
+          throw exc;
+        } finally {
+          clearTimeout(timer);
         }
-        return (await response.json()) as T;
       }
+      clearTimeout(timer);
 
       // Error path. Retry on 5xx + 429; otherwise throw.
       //

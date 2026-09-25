@@ -594,7 +594,9 @@ export function mapResponseToError(
     // Body `retry_after` first (both 503 shapes carry it), header as the
     // fallback for any proxy that strips the body.
     err.retryAfter =
-      optNumber(parsed["retry_after"]) ?? optNumber(getHeader(headers, "Retry-After"));
+      optNumber(parsed["retry_after"]) ??
+      optNumber(parsed["retry_after_seconds"]) ??
+      optNumber(getHeader(headers, "Retry-After"));
   } else if (err instanceof LenzQuotaExceededError) {
     const upgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";

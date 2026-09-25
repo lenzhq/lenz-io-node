@@ -8,7 +8,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
-- `ask` — follow-up questions grounded on a verification.
+- `ask` — follow-up questions grounded on a verification. Sync, paid.
 
 Built for teams whose AI output is async or document-shaped: legal-memo
 generators, deep-research products, due-diligence platforms, vertical

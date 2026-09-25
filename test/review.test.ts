@@ -22,6 +22,7 @@ import {
   LenzRateLimitError,
   LenzTimeoutError,
   LenzPipelineError,
+  LenzUpstreamUnavailableError,
   LenzValidationError,
   ReviewFailedError,
   ReviewTimeoutError,
@@ -610,6 +611,45 @@ describe("reviewAndWait()", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch: fetchImpl });
     const review = await drain(client.reviewAndWait({ text: DRAFT }));
     expect(review.status).toBe("completed");
+  });
+
+  it("a poll whose body stalls after the headers cannot outlive the deadline", async () => {
+    let n = 0;
+    const fetchImpl = vi.fn((_u: string | URL | Request, init?: RequestInit) => {
+      n += 1;
+      if (n === 1) return Promise.resolve(new Response(JSON.stringify(ACCEPTED), { status: 202 }));
+      // Headers arrive; the body never finishes unless aborted.
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"review_id": "442b'));
+          init?.signal?.addEventListener("abort", () =>
+            controller.error(new DOMException("aborted", "AbortError")),
+          );
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    }) as unknown as typeof fetch;
+    const client = new Lenz({ apiKey: "lenz_t", fetch: fetchImpl });
+    let settled: unknown = "pending";
+    const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 8_000 }).then(
+      (r) => (settled = r),
+      (e: unknown) => (settled = e),
+    );
+    await vi.advanceTimersByTimeAsync(8_001);
+    expect(settled).toBeInstanceOf(ReviewTimeoutError);
+    await pending;
+  });
+
+  it("a 503 stating its wait only as retry_after_seconds is surfaced, not retried at once", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 503, body: { detail: "Busy.", code: "capacity", retry_after_seconds: 90 } },
+      { status: 202, body: ACCEPTED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const err = (await client.review({ text: DRAFT }).catch((e: unknown) => e)) as LenzAPIError;
+    expect(err).toBeInstanceOf(LenzUpstreamUnavailableError);
+    expect(err.retryAfter).toBe(90);
+    expect(calls).toHaveLength(1);
   });
 
   it("the first poll keeps to a budget the submit left positive", async () => {

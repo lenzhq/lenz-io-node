@@ -64,6 +64,11 @@ idempotencyKey? })` returns `{ review_id, status: "queued" }`; the flat
 
 ### Changed
 
+- A request's timeout now covers reading a successful response's body, not
+  only its headers: a body that stalls after the headers throws
+  `LenzAPIError` at `timeoutMs` instead of hanging.
+- A stated wait in the body's `retry_after_seconds` is read like
+  `retry_after`, for the retry ladder and for `retryAfter` on a typed 503.
 - `VerifyBatchItem.claim` and `.text` accept `null`, so a review's
   `claims[].claim` passes straight into `verifyBatchAndWait`.
 
