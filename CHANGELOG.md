@@ -6,6 +6,14 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-09-26
+
+`review`: the whole extract → assess → verify recipe on a draft in one call.
+And a new optional field on every verification, single or listed,
+`suggested_rewrite`. Nothing the SDK already sends changes, and 2.16.0 keeps
+working against the current API; `review` needs an API that serves
+`POST /review`.
+
 ### Added
 
 - **`client.review`, `client.getReview` and `client.reviewAndWait`** for
