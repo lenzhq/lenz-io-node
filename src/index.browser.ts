@@ -42,6 +42,11 @@ export {
 
 export type {
   LenzWebhooksOptions,
+  CertificateTimestamped,
+  ReviewCompleted,
+  ReviewEvent,
+  ReviewEventBase,
+  ReviewFailed,
   VerificationCompleted,
   VerificationFailed,
   VerificationNeedsInput,

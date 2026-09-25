@@ -207,7 +207,14 @@ export class LenzRateLimitError extends LenzError {
   upgradeUrl = "";
 }
 
-export class LenzAPIError extends LenzError {}
+export class LenzAPIError extends LenzError {
+  /**
+   * Seconds a 5xx's `Retry-After` (or body `retry_after`) asked to wait, or
+   * `null` when it stated none. Informational on an untyped 5xx: this client
+   * paces its own retries against it, capped at {@link MAX_RETRY_AFTER_SLEEP}.
+   */
+  retryAfter: number | null = null;
+}
 
 /**
  * 503 with `code` `upstream_unavailable` or `capacity`.
@@ -223,9 +230,7 @@ export class LenzAPIError extends LenzError {}
  * already slept through by the automatic retry ladder — this being thrown
  * means the stated wait was longer, and `retryAfter` carries it.
  */
-export class LenzUpstreamUnavailableError extends LenzAPIError {
-  retryAfter: number | null = null;
-}
+export class LenzUpstreamUnavailableError extends LenzAPIError {}
 
 export class LenzTimeoutError extends LenzError {
   taskId = "";
@@ -342,9 +347,11 @@ export class ReviewFailedError extends LenzPipelineError {
       cause: errorCode || "unknown",
       fix:
         hint ||
-        (failure?.retryable
-          ? "Transient provider outage — resubmit the same draft after a short wait."
-          : "Resubmit with a different draft."),
+        (!failure
+          ? `The review failed without a stated reason; read it with client.getReview('${review.review_id}').`
+          : failure.retryable
+            ? "Transient provider outage — resubmit the same draft after a short wait."
+            : "Resubmit with a different draft."),
       docUrl: failure?.docs_url || `${DOCS_BASE}/errors`,
     });
     this.reviewId = review.review_id;
@@ -583,7 +590,7 @@ export function mapResponseToError(
     err.purgedAt = typeof purgedAt === "string" && purgedAt ? purgedAt : null;
   }
 
-  if (err instanceof LenzUpstreamUnavailableError) {
+  if (err instanceof LenzAPIError) {
     // Body `retry_after` first (both 503 shapes carry it), header as the
     // fallback for any proxy that strips the body.
     err.retryAfter =

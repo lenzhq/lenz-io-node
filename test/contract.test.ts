@@ -769,6 +769,14 @@ describe("review fixtures", () => {
     const claims = completed["claims"] as Array<Record<string, unknown>>;
     expect(claims.some((c) => c["verification"] !== null)).toBe(true);
     const incomplete = loadFixture("review_incomplete.json");
+    // The quick issue the cap left out sorts last, after the two deep ones.
+    const incompleteIssues = incomplete["issues"] as Array<Record<string, unknown>>;
+    expect(incompleteIssues.map((i) => i["claim_index"])).toEqual([0, 3, 2]);
+    expect(incompleteIssues[2]!["source"]).toBe("assessment");
+    // While assessing, escalation is not decided yet.
+    const assessing = loadFixture("review_assessing.json");
+    const assessingClaims = assessing["claims"] as Array<Record<string, unknown>>;
+    expect(assessingClaims.map((c) => c["escalation"])).toEqual([null, null, null, null]);
     expect((incomplete["failures"] as unknown[]).length).toBeGreaterThan(0);
     expect(
       (incomplete["issues"] as Array<Record<string, unknown>>).some(

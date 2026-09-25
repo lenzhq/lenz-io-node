@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Lenz,
+  LenzAPIError,
+  LenzError,
   LenzGoneError,
   LenzRateLimitError,
   LenzTimeoutError,
@@ -158,6 +160,55 @@ describe("review()", () => {
     expect(sentHeaders(calls[1]!)["Idempotency-Key"]).toBe(first);
   });
 
+  it("a 409 idempotency_conflict carrying the review_id is the receipt", async () => {
+    // A retried submit whose first attempt created the review before its
+    // socket dropped: the id must not be lost.
+    const { fetch } = makeFetch([
+      {
+        status: 409,
+        body: {
+          detail: "A review with this Idempotency-Key is still being created. Retry shortly.",
+          code: "idempotency_conflict",
+          review_id: "442b6aa9",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    expect(await client.review({ text: DRAFT, idempotencyKey: "k" })).toEqual({
+      review_id: "442b6aa9",
+      status: "queued",
+    });
+  });
+
+  for (const reviewId of [null, "", 42]) {
+    it(`a 409 idempotency_conflict with review_id ${JSON.stringify(reviewId)} still throws`, async () => {
+      const { fetch } = makeFetch([
+        {
+          status: 409,
+          body: {
+            detail: "Still being created.",
+            code: "idempotency_conflict",
+            review_id: reviewId,
+          },
+        },
+      ]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const err = (await client
+        .review({ text: DRAFT, idempotencyKey: "k" })
+        .catch((e: unknown) => e)) as LenzError;
+      expect(err).toBeInstanceOf(LenzError);
+      expect(err.statusCode).toBe(409);
+    });
+  }
+
+  it("another 409 code carrying a review_id still throws", async () => {
+    const { fetch } = makeFetch([
+      { status: 409, body: { detail: "No.", code: "something_else", review_id: "442b6aa9" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.review({ text: DRAFT })).rejects.toBeInstanceOf(LenzError);
+  });
+
   it("uses the caller's Idempotency-Key when given", async () => {
     const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
@@ -235,7 +286,19 @@ describe("getReview()", () => {
     expect(calls[0]!.url).toBe("https://lenz.io/api/v1/reviews/442b6aa9?view=issues");
     expect(review.view).toBe("issues");
     expect("claims" in review).toBe(false);
-    expect(review.issues[0]!.suggested_rewrite).toContain("German companies");
+    expect(review.issues[0]!.suggested_rewrite).toBe(
+      "The EU AI Act entered into force on 1 August 2024.",
+    );
+    expect(review.issues[1]!.suggested_rewrite).toBeNull();
+  });
+
+  it("an empty id rejects instead of throwing synchronously", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: makeFetch([]).fetch });
+    let promise: Promise<unknown> | undefined;
+    expect(() => {
+      promise = client.getReview("");
+    }).not.toThrow();
+    await expect(promise).rejects.toThrow(/non-empty review_id/);
   });
 
   it("a purged review throws LenzGoneError", async () => {
@@ -281,6 +344,8 @@ describe("reviewAndWait()", () => {
     );
     expect(review.outcome).toBe("issues_found");
     expect(review.issues[0]!.verdict).toBe("False");
+    expect(review.issues.map((i) => i.claim_index)).toEqual([0, 3]);
+    expect(review.credits.charged).toBe(14);
     expect(seen).toEqual(["queued", "assessing", "verifying", "completed"]);
     expect(calls.slice(1).every((c) => c.url.endsWith("/reviews/442b6aa9"))).toBe(true);
   });
@@ -376,22 +441,59 @@ describe("reviewAndWait()", () => {
     expect(review.status).toBe("completed");
   });
 
-  it("does not poll once the deadline passed during submit", async () => {
-    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }, { body: COMPLETED }]);
-    // The submit itself eats the whole budget.
+  it("a submit that used up the budget still polls once, so partial is filled", async () => {
+    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }, { body: VERIFYING }]);
     const slowFetch = (async (url: string | URL | Request, init?: RequestInit) => {
       await new Promise((res) => setTimeout(res, 50));
       return fetch(url, init);
     }) as typeof globalThis.fetch;
     const slow = new Lenz({ apiKey: "lenz_t", fetch: slowFetch });
     const pending = slow.reviewAndWait({ text: DRAFT }, { timeoutMs: 10 }).catch((e: unknown) => e);
-    const err = await drain(pending, 1_000);
+    const err = (await drain(pending, 1_000)) as ReviewTimeoutError;
     expect(err).toBeInstanceOf(ReviewTimeoutError);
-    expect((err as ReviewTimeoutError).partial).toBeNull();
-    expect(calls).toHaveLength(1); // the POST, and no GET after the deadline
+    expect(err.partial?.status).toBe("verifying");
+    expect(calls).toHaveLength(2); // the POST, then exactly one GET
   });
 
-  it("honours a poll's stated Retry-After instead of the 5 s floor", async () => {
+  it("the submit's retry ladder stops at the deadline", async () => {
+    // An untyped 503 stating 3 s against a 500 ms budget: the submit gives
+    // up at once rather than sleeping past the deadline and retrying.
+    const { fetch, calls } = makeFetch([
+      { status: 503, body: { detail: "down" }, headers: { "Retry-After": "3" } },
+      { status: 202, body: ACCEPTED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    let settled: unknown = "pending";
+    const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 500 }).then(
+      (r) => (settled = r),
+      (e: unknown) => (settled = e),
+    );
+    await vi.advanceTimersByTimeAsync(600);
+    expect(settled).toBeInstanceOf(LenzAPIError);
+    expect(calls).toHaveLength(1);
+    await pending;
+  });
+
+  it("a hung submit is aborted at the deadline, not at the client timeout", async () => {
+    const hanging = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_res, rej) => {
+          init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
+        }),
+    ) as unknown as typeof fetch;
+    const client = new Lenz({ apiKey: "lenz_t", fetch: hanging });
+    let settled: unknown = "pending";
+    const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 10_000 }).then(
+      (r) => (settled = r),
+      (e: unknown) => (settled = e),
+    );
+    await vi.advanceTimersByTimeAsync(10_001);
+    expect(settled).toBeInstanceOf(LenzAPIError);
+    expect(hanging).toHaveBeenCalledTimes(1);
+    await pending;
+  });
+
+  it("honours a poll's stated Retry-After (capped at 60 s) instead of the 5 s floor", async () => {
     const { fetch, calls } = makeFetch([
       { status: 202, body: ACCEPTED },
       {
@@ -403,7 +505,7 @@ describe("reviewAndWait()", () => {
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     const pending = client.reviewAndWait({ text: DRAFT });
-    await vi.advanceTimersByTimeAsync(89_999);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(calls).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1);
     expect((await pending).status).toBe("completed");
@@ -447,6 +549,95 @@ describe("reviewAndWait()", () => {
       .catch((e: unknown) => e);
     const err = await drain(pending, 30_000);
     expect(err).toBeInstanceOf(ReviewTimeoutError);
+  });
+
+  for (const [label, body] of [
+    ["an empty body", {}],
+    ["a body with no status", { review_id: "442b6aa9" }],
+    ["a body whose status is not a string", { status: 3 }],
+  ] as const) {
+    it(`a 2xx poll with ${label} is a transient failure, not a review`, async () => {
+      const { fetch } = makeFetch([
+        { status: 202, body: ACCEPTED },
+        { body: VERIFYING },
+        { body },
+        { body: COMPLETED },
+      ]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const seen: unknown[] = [];
+      const review = await drain(
+        client.reviewAndWait({ text: DRAFT }, { onUpdate: (r) => seen.push(r.status) }),
+      );
+      expect(review.status).toBe("completed");
+      expect(seen).toEqual(["verifying", "completed"]);
+    });
+  }
+
+  it("a non-review 2xx body is never stored as partial", async () => {
+    const { fetch } = makeFetch([
+      { status: 202, body: ACCEPTED },
+      ...Array.from({ length: 10 }, () => ({ body: {} })),
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const pending = client
+      .reviewAndWait({ text: DRAFT }, { timeoutMs: 12_000 })
+      .catch((e: unknown) => e);
+    const err = (await drain(pending, 60_000)) as ReviewTimeoutError;
+    expect(err).toBeInstanceOf(ReviewTimeoutError);
+    expect(err.partial).toBeNull();
+  });
+
+  for (const [stated, expectedMs] of [
+    [45, 45_000],
+    [3600, 60_000],
+  ] as const) {
+    it(`an untyped 503 stating ${stated} s paces the next poll at ${expectedMs / 1000} s`, async () => {
+      const { fetch, calls } = makeFetch([
+        { status: 202, body: ACCEPTED },
+        {
+          status: 503,
+          body: { detail: "maintenance" },
+          headers: { "Retry-After": String(stated) },
+        },
+        { body: COMPLETED },
+      ]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 7_200_000 });
+      await vi.advanceTimersByTimeAsync(expectedMs - 1);
+      expect(calls).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await pending).status).toBe("completed");
+    });
+  }
+
+  it("a stated retry_after_seconds on a poll is capped at 60 s too", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 202, body: ACCEPTED },
+      { status: 429, body: { detail: "Slow.", code: "rate_limited", retry_after_seconds: 900 } },
+      { body: COMPLETED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 7_200_000 });
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).status).toBe("completed");
+  });
+
+  it("a failed review with no failure block reads neutrally", async () => {
+    const body = { ...NO_CLAIM, failure: null };
+    const { fetch } = makeFetch([{ status: 202, body: ACCEPTED }, { body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const err = (await drain(
+      client.reviewAndWait({ text: DRAFT }).catch((e: unknown) => e),
+    )) as ReviewFailedError;
+    expect(err).toBeInstanceOf(ReviewFailedError);
+    expect(err.errorCode).toBe("");
+    expect(err.retryable).toBeNull();
+    expect(err.fix).toBe(
+      `The review failed without a stated reason; read it with client.getReview('${body.review_id}').`,
+    );
+    expect(err.fix).not.toContain("different draft");
   });
 
   it("a purged review mid-wait throws LenzGoneError, not a timeout", async () => {
@@ -520,7 +711,8 @@ companies had started compliance work by the end of 2024.
     expect(lines[0]).toEqual(["issues_found"]);
     expect(lines[2]![0]).toBe("  Suggested rewrite:");
     expect(results).toEqual([]);
-    expect(deep?.verification_id).toBe("86ea9355");
+    expect(deep?.verification_id).toBe("c9b769e1");
+    expect(lines).toHaveLength(4); // outcome, two issues, one rewrite
   });
 });
 

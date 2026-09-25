@@ -24,7 +24,12 @@ idempotencyKey? })` returns `{ review_id, status: "queued" }`; the flat
   `ReviewTimeoutError` (a `LenzTimeoutError` carrying `reviewId` and
   `partial`). `review` always sends an `Idempotency-Key`: a resend with the
   same key within 24 hours returns the same review, and a new key is a new
-  review. Needs an API that serves `POST /review`; an older one answers 404.
+  review; a retried submit that meets the first attempt's review still being
+  created (409 `idempotency_conflict` naming its `review_id`) returns that
+  receipt. `reviewAndWait`'s deadline bounds the submit as well as the polls,
+  a failed poll waits what the server stated (at most 60 s), and a 2xx that
+  is not a review counts as a failed poll. Needs an API that serves
+  `POST /review`; an older one answers 404.
 - **Review types**: `ReviewFull`, `ReviewIssues`, `ReviewEnvelope`,
   `ReviewClaim`, `ReviewIssue`, `ReviewFailure`, `ReviewAssessment`,
   `ReviewVerification`, `ReviewResult`, `ReviewSummary`, `ReviewCredits`,
@@ -41,11 +46,6 @@ idempotencyKey? })` returns `{ review_id, status: "queued" }`; the flat
   read from `Retry-After` or the body's `retry_after_seconds`, instead of
   sleeping the wait inside the call.
 
-### Changed
-
-- `VerifyBatchItem.claim` and `.text` accept `null`, so a review's
-  `claims[].claim` passes straight into `verifyBatchAndWait`.
-
 - **`suggested_rewrite` on `Verification` and `VerificationListItem`**, a
   string or `null`: a suggested rewrite of `claim` that the verification's
   findings support, to use in place of the original sentence. It has not been
@@ -58,6 +58,14 @@ idempotencyKey? })` returns `{ review_id, status: "queued" }`; the flat
   `verifyAndWait`, `wait`, and the `verification.completed` webhook's
   `result`. It is not on `assess` rows. Types only; earlier SDK versions
   ignore the key and keep working.
+- **`LenzAPIError.retryAfter`**: the seconds a 5xx's `Retry-After` (or body
+  `retry_after`) asked to wait, or `null`. It moved up from
+  `LenzUpstreamUnavailableError`, which still has it.
+
+### Changed
+
+- `VerifyBatchItem.claim` and `.text` accept `null`, so a review's
+  `claims[].claim` passes straight into `verifyBatchAndWait`.
 
 ## [2.16.0] - 2026-09-24
 

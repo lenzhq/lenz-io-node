@@ -291,7 +291,8 @@ describe("LenzWebhooks — review events", () => {
     expect(r.status).toBe("completed");
     expect(r.review.view).toBe("full");
     expect(r.review.outcome).toBe("issues_found");
-    expect(r.review.issues[0]!.verification_id).toBe("86ea9355");
+    expect(r.review.issues[0]!.verification_id).toBe("c9b769e1");
+    expect(r.review.issues[1]!.suggested_rewrite).toBeNull();
     // No verification fields on a review event.
     expect(r.verificationId).toBeNull();
   });
@@ -326,7 +327,7 @@ describe("LenzWebhooks — review events", () => {
       default:
         break;
     }
-    expect(issues).toBe(1);
+    expect(issues).toBe(2);
   });
 
   it("an unknown event still parses to the base shape, not an error", () => {
