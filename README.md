@@ -204,14 +204,15 @@ already carries a certificate keeps it.
 
 ### Suggested rewrite
 
-A full verification (`verifyAndWait`, `wait`, `verifications.get`, and the
-`verification.completed` webhook's `result`) can carry `suggested_revision`, a
-string: a suggested rewrite of `claim` that the verification's findings
-support, to use in place of the original sentence. It has not been verified
-itself: before using it, review it or run it through `client.verify({ claim })`.
-It is `null` for a true claim, when no correction is established, and
-on verifications that predate the field, and absent on responses from an API
-that predates it. List items, `assess` and `library` rows never carry it.
+A verification can carry `suggested_revision`, a string: a suggested rewrite
+of `claim` that the verification's findings support, to use in place of the
+original sentence. It has not been verified itself: before using it, review
+it or run it through `client.verify({ claim })`. It is `null` for a true
+claim, when no correction is established, and on verifications that predate
+the field, and absent on responses from an API that predates it. It is on every verification, single or listed:
+`verifications.get`, `verifications.list`, `library.list`, `verifyAndWait`,
+`wait`, and the `verification.completed` webhook's `result`. It is not on
+`assess` rows.
 
 ```ts
 const revision = v.suggested_revision ?? null;

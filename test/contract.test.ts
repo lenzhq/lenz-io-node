@@ -147,6 +147,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "modified_at",
     "language",
+    "suggested_revision",
   ]),
   EntityRef: new Set(["name", "qid"]),
   Source: new Set(["source_name", "title", "url", "snippet", "date"]),

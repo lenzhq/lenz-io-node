@@ -1915,6 +1915,28 @@ describe("suggested_revision", () => {
     expect(v.suggested_revision ?? null).toBeNull();
   });
 
+  it("is on list items too: string, null, absent", async () => {
+    const row = (revision?: unknown) => ({
+      ...detail(revision),
+      verification_id: `vid_${String(revision)}`,
+    });
+    const body = {
+      items: [row(REWRITE), { ...row(null), verdict: "True" }, row(undefined)],
+      total: 3,
+      page: 1,
+      page_size: 20,
+    };
+    const { fetch } = makeFetch([{ body }, { body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    for (const page of [await client.verifications.list(), await client.library.list()]) {
+      const [withRewrite, trueRow, olderRow] = page.items;
+      expect(withRewrite!.suggested_revision).toBe(REWRITE);
+      expect(trueRow!.suggested_revision).toBeNull();
+      expect(olderRow!.suggested_revision).toBeUndefined();
+      expect(olderRow!.suggested_revision ?? null).toBeNull();
+    }
+  });
+
   it("arrives on the completed result that wait returns", async () => {
     const { fetch } = makeFetch([{ body: { status: "completed", result: detail(REWRITE) } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });

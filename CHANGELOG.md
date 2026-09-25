@@ -8,17 +8,18 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
-- **`suggested_revision` on `Verification`**, a string or `null`: a
-  suggested rewrite of `claim` that the verification's findings support, to
-  use in place of the original sentence. It has not been verified itself:
-  before using it, review it or run it through `client.verify({ claim })`. It is
-  `null` for a true claim, when no correction is established, and on
-  verifications that predate the field, and absent on responses from an API
-  that predates it, so read it as `v.suggested_revision ?? null`. It arrives
-  on `verifications.get`, `wait` / `verifyAndWait`, and the
-  `verification.completed` webhook's `result`; list items, `assess` and
-  `library` rows do not carry it. Types only; earlier SDK versions ignore the
-  key and keep working.
+- **`suggested_revision` on `Verification` and `VerificationListItem`**, a
+  string or `null`: a suggested rewrite of `claim` that the verification's
+  findings support, to use in place of the original sentence. It has not been
+  verified itself: before using it, review it or run it through
+  `client.verify({ claim })`. It is `null` for a true claim, when no
+  correction is established, and on verifications that predate the field,
+  and absent on responses from an API that predates it, so read it as
+  `v.suggested_revision ?? null`. It is on every verification, single or
+  listed: `verifications.get`, `verifications.list`, `library.list`,
+  `verifyAndWait`, `wait`, and the `verification.completed` webhook's
+  `result`. It is not on `assess` rows. Types only; earlier SDK versions
+  ignore the key and keep working.
 
 ## [2.16.0] - 2026-09-24
 
