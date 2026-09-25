@@ -255,3 +255,91 @@ describe("LenzWebhooks", () => {
     expect(event.coverage).toEqual({});
   });
 });
+
+// ── review.* ─────────────────────────────────────────────────────────────
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { ReviewCompleted, ReviewFailed, WebhookEvent } from "../src/index.js";
+
+const REVIEW_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "contract");
+
+/** A recorded review webhook, re-stamped so it sits inside the replay window. */
+function reviewPayload(name: string, extra: Record<string, unknown> = {}): Buffer {
+  const recorded = JSON.parse(readFileSync(join(REVIEW_FIXTURES, name), "utf-8")) as Record<
+    string,
+    unknown
+  >;
+  return Buffer.from(
+    JSON.stringify({ ...recorded, delivered_at: new Date().toISOString(), ...extra }),
+  );
+}
+
+describe("LenzWebhooks — review events", () => {
+  const hooks = new LenzWebhooks({ secret: SECRET });
+
+  it("parses review.completed into a ReviewCompleted with the full review", () => {
+    const body = reviewPayload("review_webhook_completed.json");
+    const evt = hooks.parse(body, { "X-Lenz-Signature": sign(body) });
+    expect(evt.event).toBe("review.completed");
+    const r = evt as ReviewCompleted;
+    expect(r.eventId).toMatch(/^evt_[0-9a-f]{24}$/);
+    expect(r.reviewId).toBe("442b6aa9");
+    expect(r.taskId).toBe("3af4392a7d6747289b88c11778d32d08");
+    expect(r.status).toBe("completed");
+    expect(r.review.view).toBe("full");
+    expect(r.review.outcome).toBe("issues_found");
+    expect(r.review.issues[0]!.verification_id).toBe("c9b769e1");
+    expect(r.review.issues[1]!.suggested_rewrite).toBeNull();
+    // No verification fields on a review event.
+    expect(r.verificationId).toBeNull();
+  });
+
+  it("parses review.failed into a ReviewFailed carrying the failure block", () => {
+    const body = reviewPayload("review_webhook_failed.json");
+    const evt = hooks.parse(body, { "X-Lenz-Signature": sign(body) });
+    expect(evt.event).toBe("review.failed");
+    const r = evt as ReviewFailed;
+    expect(r.status).toBe("failed");
+    expect(r.review.outcome).toBe("unchecked");
+    expect(r.review.failure?.failure_reason).toBe("no_claim");
+  });
+
+  it("a retry keeps its eventId, so a consumer can dedupe on it", () => {
+    const first = reviewPayload("review_webhook_completed.json", { attempt: 1 });
+    const retry = reviewPayload("review_webhook_completed.json", { attempt: 2 });
+    const a = hooks.parse(first, { "X-Lenz-Signature": sign(first) }) as ReviewCompleted;
+    const b = hooks.parse(retry, { "X-Lenz-Signature": sign(retry) }) as ReviewCompleted;
+    expect(b.attempt).toBe(2);
+    expect(b.eventId).toBe(a.eventId);
+  });
+
+  it("narrows on `event` in a switch", () => {
+    const body = reviewPayload("review_webhook_completed.json");
+    const evt: WebhookEvent = hooks.parse(body, { "X-Lenz-Signature": sign(body) });
+    let issues = -1;
+    switch (evt.event) {
+      case "review.completed":
+        issues = (evt as ReviewCompleted).review.summary.issues;
+        break;
+      default:
+        break;
+    }
+    expect(issues).toBe(2);
+  });
+
+  it("an unknown event still parses to the base shape, not an error", () => {
+    const body = payload("review.archived", { review_id: "r1", event_id: "evt_x" });
+    const evt = hooks.parse(body, { "X-Lenz-Signature": sign(body) });
+    expect(evt.event).toBe("review.archived");
+    expect("review" in evt).toBe(false);
+  });
+
+  it("a review event with no review object degrades to the base shape", () => {
+    const body = payload("review.completed", { review_id: "r1", event_id: "evt_x" });
+    const evt = hooks.parse(body, { "X-Lenz-Signature": sign(body) });
+    expect("review" in evt).toBe(false);
+  });
+});

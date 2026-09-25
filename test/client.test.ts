@@ -10,6 +10,7 @@ import {
   Lenz,
   LenzAPIError,
   LenzAuthError,
+  LenzError,
   LenzGoneError,
   LenzNeedsInputError,
   LenzPipelineError,
@@ -2098,5 +2099,72 @@ describe("coverage", () => {
     await expect(client.verifications.getCertificate("vid_c")).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+});
+
+describe("request timeout covers the body", () => {
+  it("a 200 whose body stalls is aborted at timeoutMs and reads as LenzAPIError", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn((_u: string | URL | Request, init?: RequestInit) => {
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"plan": "fr'));
+            init?.signal?.addEventListener("abort", () =>
+              controller.error(new DOMException("aborted", "AbortError")),
+            );
+          },
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }) as unknown as typeof fetch;
+      const client = new Lenz({ apiKey: "lenz_t", fetch: fetchImpl, timeoutMs: 1_000 });
+      let settled: unknown = "pending";
+      const pending = client.usage().then(
+        (r) => (settled = r),
+        (e: unknown) => (settled = e),
+      );
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(settled).toBeInstanceOf(LenzAPIError);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("request timeout covers error bodies", () => {
+  it("a 429 whose body stalls after a Retry-After header cannot hang the call", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn((_u: string | URL | Request, init?: RequestInit) => {
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"code": "rate'));
+            init?.signal?.addEventListener("abort", () =>
+              controller.error(new DOMException("aborted", "AbortError")),
+            );
+          },
+        });
+        return Promise.resolve(
+          new Response(body, { status: 429, headers: { "Retry-After": "0" } }),
+        );
+      }) as unknown as typeof fetch;
+      const client = new Lenz({
+        apiKey: "lenz_t",
+        fetch: fetchImpl,
+        timeoutMs: 1_000,
+        maxRetries: 0,
+      });
+      let settled: unknown = "pending";
+      const pending = client.usage().then(
+        (r) => (settled = r),
+        (e: unknown) => (settled = e),
+      );
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(settled).toBeInstanceOf(LenzError);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

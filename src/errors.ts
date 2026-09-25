@@ -17,6 +17,8 @@
  *     Request ID: {id}
  */
 
+import type { ReviewFull } from "./types.js";
+
 export interface LenzErrorContext {
   message?: string;
   cause?: string;
@@ -205,7 +207,14 @@ export class LenzRateLimitError extends LenzError {
   upgradeUrl = "";
 }
 
-export class LenzAPIError extends LenzError {}
+export class LenzAPIError extends LenzError {
+  /**
+   * Seconds a 5xx's `Retry-After` (or body `retry_after`) asked to wait, or
+   * `null` when it stated none. Informational on an untyped 5xx: this client
+   * paces its own retries against it, capped at {@link MAX_RETRY_AFTER_SLEEP}.
+   */
+  retryAfter: number | null = null;
+}
 
 /**
  * 503 with `code` `upstream_unavailable` or `capacity`.
@@ -221,9 +230,7 @@ export class LenzAPIError extends LenzError {}
  * already slept through by the automatic retry ladder — this being thrown
  * means the stated wait was longer, and `retryAfter` carries it.
  */
-export class LenzUpstreamUnavailableError extends LenzAPIError {
-  retryAfter: number | null = null;
-}
+export class LenzUpstreamUnavailableError extends LenzAPIError {}
 
 export class LenzTimeoutError extends LenzError {
   taskId = "";
@@ -293,6 +300,69 @@ export class LenzGoneError extends LenzError {
 }
 
 export class LenzWebhookSignatureError extends LenzError {}
+
+/**
+ * `reviewAndWait` reached its deadline before the review finished.
+ *
+ * The review keeps running server-side: read it later with
+ * `client.getReview(reviewId)`. `partial` is the last body the wait saw, or
+ * `null` when no poll answered.
+ */
+export class ReviewTimeoutError extends LenzTimeoutError {
+  reviewId: string;
+  partial: ReviewFull | null;
+
+  constructor(reviewId: string, partial: ReviewFull | null, timeoutMs: number) {
+    super({
+      message: `Review ${reviewId} did not finish within ${timeoutMs}ms`,
+      cause: "The review is still running server-side.",
+      fix: `Read it later with client.getReview('${reviewId}'), or wait on the review.completed webhook.`,
+      docUrl: `${DOCS_BASE}/quickstart`,
+    });
+    this.reviewId = reviewId;
+    this.partial = partial;
+  }
+}
+
+/**
+ * `reviewAndWait` read a review that ended `failed`.
+ *
+ * `errorCode` is the failure's `failure_reason` (`no_claim`,
+ * `insufficient_credits`, `upstream_unavailable`, …: an open set), `hint`
+ * says what to send next, and `review` is the failed review itself. A
+ * subclass of {@link LenzPipelineError}, so `failureClass` and `retryable`
+ * are set too.
+ */
+export class ReviewFailedError extends LenzPipelineError {
+  reviewId: string;
+  errorCode: string;
+  review: ReviewFull;
+
+  constructor(review: ReviewFull) {
+    const failure = review.failure;
+    const errorCode = failure?.failure_reason ?? "";
+    const hint = failure?.hint ?? "";
+    super({
+      message: `Review ${review.review_id} failed: ${errorCode || "unknown"}`,
+      cause: errorCode || "unknown",
+      fix:
+        hint ||
+        (!failure
+          ? `The review failed without a stated reason; read it with client.getReview('${review.review_id}').`
+          : failure.retryable
+            ? "Transient provider outage — resubmit the same draft after a short wait."
+            : "Resubmit with a different draft."),
+      docUrl: failure?.docs_url || `${DOCS_BASE}/errors`,
+    });
+    this.reviewId = review.review_id;
+    this.errorCode = errorCode;
+    this.review = review;
+    this.failureReason = errorCode;
+    this.failureClass = failure?.failure_class ?? "";
+    this.retryable = typeof failure?.retryable === "boolean" ? failure.retryable : null;
+    this.hint = hint;
+  }
+}
 
 // ── Mapping table ────────────────────────────────────────────────────────
 //
@@ -520,11 +590,13 @@ export function mapResponseToError(
     err.purgedAt = typeof purgedAt === "string" && purgedAt ? purgedAt : null;
   }
 
-  if (err instanceof LenzUpstreamUnavailableError) {
+  if (err instanceof LenzAPIError) {
     // Body `retry_after` first (both 503 shapes carry it), header as the
     // fallback for any proxy that strips the body.
     err.retryAfter =
-      optNumber(parsed["retry_after"]) ?? optNumber(getHeader(headers, "Retry-After"));
+      optNumber(parsed["retry_after"]) ??
+      optNumber(parsed["retry_after_seconds"]) ??
+      optNumber(getHeader(headers, "Retry-After"));
   } else if (err instanceof LenzQuotaExceededError) {
     const upgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
@@ -551,9 +623,11 @@ export function mapResponseToError(
     // Header first, then the body. `reset_in_seconds` is what the server
     // actually sends; `retry_after` was an SDK-side invention the server has
     // never emitted — kept last purely as a defensive read.
+    // `retry_after_seconds` is the /review in-flight 429's name for it.
     err.retryAfter =
       optNumber(getHeader(headers, "Retry-After")) ??
       optNumber(parsed["reset_in_seconds"]) ??
+      optNumber(parsed["retry_after_seconds"]) ??
       optNumber(parsed["retry_after"]) ??
       0;
   }

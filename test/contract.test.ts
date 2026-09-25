@@ -187,12 +187,162 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "remaining",
   ]),
   UsageExtract: new Set(["calls_today", "daily_limit", "unlimited"]),
+  ReviewStarted: new Set(["review_id", "status"]),
+  ReviewFull: new Set([
+    "review_id",
+    "view",
+    "status",
+    "outcome",
+    "created_at",
+    "completed_at",
+    "language",
+    "policy",
+    "summary",
+    "credits",
+    "poll_after_seconds",
+    "issues",
+    "failures",
+    "failure",
+    "claims",
+  ]),
+  // The envelope without `claims`.
+  ReviewIssues: new Set([
+    "review_id",
+    "view",
+    "status",
+    "outcome",
+    "created_at",
+    "completed_at",
+    "language",
+    "policy",
+    "summary",
+    "credits",
+    "poll_after_seconds",
+    "issues",
+    "failures",
+    "failure",
+  ]),
+  EscalationPolicy: new Set([
+    "verdicts",
+    "confidence",
+    "max_verifications",
+    "max_assessments",
+    "depth",
+  ]),
+  ReviewSummary: new Set([
+    "claims_selected",
+    "claim_limit",
+    "claim_limit_reached",
+    "input_truncated",
+    "assessments",
+    "verifications",
+    "issues",
+  ]),
+  ReviewAssessmentCounts: new Set(["completed", "failed"]),
+  ReviewVerificationCounts: new Set(["planned", "completed", "failed"]),
+  ReviewCredits: new Set(["charged"]),
+  ReviewFailureBlock: new Set(["failure_reason", "failure_class", "retryable", "hint", "docs_url"]),
+  Escalation: new Set(["matched_rules", "disposition"]),
+  ReviewIssue: new Set([
+    "claim_index",
+    "claim",
+    "verified_claim",
+    "verdict",
+    "confidence",
+    "source",
+    "verification_id",
+    "verification_status",
+    "verification_url",
+    "url",
+    "escalation",
+    "key_finding",
+    "rationale",
+    "suggested_rewrite",
+    "failure",
+  ]),
+  ReviewFailure: new Set(["claim_index", "claim", "stage", "failure"]),
+  ReviewClaim: new Set(["index", "claim", "result", "assessment", "escalation", "verification"]),
+  ReviewResult: new Set(["verdict", "confidence", "source", "is_issue"]),
+  ReviewEntity: new Set(["name", "qid"]),
+  ReviewAssessment: new Set([
+    "status",
+    "verdict",
+    "confidence",
+    "rationale",
+    "dissent",
+    "verification_url",
+    "error_code",
+    "identified_claims",
+    "hint",
+    "failure",
+  ]),
+  ReviewVerification: new Set([
+    "status",
+    "content_status",
+    "verification_id",
+    "task_id",
+    "claim",
+    "language",
+    "visibility",
+    "depth",
+    "domain",
+    "entities",
+    "verdict",
+    "confidence",
+    "lenz_score",
+    "key_finding",
+    "executive_summary",
+    "suggested_rewrite",
+    "warnings",
+    "created_at",
+    "modified_at",
+    "verification_url",
+    "url",
+    "failure",
+  ]),
+  // The raw `review.*` webhook body (the parsed event renames these to camelCase).
+  ReviewWebhookPayload: new Set([
+    "event",
+    "event_id",
+    "review_id",
+    "task_id",
+    "status",
+    "review",
+    "attempt",
+    "delivered_at",
+  ]),
 };
 
 // For each parent interface + field name, which child interface (if any)
 // should be walked? Maps to the nested-type relationships you'd see in
 // `src/types.ts`. `null` means "treat as opaque" (e.g. dict bag fields).
+const REVIEW_ENVELOPE_NESTED: Record<string, string | null> = {
+  policy: "EscalationPolicy",
+  summary: "ReviewSummary",
+  credits: "ReviewCredits",
+  issues: "ReviewIssue",
+  failures: "ReviewFailure",
+  failure: "ReviewFailureBlock",
+};
+
 const NESTED: Record<string, Record<string, string | null>> = {
+  ReviewFull: { ...REVIEW_ENVELOPE_NESTED, claims: "ReviewClaim" },
+  ReviewIssues: REVIEW_ENVELOPE_NESTED,
+  ReviewSummary: {
+    assessments: "ReviewAssessmentCounts",
+    verifications: "ReviewVerificationCounts",
+  },
+  ReviewIssue: { escalation: "Escalation", failure: "ReviewFailureBlock" },
+  ReviewFailure: { failure: "ReviewFailureBlock" },
+  ReviewClaim: {
+    result: "ReviewResult",
+    assessment: "ReviewAssessment",
+    escalation: "Escalation",
+    verification: "ReviewVerification",
+  },
+  ReviewAssessment: { failure: "ReviewFailureBlock" },
+  ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
+  ReviewWebhookPayload: { review: "ReviewFull" },
   ExtractedClaims: { key_entities: "ExtractedEntity" },
   AssessResponse: { claims: "AssessClaim" },
   TaskStatus: {
@@ -294,6 +444,19 @@ describe("contract", () => {
     ["verifications_detail_uncovered.json", "Verification"],
     ["certificate.json", "Certificate"],
     ["usage.json", "Usage"],
+    // A real review, recorded state by state, plus the two failures that
+    // end one before it assesses anything.
+    ["review_accepted.json", "ReviewStarted"],
+    ["review_queued.json", "ReviewFull"],
+    ["review_assessing.json", "ReviewFull"],
+    ["review_verifying.json", "ReviewFull"],
+    ["review_completed.json", "ReviewFull"],
+    ["review_completed_issues.json", "ReviewIssues"],
+    ["review_incomplete.json", "ReviewFull"],
+    ["review_failed_no_claim.json", "ReviewFull"],
+    ["review_failed_insufficient_credits.json", "ReviewFull"],
+    ["review_webhook_completed.json", "ReviewWebhookPayload"],
+    ["review_webhook_failed.json", "ReviewWebhookPayload"],
   ];
 
   for (const [fixture, iface] of cases) {
@@ -594,4 +757,85 @@ describe("contract", () => {
     const unhandled = Object.keys(payload).filter((k) => !handled.has(k));
     expect(unhandled).toEqual([]);
   });
+});
+
+describe("review fixtures", () => {
+  // The walker only proves no key is UNKNOWN. These prove the fixtures are
+  // not so thin that the walk proved nothing: every nested type is present.
+  it("the recorded states cover every nested review shape", () => {
+    const completed = loadFixture("review_completed.json");
+    const errors = walk(completed, "ReviewFull", "");
+    expect(errors).toEqual([]);
+    const claims = completed["claims"] as Array<Record<string, unknown>>;
+    expect(claims.some((c) => c["verification"] !== null)).toBe(true);
+    const incomplete = loadFixture("review_incomplete.json");
+    // The quick issue the cap left out sorts last, after the two deep ones.
+    const incompleteIssues = incomplete["issues"] as Array<Record<string, unknown>>;
+    expect(incompleteIssues.map((i) => i["claim_index"])).toEqual([0, 3, 2]);
+    expect(incompleteIssues[2]!["source"]).toBe("assessment");
+    // While assessing, escalation is not decided yet.
+    const assessing = loadFixture("review_assessing.json");
+    const assessingClaims = assessing["claims"] as Array<Record<string, unknown>>;
+    expect(assessingClaims.map((c) => c["escalation"])).toEqual([null, null, null, null]);
+    expect((incomplete["failures"] as unknown[]).length).toBeGreaterThan(0);
+    expect(
+      (incomplete["issues"] as Array<Record<string, unknown>>).some(
+        (i) => (i["escalation"] as Record<string, unknown>)["disposition"] === "cap",
+      ),
+    ).toBe(true);
+  });
+
+  it("the issues view has no claims[], and both lists are arrays in every state", () => {
+    expect("claims" in loadFixture("review_completed_issues.json")).toBe(false);
+    for (const name of [
+      "review_queued.json",
+      "review_assessing.json",
+      "review_verifying.json",
+      "review_completed.json",
+      "review_completed_issues.json",
+      "review_incomplete.json",
+      "review_failed_no_claim.json",
+      "review_failed_insufficient_credits.json",
+    ]) {
+      const body = loadFixture(name);
+      expect(Array.isArray(body["issues"]), name).toBe(true);
+      expect(Array.isArray(body["failures"]), name).toBe(true);
+    }
+  });
+
+  it("the review_in_flight 429 maps to a rate-limit error with retryAfter", () => {
+    const err = mapResponseToError(
+      429,
+      JSON.stringify(loadFixture("error_review_in_flight_429.json")),
+      {},
+    );
+    expect(err).toBeInstanceOf(LenzRateLimitError);
+    expect(err.code).toBe("review_in_flight");
+    expect((err as LenzRateLimitError).retryAfter).toBe(60);
+  });
+
+  it("the extract_daily_limit 429 still maps with its own wait", () => {
+    const err = mapResponseToError(
+      429,
+      JSON.stringify({
+        detail: "Daily limit.",
+        code: "extract_daily_limit",
+        reset_in_seconds: 3600,
+      }),
+      {},
+    );
+    expect(err).toBeInstanceOf(LenzRateLimitError);
+    expect((err as LenzRateLimitError).retryAfter).toBe(3600);
+  });
+
+  for (const code of ["capacity", "upstream_unavailable"]) {
+    it(`a 503 ${code} maps to LenzUpstreamUnavailableError`, () => {
+      const err = mapResponseToError(
+        503,
+        JSON.stringify({ detail: "Busy.", code, retry_after: 90 }),
+        {},
+      );
+      expect(err).toBeInstanceOf(LenzUpstreamUnavailableError);
+    });
+  }
 });

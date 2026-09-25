@@ -863,10 +863,13 @@ export interface VerifyInput {
  * authoritative on the merge.
  */
 export interface VerifyBatchItem {
-  /** The item's claim. */
-  claim?: string;
+  /**
+   * The item's claim. `null` is accepted so a row read off another response
+   * (e.g. `ReviewClaim.claim`) can be passed straight through.
+   */
+  claim?: string | null;
   /** Accepted alias for `claim`; `claim` wins if both are given. */
-  text?: string;
+  text?: string | null;
   language?: string;
   source_url?: string;
   webhook_url?: string;
@@ -1034,4 +1037,328 @@ export interface WaitOptions {
   timeoutMs?: number;
   /** See {@link OnProgress}. */
   onProgress?: OnProgress;
+}
+
+// ── Review (`POST /review`, `GET /reviews/{review_id}`) ──
+
+/** The five verdict labels a check can return. */
+export type VerdictLabel = "True" | "Mostly True" | "Mixed" | "Mostly False" | "False";
+
+/** A confidence band. */
+export type ConfidenceBand = "low" | "medium" | "high";
+
+/**
+ * Where a review stands. `verifying` is skipped when no deep check was
+ * planned; `completed` and `failed` are terminal.
+ */
+export type ReviewStatus = "queued" | "assessing" | "verifying" | "completed" | "failed";
+
+/**
+ * The one field to branch on once a review is terminal (`null` before):
+ *
+ * - `clean` — every selected claim was assessed, none is an issue, and every
+ *   planned deep check completed. It covers the claims the review selected,
+ *   at the depth the policy chose.
+ * - `issues_found` — at least one claim's final verdict is `False`,
+ *   `Mostly False` or `Mixed`.
+ * - `incomplete` — an assessment or a planned deep check failed.
+ * - `unchecked` — the review failed before assessing anything (no claim in
+ *   the draft, not enough credits, an outage, an unreadable input).
+ */
+export type ReviewOutcome = "clean" | "issues_found" | "incomplete" | "unchecked";
+
+/**
+ * Why a claim did or did not get a deep check. `not_selected`: no rule
+ * matched. `planned`: it got one. `cap`: a rule matched but
+ * `maxVerifications` was reached. `credits`: the balance ran out.
+ * `account_cap`: the account's allowance of running deep checks was reached.
+ */
+export type EscalationDisposition =
+  | "not_selected"
+  | "planned"
+  | "cap"
+  | "credits"
+  | "account_cap"
+  | (string & NonNullable<unknown>);
+
+/** The escalation policy as the review resolved it (defaults filled in). */
+export interface EscalationPolicy {
+  verdicts: VerdictLabel[];
+  confidence: ConfidenceBand[];
+  max_verifications: number;
+  max_assessments: number;
+  depth: "standard" | "low";
+}
+
+/** Why a claim did or did not get a deep check. */
+export interface Escalation {
+  /** Which rules matched: `verdict`, `confidence`, both, or none. */
+  matched_rules: Array<"verdict" | "confidence">;
+  disposition: EscalationDisposition;
+}
+
+/** The failure block `GET /verify/status` answers a failed task with. */
+export interface ReviewFailureBlock {
+  /**
+   * The specific cause, e.g. `no_claim`, `insufficient_credits`,
+   * `assessment_failed`, `timeout`. An open set.
+   */
+  failure_reason: string;
+  failure_class: FailureClass;
+  /** Resubmitting the same input can succeed. */
+  retryable: boolean;
+  /** One sentence on what to do next. */
+  hint: string | null;
+  docs_url: string;
+}
+
+export interface ReviewAssessmentCounts {
+  completed: number;
+  failed: number;
+}
+
+export interface ReviewVerificationCounts {
+  planned: number;
+  completed: number;
+  failed: number;
+}
+
+/** Counters are `null` until their denominator is known. */
+export interface ReviewSummary {
+  /** Claims this review works on; `null` until the draft is read. */
+  claims_selected: number | null;
+  /** The resolved `maxAssessments`. */
+  claim_limit: number;
+  /** The draft held at least `claim_limit` claims, so more MAY exist. */
+  claim_limit_reached: boolean | null;
+  /** The text was cut at 50,000 characters. */
+  input_truncated: boolean;
+  assessments: ReviewAssessmentCounts | null;
+  verifications: ReviewVerificationCounts | null;
+  /** `issues.length`. */
+  issues: number;
+}
+
+export interface ReviewCredits {
+  /**
+   * Net credits this review cost the account. Authoritative once no deep
+   * check is running; read it at `completed`.
+   */
+  charged: number;
+}
+
+/** The one answer to read for a claim: a completed deep check overrides the quick one. */
+export interface ReviewResult {
+  verdict: VerdictLabel | "Error";
+  confidence: ConfidenceBand | null;
+  source: "assessment" | "verification";
+  /** The verdict is `False`, `Mostly False` or `Mixed`. */
+  is_issue: boolean;
+}
+
+/** The quick check (`/assess`) on one claim. */
+export interface ReviewAssessment {
+  status: "pending" | "running" | "completed" | "failed";
+  verdict: VerdictLabel | "Error" | null;
+  confidence: ConfidenceBand | null;
+  /** A reviewer's reasoning for the verdict, not sourced evidence. */
+  rationale: string | null;
+  /** When set, the reasoning of the reviewer who disagreed. */
+  dissent: string | null;
+  /** Set when the quick check served an existing deep verdict. */
+  verification_url: string | null;
+  /** On a failed assessment, as on `/assess` rows. An open set. */
+  error_code: string | null;
+  identified_claims: string[];
+  hint: string | null;
+  failure: ReviewFailureBlock | null;
+}
+
+/** An entity a deep check named. Either field may be `null`. */
+export interface ReviewEntity {
+  name: string | null;
+  /** The Wikidata id, when one was matched. */
+  qid: string | null;
+}
+
+/** The deep check (`/verify`) on one claim. */
+export interface ReviewVerification {
+  status: "processing" | "completed" | "failed";
+  /**
+   * `purged` once the verification was deleted or removed under the
+   * account's retention period: the verdict and ids stay, every text field
+   * and both URLs are `null`.
+   */
+  content_status: "available" | "purged";
+  verification_id: string | null;
+  task_id: string | null;
+  claim: string | null;
+  language: string | null;
+  /** EFFECTIVE: a same-account cache hit keeps its own visibility. */
+  visibility: string | null;
+  /** EFFECTIVE: a cache hit may serve `standard` for a `low` request. */
+  depth: string | null;
+  domain: string | null;
+  entities: ReviewEntity[];
+  verdict: VerdictLabel | null;
+  confidence: ConfidenceBand | null;
+  lenz_score: number | null;
+  key_finding: string | null;
+  executive_summary: string | null;
+  suggested_rewrite: string | null;
+  warnings: string[];
+  created_at: string | null;
+  modified_at: string | null;
+  /** `GET /verifications/{id}`: the sources. */
+  verification_url: string | null;
+  /** The verification's page on lenz.io. */
+  url: string | null;
+  failure: ReviewFailureBlock | null;
+}
+
+/** One claim of the draft, in the order the draft's claims were read. */
+export interface ReviewClaim {
+  index: number;
+  /** The claim as Lenz states it. */
+  claim: string | null;
+  /** `null` while the quick check runs, and on a failed one. */
+  result: ReviewResult | null;
+  assessment: ReviewAssessment;
+  /** `null` on a failed assessment. */
+  escalation: Escalation | null;
+  /** `null` unless a deep check was planned. */
+  verification: ReviewVerification | null;
+}
+
+/**
+ * A claim whose final verdict is `False`, `Mostly False` or `Mixed`. Until
+ * the review is `completed` the list can still change.
+ */
+export interface ReviewIssue {
+  claim_index: number;
+  claim: string | null;
+  /** The deep check's reading of the claim, when it differs from `claim`. */
+  verified_claim: string | null;
+  verdict: VerdictLabel;
+  confidence: ConfidenceBand | null;
+  /** Which check the verdict comes from. */
+  source: "assessment" | "verification";
+  /** `null` on a quick-only row. */
+  verification_id: string | null;
+  verification_status: "processing" | "completed" | "failed" | null;
+  verification_url: string | null;
+  url: string | null;
+  /** Why the row did or did not get a deep check. */
+  escalation: Escalation | null;
+  /** Set on a deep-checked row. */
+  key_finding: string | null;
+  /** The quick check's reasoning; may be `null`. */
+  rationale: string | null;
+  /**
+   * The claim rewritten to fit what the deep check found; `null` on a
+   * quick-only row and when the check found nothing to correct.
+   *
+   * A suggestion, not itself verified: review it or run it through /verify
+   * before you use it.
+   */
+  suggested_rewrite: string | null;
+  /** The deep check's failure, when it failed. */
+  failure: ReviewFailureBlock | null;
+}
+
+/** A claim outside the issue set whose work failed. */
+export interface ReviewFailure {
+  claim_index: number;
+  claim: string | null;
+  stage: "assessment" | "verification";
+  failure: ReviewFailureBlock | null;
+}
+
+/** What both views of a review share. */
+export interface ReviewEnvelope {
+  review_id: string;
+  view: "full" | "issues";
+  status: ReviewStatus;
+  /** `null` until terminal. */
+  outcome: ReviewOutcome | null;
+  created_at: string;
+  completed_at: string | null;
+  /** The output language, resolved (`""` reads as English). */
+  language: string;
+  policy: EscalationPolicy;
+  summary: ReviewSummary;
+  credits: ReviewCredits;
+  /** How long to wait before polling again; `null` once terminal. */
+  poll_after_seconds: number | null;
+  /** Ordered by severity, then confidence, then position. */
+  issues: ReviewIssue[];
+  failures: ReviewFailure[];
+  /** On `failed`, why. */
+  failure: ReviewFailureBlock | null;
+}
+
+/** `GET /reviews/{id}`: every claim, with the issues and failures. */
+export interface ReviewFull extends ReviewEnvelope {
+  view: "full";
+  claims: ReviewClaim[];
+}
+
+/** `GET /reviews/{id}?view=issues`: the envelope without `claims`. */
+export interface ReviewIssues extends ReviewEnvelope {
+  view: "issues";
+}
+
+/** The `POST /review` receipt. `status` is always `queued`, not the current state. */
+export interface ReviewStarted {
+  review_id: string;
+  status: "queued";
+}
+
+export interface ReviewInput {
+  /** The draft, up to 50,000 characters (longer text is cut), or one public http(s) URL. */
+  text: string;
+  /**
+   * Quick-check labels that get a deep check. Default
+   * `["False", "Mostly False", "Mixed"]`; `[]` means no label rule.
+   */
+  verdicts?: VerdictLabel[];
+  /** Quick-check confidence bands that get a deep check. Default `["low"]`; `[]` means no band rule. */
+  confidence?: ConfidenceBand[];
+  /** How many of the draft's claims, most check-worthy first, get a quick verdict (1-20). Default 20. */
+  maxAssessments?: number;
+  /** The deep-check cap (0-20). Default 5; `0` makes an assess-only review. */
+  maxVerifications?: number;
+  /** Depth of every deep check. Default `"standard"`. */
+  depth?: "standard" | "low";
+  /** Output language of every claim and rewrite (ISO 639-1). Omit for English. */
+  language?: string;
+  /**
+   * Where `review.completed` / `review.failed` go. Omitted or `null`: the
+   * credential's default webhook URL. `""`: no webhook for this review. A URL:
+   * that URL.
+   */
+  webhookUrl?: string | null;
+  /** Applied to every deep check. Default `"private"`. */
+  visibility?: "private" | "unlisted";
+  /**
+   * A resend with the same key within 24 hours returns the same review; a new
+   * key is a new review. When omitted, a random key is generated per call and
+   * reused across this client's own retries.
+   */
+  idempotencyKey?: string;
+}
+
+export interface GetReviewOptions {
+  /** `"issues"` drops `claims[]`. Default `"full"`. */
+  view?: "full" | "issues";
+}
+
+export interface ReviewAndWaitOptions {
+  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  timeoutMs?: number;
+  /**
+   * Called with the review on every poll whose body changed. A throw inside
+   * it is swallowed and never breaks the wait.
+   */
+  onUpdate?: (review: ReviewFull) => void;
 }

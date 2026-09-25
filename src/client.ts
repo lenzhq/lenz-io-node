@@ -64,6 +64,8 @@ import {
   LenzTimeoutError,
   LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
+  ReviewFailedError,
+  ReviewTimeoutError,
   UPSTREAM_503_CODES,
   mapResponseToError,
 } from "./errors.js";
@@ -82,7 +84,13 @@ import type {
   LibraryListInput,
   OnProgress,
   Progress,
+  GetReviewOptions,
   RelatedVerifications,
+  ReviewAndWaitOptions,
+  ReviewFull,
+  ReviewInput,
+  ReviewIssues,
+  ReviewStarted,
   SelectInput,
   TaskAccepted,
   TaskStatus,
@@ -131,6 +139,18 @@ const POLL_BACKOFF_CAP_MS = 10_000;
 // Bounds on the server's `progress.poll_after_seconds` (see `pollHintMs`).
 const POLL_HINT_MIN_S = 1;
 const POLL_HINT_MAX_S = 30;
+// `reviewAndWait`: a review takes minutes, so its polls are never tighter
+// than this, whatever the body says.
+const REVIEW_POLL_FLOOR_S = 5;
+const REVIEW_DEFAULT_TIMEOUT_MS = 600_000;
+
+/**
+ * 429 codes that throw at once instead of sleeping the stated wait.
+ * `review_in_flight` means the account already runs its maximum number of
+ * reviews, each of which takes minutes: sleeping inside the call would block
+ * the caller silently, so it gets the error and its `retryAfter` instead.
+ */
+const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 
 // Generated at build time from package.json#version — see
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
@@ -177,6 +197,14 @@ interface RequestOptions {
   authRequired?: boolean;
   /** Per-call override of the client's `timeoutMs` (each attempt's AbortController). */
   timeoutMs?: number;
+  /** Per-call override of the client's `maxRetries`. */
+  maxRetries?: number;
+  /**
+   * Absolute `Date.now()` bound for the whole call: each attempt's timeout is
+   * cut to what is left, and a retry whose sleep would reach it is not taken
+   * (the last error is thrown instead).
+   */
+  deadlineAt?: number;
   /**
    * Optional-auth endpoint: don't fail when no key, but DO send the key when
    * we have one. The server returns a caller's own private/hidden rows only to
@@ -185,6 +213,32 @@ interface RequestOptions {
    * key never reaches an endpoint that doesn't need it.
    */
   authOptional?: boolean;
+}
+
+const REVIEW_STATUSES: readonly string[] = [
+  "queued",
+  "assessing",
+  "verifying",
+  "completed",
+  "failed",
+];
+
+/** The full view of THIS review: its id, a known status, and every list. */
+function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  return (
+    b["review_id"] === reviewId &&
+    typeof b["status"] === "string" &&
+    REVIEW_STATUSES.includes(b["status"]) &&
+    Array.isArray(b["issues"]) &&
+    Array.isArray(b["failures"]) &&
+    Array.isArray(b["claims"])
+  );
+}
+
+function isRateLimit(exc: unknown): boolean {
+  return exc instanceof LenzError && exc.statusCode === 429;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -221,9 +275,11 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
       // under `retry_after`. Fall through on an EMPTY value too, not just on
       // null/undefined — `??` alone would let `reset_in_seconds: ""` mask a
       // real `retry_after`, which is not what the Python SDK does.
-      let candidate: unknown = bag ? bag["reset_in_seconds"] : null;
-      if (candidate === null || candidate === undefined || String(candidate).trim() === "") {
-        candidate = bag ? bag["retry_after"] : null;
+      // `retry_after_seconds` is the /review endpoints' name for the same wait.
+      let candidate: unknown = null;
+      for (const key of ["reset_in_seconds", "retry_after", "retry_after_seconds"]) {
+        candidate = bag ? bag[key] : null;
+        if (candidate !== null && candidate !== undefined && String(candidate).trim() !== "") break;
       }
       raw = candidate ?? null;
     } catch {
@@ -267,6 +323,16 @@ async function bodyErrorCode(response: Response): Promise<string> {
  * shed/exhaustion response. An untyped 503 — the ordinary proxy / maintenance
  * shape — is deliberately false: it keeps the ladder.
  */
+/** Seconds to wait before the next review poll: the body's hint, floored. */
+function reviewPollMs(review: { poll_after_seconds?: unknown } | null): number {
+  const hint = review?.poll_after_seconds;
+  const seconds =
+    typeof hint === "number" && Number.isFinite(hint)
+      ? Math.max(hint, REVIEW_POLL_FLOOR_S)
+      : REVIEW_POLL_FLOOR_S;
+  return seconds * 1000;
+}
+
 async function abortsOnLongStatedWait(response: Response): Promise<boolean> {
   if (response.status === 429) return true;
   if (response.status !== 503) return false;
@@ -676,6 +742,193 @@ export class Lenz {
     return usage;
   }
 
+  // ── Review: the whole recipe in one call ──
+
+  /**
+   * Start a review of a draft: Lenz reads its claims, gives each a quick
+   * verdict, and deep-checks the ones that look wrong or uncertain.
+   * Returns the receipt at once; read the review with `getReview`, wait with
+   * `reviewAndWait`, or receive `review.completed` at your webhook.
+   *
+   * The flat options are sent as the request's `escalate` policy, and only
+   * the ones you set: an omitted option takes the server's default. It
+   * spends what the calls it makes spend: 1 credit per claim assessed, and
+   * 10 (5 at `depth: "low"`) per deep check.
+   *
+   * A resend with the same `idempotencyKey` within 24 hours returns the same
+   * review; a new key is a new review.
+   */
+  async review(input: ReviewInput): Promise<ReviewStarted> {
+    return this._submitReview(input);
+  }
+
+  private async _submitReview(
+    input: ReviewInput,
+    transport: Pick<RequestOptions, "deadlineAt"> = {},
+  ): Promise<ReviewStarted> {
+    const body: Record<string, unknown> = { text: input.text };
+    if (input.language) body.language = input.language;
+    // Three states: omitted or null → the credential's default URL;
+    // "" → no webhook for this review; a URL → that URL.
+    if (input.webhookUrl !== undefined && input.webhookUrl !== null) {
+      body.webhook_url = input.webhookUrl;
+    }
+    body.visibility = input.visibility ?? "private";
+    const escalate: Record<string, unknown> = {};
+    if (input.verdicts !== undefined) escalate.verdicts = input.verdicts;
+    if (input.confidence !== undefined) escalate.confidence = input.confidence;
+    if (input.maxAssessments !== undefined) escalate.max_assessments = input.maxAssessments;
+    if (input.maxVerifications !== undefined) escalate.max_verifications = input.maxVerifications;
+    if (input.depth !== undefined) escalate.depth = input.depth;
+    if (Object.keys(escalate).length > 0) body.escalate = escalate;
+    // Always keyed: this client retries a failed POST, and a retry without a
+    // key could start a second review. Random per call, never derived from
+    // the text: the same draft submitted again later is a new review.
+    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
+    try {
+      return await this.request<ReviewStarted>({
+        method: "POST",
+        path: "/review",
+        json: body,
+        headers: { "Idempotency-Key": idempotencyKey },
+        ...transport,
+      });
+    } catch (exc) {
+      // A retried submit whose first attempt created the review (its socket
+      // dropped before the 202 arrived) meets the review still being created
+      // under the same key. When the server names it, that IS the receipt.
+      const reviewId = exc instanceof LenzError ? exc.body?.["review_id"] : undefined;
+      if (
+        exc instanceof LenzError &&
+        exc.statusCode === 409 &&
+        exc.code === "idempotency_conflict" &&
+        typeof reviewId === "string" &&
+        reviewId !== ""
+      ) {
+        return { review_id: reviewId, status: "queued" };
+      }
+      throw exc;
+    }
+  }
+
+  /**
+   * Read a review. `{ view: "issues" }` returns the envelope without
+   * `claims[]`: the issues, the failures and the summary.
+   *
+   * Throws {@link LenzGoneError} (HTTP 410) when the review was purged.
+   */
+  getReview(reviewId: string): Promise<ReviewFull>;
+  getReview(reviewId: string, opts: { view: "issues" }): Promise<ReviewIssues>;
+  getReview(reviewId: string, opts: { view: "full" }): Promise<ReviewFull>;
+  getReview(reviewId: string, opts?: GetReviewOptions): Promise<ReviewFull | ReviewIssues>;
+  getReview(reviewId: string, opts: GetReviewOptions = {}): Promise<ReviewFull | ReviewIssues> {
+    return this._getReview(reviewId, opts);
+  }
+
+  private async _getReview(
+    reviewId: string,
+    opts: GetReviewOptions,
+    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
+  ): Promise<ReviewFull | ReviewIssues> {
+    if (!reviewId) {
+      throw new Error("getReview() requires a non-empty review_id.");
+    }
+    return this.request<ReviewFull | ReviewIssues>({
+      method: "GET",
+      path: `/reviews/${encodeURIComponent(reviewId)}`,
+      query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
+      ...transport,
+    });
+  }
+
+  /**
+   * Start a review and poll it until it ends; returns the completed review.
+   *
+   * Polls on the review's `poll_after_seconds` (never tighter than 5 s) and
+   * calls `onUpdate` with the review on every poll whose body changed, so a
+   * caller can show the quick verdicts as soon as they land. Throws
+   * {@link ReviewFailedError} when the review ends `failed` and
+   * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
+   * a transient poll error is retried on the next poll, after the wait the
+   * server stated when it stated one (at most 60 s). The deadline bounds the
+   * submit and every poll; when the submit used it up, one poll still runs so
+   * the timeout can carry `partial`, and a terminal review it reads is
+   * returned or thrown as usual.
+   */
+  async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
+    const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    // The submit is bounded by the same deadline: its attempts are cut to
+    // what is left and a retry that would pass it is not taken.
+    const { review_id: reviewId } = await this._submitReview(input, { deadlineAt: deadline });
+    let last: ReviewFull | null = null;
+    let lastJson = "";
+    for (let poll = 0; ; poll++) {
+      const budget = deadline - Date.now();
+      // The first poll always runs, even when the submit used up the budget,
+      // so a timeout can still hand back what the review looks like.
+      if (budget <= 0 && poll > 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
+      let current: ReviewFull | null = null;
+      let statedWaitMs = 0;
+      try {
+        // One attempt per poll, bounded by what is left: this loop owns the
+        // waits, so a retry ladder inside the request cannot outlive the
+        // deadline.
+        const body = (await this._getReview(
+          reviewId,
+          {},
+          {
+            maxRetries: 0,
+            // Cut at what is left. Only when the submit used the whole
+            // budget does the first poll get 5 s, so `partial` can fill.
+            timeoutMs: Math.min(
+              this.timeoutMs,
+              poll === 0 && budget <= 0 ? REVIEW_POLL_FLOOR_S * 1000 : budget,
+            ),
+          },
+        )) as unknown;
+        // A 2xx that is not this review (an empty body, a proxy's error
+        // object, another id, a body missing its lists) is a failed poll,
+        // never an update and never `partial`.
+        if (isReviewBody(body, reviewId)) current = body;
+      } catch (exc) {
+        // Keep waiting through what a later poll can outlast: a 5xx, a rate
+        // limit, and anything that is not a Lenz answer at all (a network
+        // drop, a body that stops or does not decode). A Lenz answer that
+        // waiting will not change (auth, 404, a purged review) ends the wait.
+        if (exc instanceof LenzError && !(exc instanceof LenzAPIError) && !isRateLimit(exc)) {
+          throw exc;
+        }
+        // A wait the server stated outranks the poll hint, capped like every
+        // other stated wait in this client: a maintenance 503 can state an
+        // hour.
+        const retryAfter = (exc as { retryAfter?: unknown }).retryAfter;
+        if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+          statedWaitMs = Math.min(retryAfter, MAX_RETRY_AFTER_SLEEP) * 1000;
+        }
+      }
+      if (current) {
+        const json = JSON.stringify(current);
+        if (json !== lastJson) {
+          lastJson = json;
+          last = current;
+          if (opts.onUpdate) {
+            try {
+              opts.onUpdate(current);
+            } catch {
+              // A caller's bug must not end the wait.
+            }
+          }
+        }
+        if (current.status === "completed") return current;
+        if (current.status === "failed") throw new ReviewFailedError(current);
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
+      await sleep(Math.min(Math.max(reviewPollMs(current ?? last), statedWaitMs), remaining));
+    }
+  }
+
   // ── Headline ergonomic ──
 
   /**
@@ -986,10 +1239,17 @@ export class Lenz {
       headers["Content-Type"] = "application/json";
     }
 
+    const maxRetries = opts.maxRetries ?? this.maxRetries;
     let lastErr: unknown = undefined;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+    const deadlineAt = opts.deadlineAt;
+    /** A retry sleep is taken only when it ends before the deadline. */
+    const fits = (ms: number): boolean => deadlineAt === undefined || Date.now() + ms < deadlineAt;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? this.timeoutMs);
+      let attemptMs = opts.timeoutMs ?? this.timeoutMs;
+      if (deadlineAt !== undefined)
+        attemptMs = Math.max(0, Math.min(attemptMs, deadlineAt - Date.now()));
+      const timer = setTimeout(() => controller.abort(), attemptMs);
       let response: Response;
       try {
         response = await this.fetchImpl(url.toString(), {
@@ -1001,7 +1261,7 @@ export class Lenz {
       } catch (exc) {
         lastErr = exc;
         clearTimeout(timer);
-        if (attempt >= this.maxRetries) {
+        if (attempt >= maxRetries || !fits(retrySleepMs(attempt))) {
           throw new LenzAPIError({
             message: `${opts.method} ${opts.path} failed after ${attempt + 1} attempts: ${String(exc)}`,
             cause: String(exc),
@@ -1012,16 +1272,32 @@ export class Lenz {
         await sleep(retrySleepMs(attempt));
         continue;
       }
-      clearTimeout(timer);
-
       if (response.status < 400) {
-        if (response.status === 204 || response.headers.get("content-length") === "0") {
-          return {} as T;
+        // The attempt's timer stays armed until the body is read: headers
+        // arriving is not the response arriving, and a body that stalls
+        // after them must not hang the call.
+        try {
+          if (response.status === 204 || response.headers.get("content-length") === "0") {
+            return {} as T;
+          }
+          return (await response.json()) as T;
+        } catch (exc) {
+          if (controller.signal.aborted) {
+            throw new LenzAPIError({
+              message: `${opts.method} ${opts.path} timed out reading the response body`,
+              cause: String(exc),
+              fix: "Retry; if it persists, check the network between you and baseUrl.",
+              docUrl: "https://lenz.io/docs/errors",
+            });
+          }
+          throw exc;
+        } finally {
+          clearTimeout(timer);
         }
-        return (await response.json()) as T;
       }
-
-      // Error path. Retry on 5xx + 429; otherwise throw.
+      // Error path. Retry on 5xx + 429; otherwise throw. The attempt's
+      // timer stays armed while the error body is read, and is cleared
+      // before any retry sleep.
       //
       // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that,
       // whether we abort or keep retrying is decided by the typed body `code`
@@ -1043,19 +1319,39 @@ export class Lenz {
       //    code; the server is down, not pacing us, so an hour-long
       //    Retry-After must become backoff — not an hour-long sleep, and not
       //    an abort of a request our ladder might still satisfy.
-      if (attempt < this.maxRetries && (response.status >= 500 || response.status === 429)) {
+      const throwAtOnce =
+        response.status === 429 && THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
+      if (
+        !throwAtOnce &&
+        attempt < maxRetries &&
+        (response.status >= 500 || response.status === 429)
+      ) {
         const stated = await statedRetryAfterSeconds(response);
         if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
-          await sleep(stated * 1000);
-          continue;
-        }
-        if (stated === null || !(await abortsOnLongStatedWait(response))) {
-          await sleep(retrySleepMs(attempt));
-          continue;
+          if (fits(stated * 1000)) {
+            clearTimeout(timer);
+            await sleep(stated * 1000);
+            continue;
+          }
+        } else if (stated === null || !(await abortsOnLongStatedWait(response))) {
+          if (fits(retrySleepMs(attempt))) {
+            clearTimeout(timer);
+            await sleep(retrySleepMs(attempt));
+            continue;
+          }
         }
       }
 
-      const rawBody = await response.text();
+      let rawBody = "";
+      try {
+        rawBody = await response.text();
+      } catch (exc) {
+        // A body that stalled until the timer fired: the status stands, the
+        // body is lost.
+        if (!controller.signal.aborted) throw exc;
+      } finally {
+        clearTimeout(timer);
+      }
       const respHeaders: Record<string, string> = {};
       response.headers.forEach((v, k) => {
         respHeaders[k] = v;
