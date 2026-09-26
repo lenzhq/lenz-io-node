@@ -88,8 +88,8 @@ export interface EntityRef {
 }
 
 /**
- * An existing public verification that semantically resembles the
- * submitted text. Same vocabulary as `Verification` — flat
+ * An existing public verification that semantically resembles another one,
+ * as returned by `related`. Same vocabulary as `Verification` — flat
  * `verdict` / `confidence` / `lenz_score`, no nested object.
  */
 export interface SimilarVerification {
@@ -498,7 +498,7 @@ export interface TaskStatus {
    * omit it.
    */
   task_id?: string;
-  /** On `needs_input`: `multi_claim` | `duplicate_found`. */
+  /** On `needs_input`: `multi_claim`, the only reason. */
   reason?: string;
   /**
    * Present on `processing`; absent on every terminal shape (the server
@@ -509,11 +509,14 @@ export interface TaskStatus {
   result?: Verification | null;
   claims?: CandidateClaim[];
   /**
-   * @deprecated Always empty since 2026-09-12, when the
-   * `clarification_required` pause that filled it was retired. Kept because
-   * the server still sends the key.
+   * @deprecated Always empty: its producer was retired and the API no longer
+   * sends it. Removal is planned for **2026-11-29**; read `claims` instead.
    */
   candidates?: string[];
+  /**
+   * @deprecated Always empty: the API never raised `duplicate_found` for API
+   * tasks and no longer sends it. Removal is planned for **2026-11-29**.
+   */
   similar_claims?: SimilarVerification[];
   /**
    * Diagnostic on a `failed` status. The server's failed response is
