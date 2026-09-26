@@ -6,6 +6,17 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`similar_claims`** and **`candidates`** on `TaskStatus` (JSDoc
+  `@deprecated`). `similar_claims` belonged to the `duplicate_found` reason,
+  which was never raised for API tasks; `candidates` has always been empty
+  since its producer was retired. The API no longer sends either key, and
+  both fields stay optional, so code that reads them keeps compiling.
+  Removal is planned for 2026-11-29.
+- Docs: `multi_claim` is the only `needs_input` reason; `duplicate_found` is
+  gone from the documented values.
+
 ## [2.17.0] - 2026-09-26
 
 `review`: the whole extract → assess → verify recipe on a draft in one call.
