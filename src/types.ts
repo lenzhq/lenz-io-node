@@ -769,6 +769,11 @@ export interface Usage {
   ask: UsageCapacity;
   /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
   assess: UsageCapacity;
+  /**
+   * The pool seen as citation checks, the same projection as `assess`.
+   * `null` when the server sends no `citation` block.
+   */
+  citation: UsageCapacity | null;
   extract: UsageExtract;
   /**
    * Whether this key has a webhook signing secret provisioned. `POST /verify`
@@ -1184,8 +1189,9 @@ export interface ReviewSummary {
 
 export interface ReviewCredits {
   /**
-   * Net credits this review cost the account. Authoritative once no deep
-   * check is running; read it at `completed`.
+   * Net credits this review cost the account, its citation checks included.
+   * Authoritative once no deep check or citation check is running; read it
+   * at `completed`.
    */
   charged: number;
 }

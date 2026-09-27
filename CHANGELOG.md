@@ -14,6 +14,8 @@ defaults.
 
 ### Added
 
+- **`usage().citation`**: the credit pool seen as citation checks, the same
+  projection as `assess`; `null` when the server sends no `citation` block.
 - **`client.review({ text, checkCitations: true, maxCitations })`**, sent as
   the API's `citations` object (`{ check: true, max: N }`), only the options
   you set. The first `maxCitations` (1-20, default 20) citations in the

@@ -756,6 +756,9 @@ export class Lenz {
         credits["bonus"] = credits["extra"];
       }
     }
+    // A body without the `citation` block reads it as null, never undefined.
+    const raw = usage as unknown as Record<string, unknown>;
+    if (raw && typeof raw === "object" && raw["citation"] === undefined) raw["citation"] = null;
     return usage;
   }
 
