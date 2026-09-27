@@ -311,6 +311,32 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   ReviewCitationFailure: new Set(["citation_index", "reference", "cited_url", "doi", "failure"]),
   ReviewMoreCitation: new Set(["index", "reference", "cited_url", "doi", "sentence", "position"]),
+  CitecheckStarted: new Set(["citecheck_id", "status"]),
+  Citecheck: new Set([
+    "citecheck_id",
+    "status",
+    "outcome",
+    "created_at",
+    "completed_at",
+    "poll_after_seconds",
+    "policy",
+    "summary",
+    "credits",
+    "citations",
+    "citation_issues",
+    "citation_failures",
+    "more_citations",
+    "failure",
+  ]),
+  CitecheckPolicy: new Set(["max_citations"]),
+  CitecheckSummary: new Set([
+    "citations_found",
+    "citations_selected",
+    "citation_limit",
+    "citation_limit_reached",
+    "citation_checks",
+    "citation_issues",
+  ]),
   ReviewAssessmentCounts: new Set(["completed", "failed"]),
   ReviewVerificationCounts: new Set(["planned", "completed", "failed"]),
   ReviewCredits: new Set(["charged"]),
@@ -426,6 +452,17 @@ const NESTED: Record<string, Record<string, string | null>> = {
   },
   ReviewCitationFailure: { failure: "ReviewFailureBlock" },
   ReviewMoreCitation: { position: "ReviewCitationPosition" },
+  Citecheck: {
+    policy: "CitecheckPolicy",
+    summary: "CitecheckSummary",
+    credits: "ReviewCredits",
+    citations: "ReviewCitation",
+    citation_issues: "ReviewCitationIssue",
+    citation_failures: "ReviewCitationFailure",
+    more_citations: "ReviewMoreCitation",
+    failure: "ReviewFailureBlock",
+  },
+  CitecheckSummary: { citation_checks: "ReviewCitationCheckCounts" },
   ReviewIssue: { escalation: "Escalation", failure: "ReviewFailureBlock" },
   ReviewFailure: { failure: "ReviewFailureBlock" },
   ReviewClaim: {
@@ -560,6 +597,13 @@ describe("contract", () => {
     // produce on demand (our failure with and without a finding), and a
     // supported row. Same keys as the recorded bodies.
     ["review_citations_constructed.json", "ReviewFull"],
+    // A review with the claims and citations found past its caps, recorded.
+    ["review_citations_more.json", "ReviewFull"],
+    // /citecheck, recorded: the receipt, a check of a draft's first four
+    // citations, and a check of two statement-source pairs.
+    ["citecheck_accepted.json", "CitecheckStarted"],
+    ["citecheck_completed.json", "Citecheck"],
+    ["citecheck_pairs_completed.json", "Citecheck"],
     ["review_webhook_completed.json", "ReviewWebhookPayload"],
     ["review_webhook_failed.json", "ReviewWebhookPayload"],
   ];

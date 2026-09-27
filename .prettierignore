@@ -13,3 +13,4 @@ dist/
 # The recorded /review fixtures — the SAME bytes as the Python SDK's copies.
 test/fixtures/contract/review_*.json
 test/fixtures/contract/error_review_*.json
+test/fixtures/contract/citecheck_*.json

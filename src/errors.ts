@@ -17,7 +17,7 @@
  *     Request ID: {id}
  */
 
-import type { ReviewFull } from "./types.js";
+import type { Citecheck, ReviewFull } from "./types.js";
 
 export interface LenzErrorContext {
   message?: string;
@@ -321,6 +321,59 @@ export class ReviewTimeoutError extends LenzTimeoutError {
     });
     this.reviewId = reviewId;
     this.partial = partial;
+  }
+}
+
+/** `citecheckAndWait` reached its deadline before the check ended; it keeps running. */
+export class CitecheckTimeoutError extends LenzTimeoutError {
+  citecheckId: string;
+  partial: Citecheck | null;
+
+  constructor(citecheckId: string, partial: Citecheck | null, timeoutMs: number) {
+    super({
+      message: `Citation check ${citecheckId} did not finish within ${timeoutMs}ms`,
+      cause: "The citation check is still running server-side.",
+      fix: `Read it later with client.getCitecheck('${citecheckId}'), or wait on the citecheck.completed webhook.`,
+      docUrl: `${DOCS_BASE}/citations`,
+    });
+    this.citecheckId = citecheckId;
+    this.partial = partial;
+  }
+}
+
+/**
+ * `citecheckAndWait` read a check that ended `failed`. `errorCode` is the
+ * failure's `failure_reason` (an open set) and `citecheck` the failed check.
+ * A subclass of {@link LenzPipelineError}.
+ */
+export class CitecheckFailedError extends LenzPipelineError {
+  citecheckId: string;
+  errorCode: string;
+  citecheck: Citecheck;
+
+  constructor(check: Citecheck) {
+    const failure = check.failure;
+    const errorCode = failure?.failure_reason ?? "";
+    const hint = failure?.hint ?? "";
+    super({
+      message: `Citation check ${check.citecheck_id} failed: ${errorCode || "unknown"}`,
+      cause: errorCode || "unknown",
+      fix:
+        hint ||
+        (!failure
+          ? `The check failed without a stated reason; read it with client.getCitecheck('${check.citecheck_id}').`
+          : failure.retryable
+            ? "Retry the same request after a short wait."
+            : "Check the request and resubmit."),
+      docUrl: failure?.docs_url || `${DOCS_BASE}/errors`,
+    });
+    this.citecheckId = check.citecheck_id;
+    this.errorCode = errorCode;
+    this.citecheck = check;
+    this.failureReason = errorCode;
+    this.failureClass = failure?.failure_class ?? "";
+    this.retryable = typeof failure?.retryable === "boolean" ? failure.retryable : null;
+    this.hint = hint;
   }
 }
 

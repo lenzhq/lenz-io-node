@@ -18,6 +18,19 @@ defaults.
   API's `escalate` object as `escalate.max_citations`: the draft's first N
   citations are checked. Omitted or `0` sends nothing and checks none.
   `reviewAndWait` takes it too.
+- **`client.citecheck`, `client.getCitecheck` and `client.citecheckAndWait`**
+  for `POST /citecheck` and `GET /citechecks/{citecheck_id}`: the citation
+  check on its own. `citecheck({ text | pairs, maxCitations?, language?,
+webhookUrl?, idempotencyKey? })` takes a draft (its first `maxCitations`,
+  1-20, are checked) or 1 to 20 statement-source pairs (`CitationPair`:
+  `statement` and one of `url` or `doi`, with optional `quotes` and, for a
+  DOI, what the reference gives); exactly one of the two, and `maxCitations`
+  with pairs throws before any request. The body is a `Citecheck`, with the
+  review's citation rows, `summary`, `credits` and `more_citations`.
+  `citecheckAndWait` throws `CitecheckFailedError` (a `LenzPipelineError`) or
+  `CitecheckTimeoutError` (a `LenzTimeoutError`, with `partial`).
+  `citecheck.completed` / `citecheck.failed` webhooks parse into
+  `CitecheckCompleted` / `CitecheckFailed`.
 - **`maxAssessments: 0`**: a review that checks no claim, e.g. a review of the
   draft's citations only.
 - **The citation types.** `ReviewFull.citations` (one `ReviewCitation` per

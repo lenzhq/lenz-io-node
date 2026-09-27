@@ -2,13 +2,14 @@
 
 Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://lenz.io/developers).
 
-**Five API calls: one research-depth ladder, and one call that runs it on a whole draft.**
+**Six API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
 
-- `review` — the ladder on a draft in one async call, its citations too if asked: its claims, a quick verdict on each, a deep check on the doubtful ones, issues, with rewrites.
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
+- `citecheck` — the citation check on its own: does each source a draft cites say what the draft says? Async.
 - `ask` — follow-up questions grounded on a verification. Sync, paid.
+- `review` — the ladder on a draft in one async call, its citations too if asked: its claims, a quick verdict on each, a deep check on the doubtful ones, issues, with rewrites.
 
 Built for teams whose AI output is async or document-shaped: legal-memo
 generators, deep-research products, due-diligence platforms, vertical
@@ -122,6 +123,42 @@ Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check;
 `review.credits.charged` says what the review cost. A resend with the same
 `idempotencyKey` within 24 hours returns the same review; a new key is a new
 review.
+
+## Check a draft's citations
+
+`citecheck` runs the citation check on its own, without the rest of a review:
+does each cited source say what the draft says it does? Send a draft (its
+links are read from the text, as for `review`) or the statement-source pairs
+yourself.
+
+```ts
+const check = await client.citecheckAndWait({ text: draft, maxCitations: 10 });
+console.log(check.outcome); // clean | issues_found | incomplete | unchecked
+for (const c of check.citation_issues) console.log(c.finding, c.cited_url ?? c.doi, c.statement);
+
+// Pairs: each checked as it is (maxCitations does not apply)
+await client.citecheckAndWait({
+  pairs: [
+    {
+      statement: "Water boils at 100 degrees Celsius at sea level.",
+      url: "https://en.wikipedia.org/wiki/Boiling_point",
+    },
+    {
+      statement: "Diamond sensors can measure temperature in a living cell.",
+      doi: "10.1038/nature12373",
+      cited_year: "2013",
+    },
+  ],
+});
+```
+
+The body carries the same rows as a review's: `citations`, `citation_issues`,
+`citation_failures`, `summary` and `more_citations` (the draft's citations past
+`maxCitations`, found but not checked). `client.citecheck(...)` returns a
+`citecheck_id` at once; read it with `client.getCitecheck(citecheckId)`.
+`citecheckAndWait` throws `CitecheckFailedError` when the check fails and
+`CitecheckTimeoutError` at the deadline. `citecheck.completed` and
+`citecheck.failed` webhooks parse into `CitecheckCompleted` / `CitecheckFailed`.
 
 ## Quickstart — the canonical integration
 
