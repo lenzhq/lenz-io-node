@@ -1347,7 +1347,7 @@ export type ReviewCitationUncheckedReason =
   | "no_statement"
   | "invalid_url"
   | "other_version"
-  | "ambiguous"
+  | "inconclusive"
   | "ambiguous_reference"
   | (string & NonNullable<unknown>);
 

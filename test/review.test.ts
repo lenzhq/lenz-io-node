@@ -31,6 +31,7 @@ import { withReviewDefaults } from "../src/reviewDefaults.js";
 import type {
   ReviewEntity,
   ReviewFull,
+  ReviewCitationUncheckedReason,
   ReviewInput,
   ReviewIssues,
   VerdictLabel,
@@ -966,6 +967,15 @@ describe("getReview() citations", () => {
     expect(review.citation_failures.map((f) => f.citation_index)).toEqual([7]);
     expect(review.issues).toEqual([]);
     expect(review.outcome).toBe("incomplete");
+  });
+
+  it("an unchecked reason this version does not list passes through", async () => {
+    const body = JSON.parse(JSON.stringify(CIT_COMPLETED)) as ReviewFull;
+    body.citations[3]!.check.unchecked_reason = "inconclusive";
+    const review = (await read(body)) as ReviewFull;
+    const reason: ReviewCitationUncheckedReason | null =
+      review.citations[3]!.check.unchecked_reason;
+    expect(reason).toBe("inconclusive");
   });
 
   it("waiting rows have no result", async () => {
