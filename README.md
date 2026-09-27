@@ -4,7 +4,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 
 **Five API calls: one research-depth ladder, and one call that runs it on a whole draft.**
 
-- `review` — the whole ladder on a draft in one async call: its claims, a quick verdict on each, a deep check on the doubtful ones, the issues with suggested rewrites. 2-4 min.
+- `review` — the ladder on a draft in one async call, its citations too if asked: its claims, a quick verdict on each, a deep check on the doubtful ones, issues, with rewrites.
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
