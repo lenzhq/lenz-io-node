@@ -8,9 +8,9 @@ All notable changes to this SDK are documented here. Format follows
 
 `review` can check a draft's citations: does each linked source (a URL or a
 DOI) say what the draft says it does? Nothing the SDK already sends changes:
-leave the new options out and the request is exactly what 2.17.0 sends. Needs
-an API that serves the citation check; a body from one that does not reads
-with the new keys at their defaults.
+leave the new options out and the request is exactly what 2.17.0 sends. A
+review body without the citation keys reads with the new keys at their
+defaults.
 
 ### Added
 
@@ -36,11 +36,11 @@ with the new keys at their defaults.
   `ReviewCitationRecord`, `ReviewCitationDifference`,
   `ReviewCitationCheckCounts`, and the unions `ReviewCitationFinding`,
   `ReviewCitationSource` and `ReviewCitationUncheckedReason` (an open set).
-- **Defaults for an older server.** `getReview`, `reviewAndWait` and the
-  `review.*` webhook events fill the citation keys the server did not send
-  (`[]` for the lists, `null` for the counts, `0` for `citation_issues`,
-  `false` and `null` for the policy), so the types hold against an API
-  without the feature. A key the server sent is never changed.
+- **Defaults for a body without the citation keys.** `getReview`,
+  `reviewAndWait` and the `review.*` webhook events fill the citation keys a
+  review body does not carry (`[]` for the lists, `null` for the counts, `0`
+  for `citation_issues`, `false` and `null` for the policy), so the types
+  hold for every review body. A key the server sent is never changed.
 
 ### Deprecated
 

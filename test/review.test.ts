@@ -582,7 +582,7 @@ describe("reviewAndWait()", () => {
       const review = await drain(
         client.reviewAndWait({ text: DRAFT }, { onUpdate: (r) => seen.push(r.status) }),
       );
-      // As the server sent it, with the citation keys an older server omits.
+      // As the server sent it, with the citation keys the body does not carry.
       expect(review).toEqual(withReviewDefaults(COMPLETED));
       expect(seen).toEqual(["verifying", "completed"]);
     });
@@ -1010,7 +1010,7 @@ describe("getReview() citations", () => {
   });
 
   it.each(["review_completed.json", "review_failed_no_claim.json"])(
-    "a body from a server without the feature (%s) reads with the defaults",
+    "a body without the citation keys (%s) reads with the defaults",
     async (name) => {
       const body = fixture(name);
       expect(Object.keys(body).some((k) => k.startsWith("citation"))).toBe(false);
@@ -1037,7 +1037,7 @@ describe("getReview() citations", () => {
     },
   );
 
-  it("an old server's issues view gets the two lists but no rows", async () => {
+  it("an issues view without the citation keys gets the two lists but no rows", async () => {
     const review = await read(ISSUES, "issues");
     expect(review.citation_issues).toEqual([]);
     expect("citations" in review).toBe(false);

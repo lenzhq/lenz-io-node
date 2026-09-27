@@ -362,7 +362,7 @@ describe("LenzWebhooks — review events with citations", () => {
     expect(r.review.summary.citation_checks).toEqual({ checked: 6, unchecked: 3, failed: 1 });
   });
 
-  it("a review from a server without the feature reads with the defaults", () => {
+  it("a review without the citation keys reads with the defaults", () => {
     const body = reviewPayload("review_webhook_completed.json");
     const r = hooks.parse(body, { "X-Lenz-Signature": sign(body) }) as ReviewCompleted;
     expect([r.review.citations, r.review.citation_issues, r.review.citation_failures]).toEqual([

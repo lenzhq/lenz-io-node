@@ -1,10 +1,3 @@
-/**
- * Fills the review body's citation keys when the server did not send them,
- * so a body from an API without the citation check reads like one from an
- * API with it and the check not asked for: `[]` for the lists, `null` for
- * the counts, `0` for `citation_issues`, `false` / `null` for the policy.
- * Keys the server sent are never touched. Returns a copy.
- */
 function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
@@ -14,6 +7,12 @@ function withNull(v: unknown, key: string): unknown {
   return { ...v, [key]: null };
 }
 
+/**
+ * Fills the citation keys a review body does not carry, so it reads like a
+ * review that did not ask for the check: `[]` for the lists, `null` for the
+ * counts, `0` for `citation_issues`, `false` / `null` for the policy. Keys
+ * the server sent are never touched. Returns a copy.
+ */
 export function withReviewDefaults<T>(body: T): T {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const b = { ...(body as Record<string, unknown>) };
@@ -21,7 +20,7 @@ export function withReviewDefaults<T>(body: T): T {
   b["citation_failures"] ??= [];
   // Only the full view carries rows: `citations` sits beside `claims`.
   if (Array.isArray(b["claims"])) b["citations"] ??= [];
-  // A key added to the rows later reads as null on a body that predates it.
+  // A row key the body does not carry reads as null.
   if (Array.isArray(b["citation_issues"])) {
     b["citation_issues"] = (b["citation_issues"] as unknown[]).map((i) =>
       withNull(i, "missing_quote"),
