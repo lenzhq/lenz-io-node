@@ -230,7 +230,11 @@ const REVIEW_STATUSES: readonly string[] = [
   "failed",
 ];
 
-/** THIS citation check: its id, a known status, and its three lists. */
+function isPlainObject(v: unknown): boolean {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** THIS citation check: its id, a known status, its three lists, its summary and credits. */
 function isCitecheckBody(body: unknown, citecheckId: string): body is Citecheck {
   if (!body || typeof body !== "object" || Array.isArray(body)) return false;
   const b = body as Record<string, unknown>;
@@ -240,7 +244,9 @@ function isCitecheckBody(body: unknown, citecheckId: string): body is Citecheck 
     ["queued", "checking", "completed", "failed"].includes(b["status"]) &&
     Array.isArray(b["citations"]) &&
     Array.isArray(b["citation_issues"]) &&
-    Array.isArray(b["citation_failures"])
+    Array.isArray(b["citation_failures"]) &&
+    isPlainObject(b["summary"]) &&
+    isPlainObject(b["credits"])
   );
 }
 
@@ -919,15 +925,22 @@ export class Lenz {
     citecheckId: string,
     transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
   ): Promise<Citecheck> {
+    return withCitecheckDefaults(await this._readCitecheck(citecheckId, transport)) as Citecheck;
+  }
+
+  /** The body as the server sent it, before any default is filled. */
+  private async _readCitecheck(
+    citecheckId: string,
+    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
+  ): Promise<unknown> {
     if (!citecheckId) {
       throw new Error("getCitecheck() requires a non-empty citecheck_id.");
     }
-    const body = await this.request<Citecheck>({
+    return this.request<unknown>({
       method: "GET",
       path: `/citechecks/${encodeURIComponent(citecheckId)}`,
       ...transport,
     });
-    return withCitecheckDefaults(body);
   }
 
   /**
@@ -949,7 +962,9 @@ export class Lenz {
     });
     return this._waitJob<Citecheck>({
       deadline,
-      read: (transport) => this._getCitecheck(citecheckId, transport),
+      // The raw body, so the guard judges what the server sent: a default
+      // filled first would let a bare `{citecheck_id, status}` pass as a result.
+      read: (transport) => this._readCitecheck(citecheckId, transport),
       isBody: (body) => isCitecheckBody(body, citecheckId),
       failed: (check) => new CitecheckFailedError(check),
       timedOut: (last) => new CitecheckTimeoutError(citecheckId, last, timeoutMs),
