@@ -1403,6 +1403,8 @@ export interface ReviewCitationCheck {
   rationale: string | null;
   /** `null` when the draft quoted nothing from this source. */
   quote: "matched" | "not_in_source" | "unchecked" | null;
+  /** The quoted excerpt the quote check did not find; `null` unless `quote` is `not_in_source`. */
+  missing_quote: string | null;
   /** `null` with no DOI, or when the registry did not answer. */
   doi_registered: boolean | null;
   /** `null` with no DOI. */
@@ -1453,6 +1455,8 @@ export interface ReviewCitationIssue {
   source: ReviewCitationSource;
   snippet: string | null;
   rationale: string | null;
+  /** On `quote_not_in_source`: the quoted excerpt that was not found. */
+  missing_quote: string | null;
   metadata_differences: ReviewCitationDifference[];
   page_title: string | null;
   /** Set when another part of the check failed after the finding was established. */

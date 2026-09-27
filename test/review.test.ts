@@ -950,6 +950,9 @@ describe("getReview() citations", () => {
     const byIndex = new Map(review.citations.map((c) => [c.index, c]));
     expect(byIndex.get(0)!.result!.finding).toBe("contradicted");
     expect(byIndex.get(1)!.check.quote).toBe("not_in_source");
+    expect(byIndex.get(1)!.check.missing_quote).toBe("the best in a decade");
+    expect(byIndex.get(0)!.check.missing_quote).toBeNull();
+    expect(review.citation_issues[3]!.missing_quote).toBe("the best in a decade");
     expect(byIndex.get(3)!.check.unchecked_reason).toBe("partial_text");
     expect(byIndex.get(4)!.check.registered!.year).toBe(2013);
     expect(byIndex.get(4)!.check.metadata_differences[0]!.field).toBe("year");
@@ -976,6 +979,18 @@ describe("getReview() citations", () => {
     const reason: ReviewCitationUncheckedReason | null =
       review.citations[3]!.check.unchecked_reason;
     expect(reason).toBe("inconclusive");
+  });
+
+  it("missing_quote reads as null on a body without it", async () => {
+    const body = JSON.parse(JSON.stringify(CIT_COMPLETED)) as Record<string, unknown>;
+    const rows = body["citations"] as Array<{ check: Record<string, unknown> }>;
+    delete rows[1]!.check["missing_quote"];
+    const issues = body["citation_issues"] as Array<Record<string, unknown>>;
+    delete issues[3]!["missing_quote"];
+    const review = (await read(body)) as ReviewFull;
+    expect(review.citations[1]!.check.missing_quote).toBeNull();
+    expect(review.citation_issues[3]!.missing_quote).toBeNull();
+    expect(review.citations[1]!.check.quote).toBe("not_in_source");
   });
 
   it("waiting rows have no result", async () => {

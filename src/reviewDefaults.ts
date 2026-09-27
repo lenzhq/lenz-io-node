@@ -5,6 +5,15 @@
  * the counts, `0` for `citation_issues`, `false` / `null` for the policy.
  * Keys the server sent are never touched. Returns a copy.
  */
+function isObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function withNull(v: unknown, key: string): unknown {
+  if (!isObject(v) || v[key] !== undefined) return v;
+  return { ...v, [key]: null };
+}
+
 export function withReviewDefaults<T>(body: T): T {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const b = { ...(body as Record<string, unknown>) };
@@ -12,6 +21,18 @@ export function withReviewDefaults<T>(body: T): T {
   b["citation_failures"] ??= [];
   // Only the full view carries rows: `citations` sits beside `claims`.
   if (Array.isArray(b["claims"])) b["citations"] ??= [];
+  // A key added to the rows later reads as null on a body that predates it.
+  if (Array.isArray(b["citation_issues"])) {
+    b["citation_issues"] = (b["citation_issues"] as unknown[]).map((i) =>
+      withNull(i, "missing_quote"),
+    );
+  }
+  if (Array.isArray(b["citations"])) {
+    b["citations"] = (b["citations"] as unknown[]).map((row) => {
+      if (!isObject(row) || !isObject(row["check"])) return row;
+      return { ...row, check: withNull(row["check"], "missing_quote") };
+    });
+  }
   const summary = b["summary"];
   if (summary && typeof summary === "object" && !Array.isArray(summary)) {
     const s = { ...(summary as Record<string, unknown>) };
