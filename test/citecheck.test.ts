@@ -23,7 +23,7 @@ import {
   LenzTimeoutError,
   LenzWebhooks,
 } from "../src/index.js";
-import type { Citecheck, CitecheckCompleted, CitecheckInput } from "../src/index.js";
+import type { CitationPair, Citecheck, CitecheckCompleted, CitecheckInput } from "../src/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -112,6 +112,13 @@ describe("citecheck()", () => {
       },
     ];
     expect(await sent({ pairs })).toEqual({ pairs });
+  });
+
+  it("a pair carries no language of its own", () => {
+    // `language` is request-level only: the output language of the reasoning.
+    // @ts-expect-error: CitationPair has no `language`.
+    const pair: CitationPair = { statement: "s", url: "https://x.org", language: "de" };
+    expect(pair.statement).toBe("s");
   });
 
   it("always sends an Idempotency-Key", async () => {

@@ -28,7 +28,9 @@ webhookUrl?, idempotencyKey? })` takes a draft (its first `maxCitations`,
   1-20, are checked) or 1 to 20 statement-source pairs (`CitationPair`:
   `statement` and one of `url` or `doi`, with optional `quotes` and, for a
   DOI, what the reference gives); exactly one of the two, and `maxCitations`
-  with pairs throws before any request. The body is a `Citecheck`, with the
+  with pairs throws before any request. `language` is the language Lenz
+  writes the reasoning in (English when omitted); hints are always in English.
+  The body is a `Citecheck`, with the
   review's citation rows, `summary`, `credits` and `more_citations`.
   `citecheckAndWait` throws `CitecheckFailedError` (a `LenzPipelineError`) or
   `CitecheckTimeoutError` (a `LenzTimeoutError`, with `partial`).
