@@ -78,16 +78,15 @@ await client.review({
   before you use it.
 - **`failures`** lists the claims outside the issues whose check failed.
 
-**Checking the draft's sources.** `checkCitations: true` also checks the
-draft's citations, its links and DOIs: does each source say what the draft
-says it does? Links are read from `text`, so keep a link as a markdown link
-(`[words](https://...)`); a Word or Google document pasted as plain text loses
-them. The first `maxCitations` (1-20, default 20) in the draft's order are
-checked. With `maxAssessments: 0` the review checks the sources
-and no claim.
+**Checking the draft's sources.** `maxCitations: N` (1-20) also checks the
+draft's first N citations, its links and DOIs: does each source say what the
+draft says it does? Links are read from `text`, so keep a link as a markdown
+link (`[words](https://...)`); a Word or Google document pasted as plain text
+loses them. With `maxAssessments: 0` the review checks the sources and no
+claim.
 
 ```ts
-const review = await client.reviewAndWait({ text: draft, checkCitations: true, maxAssessments: 0 });
+const review = await client.reviewAndWait({ text: draft, maxCitations: 20, maxAssessments: 0 });
 const s = review.summary;
 console.log(`${s.citations_found} found, ${s.citations_selected} checked`);
 for (const c of review.citation_issues) {
@@ -105,7 +104,9 @@ citation with its `check`; a row that could not be checked says why in
 `citation_failures` lists the ones that failed on our side. A citation issue
 makes `outcome` `issues_found` even when `issues` is empty. `rationale` is a
 reviewer's note, not a checked source; `snippet` is the passage from the page.
-Leave both options out and nothing is sent: the review is as before.
+`more_claims` and `more_citations` list what the draft holds past
+`maxAssessments` and `maxCitations`: found, not checked, to send in a later
+request. Leave `maxCitations` out (or `0`) and no citation is checked.
 
 `reviewAndWait` polls on the review's own `poll_after_seconds` and takes
 `{ timeoutMs, onUpdate }`: `onUpdate(review)` fires on every poll that changed

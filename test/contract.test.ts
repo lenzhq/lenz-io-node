@@ -204,6 +204,8 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "failures",
     "citation_issues",
     "citation_failures",
+    "more_claims",
+    "more_citations",
     "failure",
     "claims",
     "citations",
@@ -225,6 +227,8 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "failures",
     "citation_issues",
     "citation_failures",
+    "more_claims",
+    "more_citations",
     "failure",
   ]),
   EscalationPolicy: new Set([
@@ -233,7 +237,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "max_verifications",
     "max_assessments",
     "depth",
-    "check_citations",
     "max_citations",
   ]),
   ReviewSummary: new Set([
@@ -307,6 +310,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "failure",
   ]),
   ReviewCitationFailure: new Set(["citation_index", "reference", "cited_url", "doi", "failure"]),
+  ReviewMoreCitation: new Set(["index", "reference", "cited_url", "doi", "sentence", "position"]),
   ReviewAssessmentCounts: new Set(["completed", "failed"]),
   ReviewVerificationCounts: new Set(["planned", "completed", "failed"]),
   ReviewCredits: new Set(["charged"]),
@@ -393,6 +397,7 @@ const REVIEW_ENVELOPE_NESTED: Record<string, string | null> = {
   failures: "ReviewFailure",
   citation_issues: "ReviewCitationIssue",
   citation_failures: "ReviewCitationFailure",
+  more_citations: "ReviewMoreCitation",
   failure: "ReviewFailureBlock",
 };
 
@@ -420,6 +425,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
     failure: "ReviewFailureBlock",
   },
   ReviewCitationFailure: { failure: "ReviewFailureBlock" },
+  ReviewMoreCitation: { position: "ReviewCitationPosition" },
   ReviewIssue: { escalation: "Escalation", failure: "ReviewFailureBlock" },
   ReviewFailure: { failure: "ReviewFailureBlock" },
   ReviewClaim: {

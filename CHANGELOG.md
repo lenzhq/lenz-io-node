@@ -8,17 +8,16 @@ All notable changes to this SDK are documented here. Format follows
 
 `review` can check a draft's citations: does each linked source (a URL or a
 DOI) say what the draft says it does? Nothing the SDK already sends changes:
-leave the new options out and the request is exactly what 2.17.0 sends. A
+leave `maxCitations` out and the request is exactly what 2.17.0 sends. A
 review body without the citation keys reads with the new keys at their
 defaults.
 
 ### Added
 
-- **`client.review({ text, checkCitations: true, maxCitations })`**, sent as
-  the API's `citations` object (`{ check: true, max: N }`), only the options
-  you set. The first `maxCitations` (1-20, default 20) citations in the
-  draft's order are checked. `maxCitations` without
-  `checkCitations` throws before any request. `reviewAndWait` takes both.
+- **`client.review({ text, maxCitations: N })`** (1-20), sent inside the
+  API's `escalate` object as `escalate.max_citations`: the draft's first N
+  citations are checked. Omitted or `0` sends nothing and checks none.
+  `reviewAndWait` takes it too.
 - **`maxAssessments: 0`**: a review that checks no claim, e.g. a review of the
   draft's citations only.
 - **The citation types.** `ReviewFull.citations` (one `ReviewCitation` per
@@ -31,15 +30,20 @@ defaults.
   `citations_found`, `citations_selected`, `citation_limit`,
   `citation_limit_reached`, `citation_checks` (`checked`, `unchecked`,
   `failed`), `citation_issues` and `citations_skipped`; `EscalationPolicy`
-  gains `check_citations` and `max_citations`. Also exported:
+  gains `max_citations`. `more_claims` and `more_citations`
+  (`ReviewMoreCitation`: `index`, `reference`, `cited_url`, `doi`,
+  `sentence`, `position`) list what the draft holds past `maxAssessments`
+  and `maxCitations`: found but not checked; `null` until the draft is read.
+  Also exported:
   `ReviewCitationCheck`, `ReviewCitationResult`, `ReviewCitationPosition`,
   `ReviewCitationRecord`, `ReviewCitationDifference`,
   `ReviewCitationCheckCounts`, and the unions `ReviewCitationFinding`,
   `ReviewCitationSource` and `ReviewCitationUncheckedReason` (an open set).
 - **Defaults for a body without the citation keys.** `getReview`,
   `reviewAndWait` and the `review.*` webhook events fill the citation keys a
-  review body does not carry (`[]` for the lists, `null` for the counts, `0`
-  for `citation_issues`, `false` and `null` for the policy), so the types
+  review body does not carry (`[]` for the lists, `null` for the counts,
+  `more_claims`, `more_citations` and the policy's `max_citations`, `0` for
+  `citation_issues`), so the types
   hold for every review body. A key the server sent is never changed.
 
 ### Deprecated

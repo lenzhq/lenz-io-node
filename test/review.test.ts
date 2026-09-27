@@ -891,42 +891,21 @@ describe("review() citations option", () => {
 
   it("not asked: nothing is sent, and the body is as before", async () => {
     expect(await sent({})).toEqual({ text: DRAFT, visibility: "private" });
-    expect(await sent({ checkCitations: undefined, maxCitations: undefined })).toEqual({
-      text: DRAFT,
-      visibility: "private",
-    });
+    // Omitted and 0 both mean no citation check: nothing is sent.
+    for (const maxCitations of [undefined, 0]) {
+      expect(await sent({ maxCitations })).toEqual({ text: DRAFT, visibility: "private" });
+    }
   });
 
-  it.each([
-    [{ checkCitations: true }, { check: true }],
-    [
-      { checkCitations: true, maxCitations: 10 },
-      { check: true, max: 10 },
-    ],
-    [{ checkCitations: false }, { check: false }],
-    [
-      { checkCitations: false, maxCitations: 5 },
-      { check: false, max: 5 },
-    ],
-  ])("%o is sent as the citations object", async (input, expected) => {
-    const body = await sent(input);
-    expect(body["citations"]).toEqual(expected);
-    expect("escalate" in body).toBe(false);
+  it("maxCitations is sent inside escalate", async () => {
+    const body = await sent({ maxCitations: 10 });
+    expect(body["escalate"]).toEqual({ max_citations: 10 });
+    expect("citations" in body).toBe(false);
   });
 
-  it("maxCitations alone is refused before any request", async () => {
-    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await expect(client.review({ text: DRAFT, maxCitations: 5 })).rejects.toThrow(
-      "maxCitations needs checkCitations: true.",
-    );
-    expect(calls).toHaveLength(0);
-  });
-
-  it("a citations-only review sends maxAssessments 0", async () => {
-    const body = await sent({ checkCitations: true, maxAssessments: 0 });
-    expect(body["escalate"]).toEqual({ max_assessments: 0 });
-    expect(body["citations"]).toEqual({ check: true });
+  it("a citations-only review sends maxAssessments 0 beside maxCitations", async () => {
+    const body = await sent({ maxCitations: 20, maxAssessments: 0 });
+    expect(body["escalate"]).toEqual({ max_assessments: 0, max_citations: 20 });
   });
 });
 
@@ -939,8 +918,15 @@ describe("getReview() citations", () => {
 
   it("every row state reads through", async () => {
     const review = (await read(CIT_CONSTRUCTED)) as ReviewFull;
-    expect(review.policy.check_citations).toBe(true);
     expect(review.policy.max_citations).toBe(10);
+    expect(review.more_claims).toEqual([]);
+    const more = review.more_citations![0]!;
+    expect([more.index, more.cited_url, more.position?.start]).toEqual([
+      10,
+      "https://example.gov/housing-2024",
+      2491,
+    ]);
+    expect(more.sentence).toMatch(/housing figures/);
     const s = review.summary;
     expect([
       s.citations_found,
@@ -1058,8 +1044,8 @@ describe("getReview() citations", () => {
         [],
         [],
       ]);
-      expect(review.policy.check_citations).toBe(false);
       expect(review.policy.max_citations).toBeNull();
+      expect([review.more_claims, review.more_citations]).toEqual([null, null]);
       const s = review.summary;
       expect([
         s.citations_found,
@@ -1087,7 +1073,7 @@ describe("getReview() citations", () => {
       { body: CIT_CONSTRUCTED },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const review = await client.reviewAndWait({ text: DRAFT, checkCitations: true });
+    const review = await client.reviewAndWait({ text: DRAFT, maxCitations: 10 });
     expect(review.citations).toHaveLength(10);
   });
 });

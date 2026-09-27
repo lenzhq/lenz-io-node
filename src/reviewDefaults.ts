@@ -9,9 +9,9 @@ function withNull(v: unknown, key: string): unknown {
 
 /**
  * Fills the citation keys a review body does not carry, so it reads like a
- * review that did not ask for the check: `[]` for the lists, `null` for the
- * counts, `0` for `citation_issues`, `false` / `null` for the policy. Keys
- * the server sent are never touched. Returns a copy.
+ * review that checks no citation: `[]` for the lists, `null` for the counts,
+ * `more_claims`, `more_citations` and `policy.max_citations`, `0` for
+ * `citation_issues`. Keys the server sent are never touched. Returns a copy.
  */
 export function withReviewDefaults<T>(body: T): T {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
@@ -20,6 +20,9 @@ export function withReviewDefaults<T>(body: T): T {
   b["citation_failures"] ??= [];
   // Only the full view carries rows: `citations` sits beside `claims`.
   if (Array.isArray(b["claims"])) b["citations"] ??= [];
+  for (const key of ["more_claims", "more_citations"]) {
+    if (b[key] === undefined) b[key] = null;
+  }
   // A row key the body does not carry reads as null.
   if (Array.isArray(b["citation_issues"])) {
     b["citation_issues"] = (b["citation_issues"] as unknown[]).map((i) =>
@@ -51,7 +54,6 @@ export function withReviewDefaults<T>(body: T): T {
   const policy = b["policy"];
   if (policy && typeof policy === "object" && !Array.isArray(policy)) {
     const p = { ...(policy as Record<string, unknown>) };
-    p["check_citations"] ??= false;
     if (p["max_citations"] === undefined) p["max_citations"] = null;
     b["policy"] = p;
   }
