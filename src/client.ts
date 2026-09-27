@@ -896,10 +896,7 @@ export class Lenz {
     } catch (exc) {
       // A retried submit that meets the first attempt's check still being
       // created: when the server names it, that IS the receipt.
-      const named =
-        exc instanceof LenzError
-          ? (exc.body?.["citecheck_id"] ?? exc.body?.["review_id"])
-          : undefined;
+      const named = exc instanceof LenzError ? exc.body?.["citecheck_id"] : undefined;
       if (
         exc instanceof LenzError &&
         exc.statusCode === 409 &&

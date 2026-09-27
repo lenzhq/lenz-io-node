@@ -17,6 +17,7 @@ import {
   CitecheckFailedError,
   CitecheckTimeoutError,
   Lenz,
+  LenzError,
   LenzGoneError,
   LenzPipelineError,
   LenzTimeoutError,
@@ -134,21 +135,31 @@ describe("citecheck()", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it.each(["citecheck_id", "review_id"])(
-    "a conflict naming the check (%s) is the receipt",
-    async (key) => {
-      const { fetch } = makeFetch([
-        {
-          status: 409,
-          body: { detail: "still being created", code: "idempotency_conflict", [key]: CHECK_ID },
+  it("a conflict naming the check is the receipt", async () => {
+    const { fetch } = makeFetch([
+      {
+        status: 409,
+        body: {
+          detail: "still being created",
+          code: "idempotency_conflict",
+          citecheck_id: CHECK_ID,
         },
-      ]);
-      const started = await new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 }).citecheck({
-        text: DRAFT,
-      });
-      expect(started.citecheck_id).toBe(CHECK_ID);
-    },
-  );
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    expect((await client.citecheck({ text: DRAFT })).citecheck_id).toBe(CHECK_ID);
+  });
+
+  it("a conflict naming no check rejects", async () => {
+    const { fetch } = makeFetch([
+      {
+        status: 409,
+        body: { detail: "still being created", code: "idempotency_conflict", citecheck_id: null },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    await expect(client.citecheck({ text: DRAFT })).rejects.toBeInstanceOf(LenzError);
+  });
 });
 
 // ── read ─────────────────────────────────────────────────────────────────
