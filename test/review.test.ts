@@ -949,7 +949,7 @@ describe("getReview() citations", () => {
       s.citation_limit_reached,
     ]).toEqual([23, 10, 10, true]);
     expect(s.citation_checks).toEqual({ checked: 6, unchecked: 3, failed: 1 });
-    expect(s.citation_issues).toBe(5);
+    expect(s.citation_issues).toBe(6);
     const byIndex = new Map(review.citations.map((c) => [c.index, c]));
     expect(byIndex.get(0)!.result!.finding).toBe("contradicted");
     expect(byIndex.get(1)!.check.quote).toBe("not_in_source");
@@ -968,6 +968,7 @@ describe("getReview() citations", () => {
       "page_not_found",
       "contradicted",
       "quote_not_in_source",
+      "partly_supported",
       "metadata_mismatch",
     ]);
     expect(review.citation_failures.map((f) => f.citation_index)).toEqual([7]);
@@ -1019,6 +1020,7 @@ describe("getReview() citations", () => {
     expect(s.citation_issues).toBe(review.citation_issues.length);
     const findings = new Set(review.citations.map((c) => c.result?.finding));
     for (const f of [
+      "supported",
       "contradicted",
       "page_not_found",
       "metadata_mismatch",
