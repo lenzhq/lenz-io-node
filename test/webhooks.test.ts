@@ -343,3 +343,35 @@ describe("LenzWebhooks — review events", () => {
     expect("review" in evt).toBe(false);
   });
 });
+
+describe("LenzWebhooks — review events with citations", () => {
+  const hooks = new LenzWebhooks({ secret: SECRET });
+  const citations = JSON.parse(
+    readFileSync(join(REVIEW_FIXTURES, "review_citations_constructed.json"), "utf-8"),
+  ) as Record<string, unknown>;
+
+  it("carries the citation rows, issues and failures", () => {
+    const body = reviewPayload("review_webhook_completed.json", {
+      review: citations,
+      review_id: citations["review_id"],
+    });
+    const r = hooks.parse(body, { "X-Lenz-Signature": sign(body) }) as ReviewCompleted;
+    expect(r.review.citations).toHaveLength(10);
+    expect(r.review.citation_issues[0]!.finding).toBe("doi_not_found");
+    expect(r.review.citation_failures[0]!.citation_index).toBe(7);
+    expect(r.review.summary.citation_checks).toEqual({ checked: 6, unchecked: 3, failed: 1 });
+  });
+
+  it("a review without the citation keys reads with the defaults", () => {
+    const body = reviewPayload("review_webhook_completed.json");
+    const r = hooks.parse(body, { "X-Lenz-Signature": sign(body) }) as ReviewCompleted;
+    expect([r.review.citations, r.review.citation_issues, r.review.citation_failures]).toEqual([
+      [],
+      [],
+      [],
+    ]);
+    expect(r.review.policy.check_citations).toBe(false);
+    expect(r.review.summary.citations_found).toBeNull();
+    expect(r.review.summary.citation_issues).toBe(0);
+  });
+});

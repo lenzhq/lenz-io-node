@@ -4,7 +4,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 
 **Five API calls: one research-depth ladder, and one call that runs it on a whole draft.**
 
-- `review` — the whole ladder on a draft in one async call: its claims, a quick verdict on each, a deep check on the doubtful ones, the issues with suggested rewrites. 2-4 min.
+- `review` — the ladder on a draft in one async call, its citations too if asked: its claims, a quick verdict on each, a deep check on the doubtful ones, issues, with rewrites.
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
@@ -77,6 +77,35 @@ await client.review({
   none. It is not verified itself: review it, or run it through `verify`,
   before you use it.
 - **`failures`** lists the claims outside the issues whose check failed.
+
+**Checking the draft's sources.** `checkCitations: true` also checks the
+draft's citations, its links and DOIs: does each source say what the draft
+says it does? Links are read from `text`, so keep a link as a markdown link
+(`[words](https://...)`); a Word or Google document pasted as plain text loses
+them. The first `maxCitations` (1-20, default 20) in the draft's order are
+checked. With `maxAssessments: 0` the review checks the sources
+and no claim.
+
+```ts
+const review = await client.reviewAndWait({ text: draft, checkCitations: true, maxAssessments: 0 });
+const s = review.summary;
+console.log(`${s.citations_found} found, ${s.citations_selected} checked`);
+for (const c of review.citation_issues) {
+  // most serious first
+  console.log(c.finding, c.cited_url ?? c.doi, c.statement);
+  if (c.snippet) console.log("  The source says:", c.snippet);
+}
+```
+
+`finding` is one of `doi_not_found`, `page_not_found`, `contradicted`,
+`quote_not_in_source`, `not_in_source`, `partly_supported` or
+`metadata_mismatch`, most serious first. `citations` lists every checked
+citation with its `check`; a row that could not be checked says why in
+`check.unchecked_reason` and what to do in `check.hint`, and
+`citation_failures` lists the ones that failed on our side. A citation issue
+makes `outcome` `issues_found` even when `issues` is empty. `rationale` is a
+reviewer's note, not a checked source; `snippet` is the passage from the page.
+Leave both options out and nothing is sent: the review is as before.
 
 `reviewAndWait` polls on the review's own `poll_after_seconds` and takes
 `{ timeoutMs, onUpdate }`: `onUpdate(review)` fires on every poll that changed

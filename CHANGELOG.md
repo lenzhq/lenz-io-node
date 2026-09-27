@@ -6,6 +6,42 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+`review` can check a draft's citations: does each linked source (a URL or a
+DOI) say what the draft says it does? Nothing the SDK already sends changes:
+leave the new options out and the request is exactly what 2.17.0 sends. A
+review body without the citation keys reads with the new keys at their
+defaults.
+
+### Added
+
+- **`client.review({ text, checkCitations: true, maxCitations })`**, sent as
+  the API's `citations` object (`{ check: true, max: N }`), only the options
+  you set. The first `maxCitations` (1-20, default 20) citations in the
+  draft's order are checked. `maxCitations` without
+  `checkCitations` throws before any request. `reviewAndWait` takes both.
+- **`maxAssessments: 0`**: a review that checks no claim, e.g. a review of the
+  draft's citations only.
+- **The citation types.** `ReviewFull.citations` (one `ReviewCitation` per
+  citation: `reference`, `cited_url`, `doi`, `statement`, `quotes`,
+  `position`, the derived `result` and the `check`), and on both views
+  `citation_issues` (`ReviewCitationIssue`, most serious first) and
+  `citation_failures` (`ReviewCitationFailure`). On a quote finding,
+  `missing_quote` (on the check and on the issue) is the excerpt that was not
+  found. `ReviewSummary` gains
+  `citations_found`, `citations_selected`, `citation_limit`,
+  `citation_limit_reached`, `citation_checks` (`checked`, `unchecked`,
+  `failed`), `citation_issues` and `citations_skipped`; `EscalationPolicy`
+  gains `check_citations` and `max_citations`. Also exported:
+  `ReviewCitationCheck`, `ReviewCitationResult`, `ReviewCitationPosition`,
+  `ReviewCitationRecord`, `ReviewCitationDifference`,
+  `ReviewCitationCheckCounts`, and the unions `ReviewCitationFinding`,
+  `ReviewCitationSource` and `ReviewCitationUncheckedReason` (an open set).
+- **Defaults for a body without the citation keys.** `getReview`,
+  `reviewAndWait` and the `review.*` webhook events fill the citation keys a
+  review body does not carry (`[]` for the lists, `null` for the counts, `0`
+  for `citation_issues`, `false` and `null` for the policy), so the types
+  hold for every review body. A key the server sent is never changed.
+
 ### Deprecated
 
 - **`similar_claims`** and **`candidates`** on `TaskStatus` (JSDoc
