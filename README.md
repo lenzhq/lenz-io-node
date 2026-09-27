@@ -83,7 +83,7 @@ draft's citations, its links and DOIs: does each source say what the draft
 says it does? Links are read from `text`, so keep a link as a markdown link
 (`[words](https://...)`); a Word or Google document pasted as plain text loses
 them. The first `maxCitations` (1-20, default 20) in the draft's order are
-checked, at no charge. With `maxAssessments: 0` the review checks the sources
+checked. With `maxAssessments: 0` the review checks the sources
 and no claim.
 
 ```ts

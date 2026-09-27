@@ -1537,7 +1537,7 @@ export interface ReviewInput {
   /**
    * Also check the draft's citations (links and DOIs, read from `text`; keep
    * a link as a markdown link, `[words](https://...)`): does each source say
-   * what the draft says it does? Free. Omitted with `maxCitations`: nothing is
+   * what the draft says it does? Omitted with `maxCitations`: nothing is
    * sent, and the review is exactly as without them.
    */
   checkCitations?: boolean;

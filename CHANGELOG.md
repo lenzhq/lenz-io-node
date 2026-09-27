@@ -17,7 +17,7 @@ with the new keys at their defaults.
 - **`client.review({ text, checkCitations: true, maxCitations })`**, sent as
   the API's `citations` object (`{ check: true, max: N }`), only the options
   you set. The first `maxCitations` (1-20, default 20) citations in the
-  draft's order are checked, at no charge. `maxCitations` without
+  draft's order are checked. `maxCitations` without
   `checkCitations` throws before any request. `reviewAndWait` takes both.
 - **`maxAssessments: 0`**: a review that checks no claim, e.g. a review of the
   draft's citations only.
