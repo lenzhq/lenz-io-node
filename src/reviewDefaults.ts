@@ -1,3 +1,15 @@
+/**
+ * The same for a citation check's body: `[]` for the three lists, `null` for
+ * `more_citations`. Keys the server sent are never touched. Returns a copy.
+ */
+export function withCitecheckDefaults<T>(body: T): T {
+  if (!isObject(body)) return body;
+  const b: Record<string, unknown> = { ...body };
+  for (const key of ["citations", "citation_issues", "citation_failures"]) b[key] ??= [];
+  if (b["more_citations"] === undefined) b["more_citations"] = null;
+  return b as T;
+}
+
 function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }

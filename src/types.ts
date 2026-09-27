@@ -1600,6 +1600,118 @@ export interface GetReviewOptions {
   view?: "full" | "issues";
 }
 
+// ── Citation check (`POST /citecheck`, `GET /citechecks/{citecheck_id}`) ──
+
+/**
+ * One statement and the source it cites, for `citecheck({ pairs })`:
+ * `statement` (1 to 1,000 characters) and exactly one of `url` (http or
+ * https) and `doi` (the DOI alone, like `10.1038/nature12373`).
+ */
+export interface CitationPair {
+  statement: string;
+  url?: string;
+  doi?: string;
+  /** Up to 3 excerpts the statement quotes from the source, each 15 to 500 characters and words of the statement. */
+  quotes?: string[];
+  /** With `doi`: the title the reference gives. */
+  cited_title?: string;
+  /** With `doi`: the authors, family names, at most 10. */
+  cited_authors?: string[];
+  /** With `doi`: the year the reference gives, four digits. */
+  cited_year?: string;
+  /** With `doi`: the journal the reference gives. */
+  cited_journal?: string;
+  /** The statement's language; overrides the request's. */
+  language?: string;
+}
+
+/** Send exactly one of `text` and `pairs`. */
+export interface CitecheckInput {
+  /**
+   * A draft, up to 50,000 characters, with its links (markdown links, bare
+   * URLs, `doi:` and `doi.org` forms, `[n]` markers with a reference list).
+   */
+  text?: string;
+  /** 1 to 20 statement-source pairs, each checked as it is. */
+  pairs?: CitationPair[];
+  /** With `text`: check its first N citations (1-20). Default 20. */
+  maxCitations?: number;
+  /** The language of the draft or the statements. Detected when omitted. */
+  language?: string;
+  /**
+   * Where `citecheck.completed` / `citecheck.failed` go. Omitted or `null`:
+   * the credential's default webhook URL. `""`: no webhook. A URL: that URL.
+   */
+  webhookUrl?: string | null;
+  /**
+   * A resend with the same key within 24 hours returns the same check. When
+   * omitted, a random key is generated per call.
+   */
+  idempotencyKey?: string;
+}
+
+/** The `POST /citecheck` receipt. `status` is always `queued`. */
+export interface CitecheckStarted {
+  citecheck_id: string;
+  status: "queued";
+}
+
+export interface CitecheckPolicy {
+  /** How many citations are checked (for pairs, the number of pairs). */
+  max_citations: number | null;
+}
+
+/** Counts over the check, as on a review's `summary`. */
+export interface CitecheckSummary {
+  /** Citations in the text, or the pairs sent; `null` until read. */
+  citations_found: number | null;
+  citations_selected: number | null;
+  citation_limit: number | null;
+  citation_limit_reached: boolean | null;
+  citation_checks: ReviewCitationCheckCounts | null;
+  citation_issues: number;
+}
+
+/**
+ * Where a citation check stands. `completed` and `failed` are terminal.
+ */
+export type CitecheckStatus = "queued" | "checking" | "completed" | "failed";
+
+/** `GET /citechecks/{id}`: a citation check, with the review's citation rows. */
+export interface Citecheck {
+  citecheck_id: string;
+  status: CitecheckStatus;
+  /**
+   * `null` until terminal. `incomplete`: a citation could not be checked
+   * for a reason of ours.
+   */
+  outcome: ReviewOutcome | null;
+  created_at: string;
+  completed_at: string | null;
+  /** How long to wait before polling again; `null` once terminal. */
+  poll_after_seconds: number | null;
+  policy: CitecheckPolicy;
+  summary: CitecheckSummary;
+  credits: ReviewCredits;
+  citations: ReviewCitation[];
+  citation_issues: ReviewCitationIssue[];
+  citation_failures: ReviewCitationFailure[];
+  /**
+   * The text's citations past the ones checked (up to 100): found but not
+   * checked. `null` until the text is read; `[]` for pairs.
+   */
+  more_citations: ReviewMoreCitation[] | null;
+  /** On `failed`, why. */
+  failure: ReviewFailureBlock | null;
+}
+
+export interface CitecheckAndWaitOptions {
+  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  timeoutMs?: number;
+  /** Called with the check on every poll whose body changed. A throw inside it is swallowed. */
+  onUpdate?: (check: Citecheck) => void;
+}
+
 export interface ReviewAndWaitOptions {
   /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
   timeoutMs?: number;

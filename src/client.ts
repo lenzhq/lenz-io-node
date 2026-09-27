@@ -64,6 +64,8 @@ import {
   LenzTimeoutError,
   LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
+  CitecheckFailedError,
+  CitecheckTimeoutError,
   ReviewFailedError,
   ReviewTimeoutError,
   UPSTREAM_503_CODES,
@@ -84,6 +86,10 @@ import type {
   LibraryListInput,
   OnProgress,
   Progress,
+  Citecheck,
+  CitecheckAndWaitOptions,
+  CitecheckInput,
+  CitecheckStarted,
   GetReviewOptions,
   RelatedVerifications,
   ReviewAndWaitOptions,
@@ -156,7 +162,7 @@ const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
 // published package.
 import { VERSION as SDK_VERSION } from "./_version.js";
-import { withReviewDefaults } from "./reviewDefaults.js";
+import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 
 /**
  * Cross-runtime UUID. Prefers the WebCrypto global (browsers, Node ≥20, Deno,
@@ -223,6 +229,20 @@ const REVIEW_STATUSES: readonly string[] = [
   "completed",
   "failed",
 ];
+
+/** THIS citation check: its id, a known status, and its three lists. */
+function isCitecheckBody(body: unknown, citecheckId: string): body is Citecheck {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  return (
+    b["citecheck_id"] === citecheckId &&
+    typeof b["status"] === "string" &&
+    ["queued", "checking", "completed", "failed"].includes(b["status"]) &&
+    Array.isArray(b["citations"]) &&
+    Array.isArray(b["citation_issues"]) &&
+    Array.isArray(b["citation_failures"])
+  );
+}
 
 /** The full view of THIS review: its id, a known status, and every list. */
 function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
@@ -829,6 +849,114 @@ export class Lenz {
     return this._getReview(reviewId, opts);
   }
 
+  // ── Citation check: the check on its own ──
+
+  /**
+   * Start a citation check: does each source the text cites (or each pair
+   * sent) say what the statement says it does? Send exactly one of `text`
+   * and `pairs`; `maxCitations` goes with `text`. Returns the receipt at once;
+   * read the check with `getCitecheck`, wait with `citecheckAndWait`, or
+   * receive `citecheck.completed` at your webhook.
+   */
+  async citecheck(input: CitecheckInput): Promise<CitecheckStarted> {
+    return this._submitCitecheck(input);
+  }
+
+  private async _submitCitecheck(
+    input: CitecheckInput,
+    transport: Pick<RequestOptions, "deadlineAt"> = {},
+  ): Promise<CitecheckStarted> {
+    const hasText = typeof input.text === "string" && input.text.trim() !== "";
+    if (hasText === (input.pairs !== undefined)) {
+      throw new Error("citecheck() needs exactly one of text and pairs.");
+    }
+    if (input.pairs !== undefined && input.maxCitations !== undefined) {
+      throw new Error("maxCitations goes with text: every pair is checked.");
+    }
+    const body: Record<string, unknown> = hasText ? { text: input.text } : { pairs: input.pairs };
+    if (input.maxCitations !== undefined) body.max_citations = input.maxCitations;
+    if (input.language) body.language = input.language;
+    if (input.webhookUrl !== undefined && input.webhookUrl !== null)
+      body.webhook_url = input.webhookUrl;
+    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
+    try {
+      return await this.request<CitecheckStarted>({
+        method: "POST",
+        path: "/citecheck",
+        json: body,
+        headers: { "Idempotency-Key": idempotencyKey },
+        ...transport,
+      });
+    } catch (exc) {
+      // A retried submit that meets the first attempt's check still being
+      // created: when the server names it, that IS the receipt.
+      const named =
+        exc instanceof LenzError
+          ? (exc.body?.["citecheck_id"] ?? exc.body?.["review_id"])
+          : undefined;
+      if (
+        exc instanceof LenzError &&
+        exc.statusCode === 409 &&
+        exc.code === "idempotency_conflict" &&
+        typeof named === "string" &&
+        named !== ""
+      ) {
+        return { citecheck_id: named, status: "queued" };
+      }
+      throw exc;
+    }
+  }
+
+  /**
+   * Read a citation check. Throws {@link LenzGoneError} (HTTP 410) once the
+   * account's retention period has removed it.
+   */
+  async getCitecheck(citecheckId: string): Promise<Citecheck> {
+    return this._getCitecheck(citecheckId);
+  }
+
+  private async _getCitecheck(
+    citecheckId: string,
+    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
+  ): Promise<Citecheck> {
+    if (!citecheckId) {
+      throw new Error("getCitecheck() requires a non-empty citecheck_id.");
+    }
+    const body = await this.request<Citecheck>({
+      method: "GET",
+      path: `/citechecks/${encodeURIComponent(citecheckId)}`,
+      ...transport,
+    });
+    return withCitecheckDefaults(body);
+  }
+
+  /**
+   * Start a citation check and poll it until it ends; returns the completed
+   * check. Polls on its `poll_after_seconds` (never tighter than 5 s) and
+   * calls `onUpdate` on every poll whose body changed. Throws
+   * {@link CitecheckFailedError} when the check ends `failed` and
+   * {@link CitecheckTimeoutError} (carrying the last body seen) at the
+   * deadline, which bounds the submit and every poll.
+   */
+  async citecheckAndWait(
+    input: CitecheckInput,
+    opts: CitecheckAndWaitOptions = {},
+  ): Promise<Citecheck> {
+    const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    const { citecheck_id: citecheckId } = await this._submitCitecheck(input, {
+      deadlineAt: deadline,
+    });
+    return this._waitJob<Citecheck>({
+      deadline,
+      read: (transport) => this._getCitecheck(citecheckId, transport),
+      isBody: (body) => isCitecheckBody(body, citecheckId),
+      failed: (check) => new CitecheckFailedError(check),
+      timedOut: (last) => new CitecheckTimeoutError(citecheckId, last, timeoutMs),
+      onUpdate: opts.onUpdate,
+    });
+  }
+
   private async _getReview(
     reviewId: string,
     opts: GetReviewOptions,
@@ -866,41 +994,60 @@ export class Lenz {
     // The submit is bounded by the same deadline: its attempts are cut to
     // what is left and a retry that would pass it is not taken.
     const { review_id: reviewId } = await this._submitReview(input, { deadlineAt: deadline });
-    let last: ReviewFull | null = null;
+    return this._waitJob<ReviewFull>({
+      deadline,
+      read: (transport) => this._getReview(reviewId, {}, transport),
+      isBody: (body) => isReviewBody(body, reviewId),
+      failed: (review) => new ReviewFailedError(review),
+      timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
+      onUpdate: opts.onUpdate,
+    });
+  }
+
+  /**
+   * The poll loop behind every `*AndWait` of an async job (a review, a
+   * citation check), from the moment it was accepted to `deadline`.
+   */
+  private async _waitJob<T extends { status: string; poll_after_seconds: number | null }>(job: {
+    deadline: number;
+    read: (transport: Pick<RequestOptions, "timeoutMs" | "maxRetries">) => Promise<unknown>;
+    isBody: (body: unknown) => body is T;
+    failed: (current: T) => Error;
+    timedOut: (last: T | null) => Error;
+    onUpdate?: (current: T) => void;
+  }): Promise<T> {
+    const { deadline } = job;
+    let last: T | null = null;
     let lastJson = "";
     for (let poll = 0; ; poll++) {
       const budget = deadline - Date.now();
       // The first poll always runs, even when the submit used up the budget,
-      // so a timeout can still hand back what the review looks like.
-      if (budget <= 0 && poll > 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
-      let current: ReviewFull | null = null;
+      // so a timeout can still hand back what the job looks like.
+      if (budget <= 0 && poll > 0) throw job.timedOut(last);
+      let current: T | null = null;
       let statedWaitMs = 0;
       try {
         // One attempt per poll, bounded by what is left: this loop owns the
         // waits, so a retry ladder inside the request cannot outlive the
         // deadline.
-        const body = (await this._getReview(
-          reviewId,
-          {},
-          {
-            maxRetries: 0,
-            // Cut at what is left. Only when the submit used the whole
-            // budget does the first poll get 5 s, so `partial` can fill.
-            timeoutMs: Math.min(
-              this.timeoutMs,
-              poll === 0 && budget <= 0 ? REVIEW_POLL_FLOOR_S * 1000 : budget,
-            ),
-          },
-        )) as unknown;
-        // A 2xx that is not this review (an empty body, a proxy's error
-        // object, another id, a body missing its lists) is a failed poll,
-        // never an update and never `partial`.
-        if (isReviewBody(body, reviewId)) current = body;
+        const body = await job.read({
+          maxRetries: 0,
+          // Cut at what is left. Only when the submit used the whole budget
+          // does the first poll get 5 s, so `partial` can fill.
+          timeoutMs: Math.min(
+            this.timeoutMs,
+            poll === 0 && budget <= 0 ? REVIEW_POLL_FLOOR_S * 1000 : budget,
+          ),
+        });
+        // A 2xx that is not this job (an empty body, a proxy's error object,
+        // another id, a body missing its lists) is a failed poll, never an
+        // update and never `partial`.
+        if (job.isBody(body)) current = body;
       } catch (exc) {
         // Keep waiting through what a later poll can outlast: a 5xx, a rate
         // limit, and anything that is not a Lenz answer at all (a network
         // drop, a body that stops or does not decode). A Lenz answer that
-        // waiting will not change (auth, 404, a purged review) ends the wait.
+        // waiting will not change (auth, 404, a purged job) ends the wait.
         if (exc instanceof LenzError && !(exc instanceof LenzAPIError) && !isRateLimit(exc)) {
           throw exc;
         }
@@ -917,19 +1064,19 @@ export class Lenz {
         if (json !== lastJson) {
           lastJson = json;
           last = current;
-          if (opts.onUpdate) {
+          if (job.onUpdate) {
             try {
-              opts.onUpdate(current);
+              job.onUpdate(current);
             } catch {
               // A caller's bug must not end the wait.
             }
           }
         }
         if (current.status === "completed") return current;
-        if (current.status === "failed") throw new ReviewFailedError(current);
+        if (current.status === "failed") throw job.failed(current);
       }
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new ReviewTimeoutError(reviewId, last, timeoutMs);
+      if (remaining <= 0) throw job.timedOut(last);
       await sleep(Math.min(Math.max(reviewPollMs(current ?? last), statedWaitMs), remaining));
     }
   }

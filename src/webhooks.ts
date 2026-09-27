@@ -20,8 +20,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
-import { withReviewDefaults } from "./reviewDefaults.js";
-import type { Coverage, FailureClass, ReviewFull } from "./types.js";
+import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
+import type { Citecheck, Coverage, FailureClass, ReviewFull } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
@@ -78,6 +78,8 @@ export type WebhookEventKind =
   | "certificate.timestamped"
   | "review.completed"
   | "review.failed"
+  | "citecheck.completed"
+  | "citecheck.failed"
   // The `string & NonNullable<unknown>` trick preserves the autocomplete
   // hints from the literal union while still permitting any future
   // event-kind string the server adds. `(string & {})` reads cleaner but
@@ -169,6 +171,31 @@ export interface ReviewFailed extends ReviewEventBase {
 export type ReviewEvent = ReviewCompleted | ReviewFailed;
 
 /**
+ * `event=citecheck.completed` / `citecheck.failed` — a citation check ended.
+ * `citecheck` is the whole check, as `client.getCitecheck` returns it.
+ * **Dedupe on `eventId`**: it is stable across every retry, while `attempt`
+ * changes. `taskId` is the delivery's identity, not pollable.
+ */
+export interface CitecheckEventBase extends WebhookEventBase {
+  event: "citecheck.completed" | "citecheck.failed";
+  eventId: string;
+  citecheckId: string;
+  citecheck: Citecheck;
+}
+
+export interface CitecheckCompleted extends CitecheckEventBase {
+  event: "citecheck.completed";
+}
+
+/** The check's `failure` block says why. */
+export interface CitecheckFailed extends CitecheckEventBase {
+  event: "citecheck.failed";
+}
+
+/** Either citation-check event. */
+export type CitecheckEvent = CitecheckCompleted | CitecheckFailed;
+
+/**
  * Every event `parse` returns, discriminated on `event`. Ignore an event you
  * do not recognise: new kinds are added without a major release and arrive
  * as the base shape.
@@ -176,6 +203,8 @@ export type ReviewEvent = ReviewCompleted | ReviewFailed;
 export type WebhookEvent =
   | ReviewCompleted
   | ReviewFailed
+  | CitecheckCompleted
+  | CitecheckFailed
   | VerificationCompleted
   | VerificationFailed
   | VerificationNeedsInput
@@ -237,6 +266,18 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
         eventId: String(payload["event_id"] ?? ""),
         reviewId: String(payload["review_id"] ?? ""),
         review: withReviewDefaults(review) as ReviewFull,
+      };
+    }
+  }
+  if (event === "citecheck.completed" || event === "citecheck.failed") {
+    const check = payload["citecheck"];
+    if (check && typeof check === "object" && !Array.isArray(check)) {
+      return {
+        ...base,
+        event,
+        eventId: String(payload["event_id"] ?? ""),
+        citecheckId: String(payload["citecheck_id"] ?? ""),
+        citecheck: withCitecheckDefaults(check) as Citecheck,
       };
     }
   }
