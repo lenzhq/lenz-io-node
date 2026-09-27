@@ -170,7 +170,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "verify",
     "ask",
     "assess",
-    "citation",
     "extract",
     "has_webhook_secret",
   ]),
@@ -471,7 +470,6 @@ const NESTED: Record<string, Record<string, string | null>> = {
     verify: "UsageCapacity",
     ask: "UsageCapacity",
     assess: "UsageCapacity",
-    citation: "UsageCapacity",
     extract: "UsageExtract",
   },
 };

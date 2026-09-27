@@ -2168,15 +2168,3 @@ describe("request timeout covers error bodies", () => {
     }
   });
 });
-
-describe("usage() citation block", () => {
-  it("reads the citation block, and null when the server sends none", async () => {
-    const block = { quota_used: 1, quota_total: 100, quota_remaining: 99, remaining: 99 };
-    const withBlock = makeFetch([{ body: { ...USAGE_BODY, citation: block } }]);
-    const a = await new Lenz({ apiKey: "lenz_t", fetch: withBlock.fetch }).usage();
-    expect(a.citation).toEqual(block);
-    const without = makeFetch([{ body: USAGE_BODY }]);
-    const b = await new Lenz({ apiKey: "lenz_t", fetch: without.fetch }).usage();
-    expect(b.citation).toBeNull();
-  });
-});

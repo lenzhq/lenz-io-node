@@ -769,11 +769,6 @@ export interface Usage {
   ask: UsageCapacity;
   /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
   assess: UsageCapacity;
-  /**
-   * The pool seen as citation checks, the same projection as `assess`.
-   * `null` when the server sends no `citation` block.
-   */
-  citation: UsageCapacity | null;
   extract: UsageExtract;
   /**
    * Whether this key has a webhook signing secret provisioned. `POST /verify`
