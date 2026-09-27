@@ -1067,6 +1067,10 @@ export type ReviewStatus = "queued" | "assessing" | "verifying" | "completed" | 
  * - `incomplete` — an assessment or a planned deep check failed.
  * - `unchecked` — the review failed before assessing anything (no claim in
  *   the draft, not enough credits, an outage, an unreadable input).
+ *
+ * On a review that asked for the citation check, a citation issue makes it
+ * `issues_found` too (`issues` may then be empty: the rows are in
+ * `citation_issues`), and a failed citation check makes it `incomplete`.
  */
 export type ReviewOutcome = "clean" | "issues_found" | "incomplete" | "unchecked";
 
@@ -1091,6 +1095,10 @@ export interface EscalationPolicy {
   max_verifications: number;
   max_assessments: number;
   depth: "standard" | "low";
+  /** Whether the review checks the draft's citations. */
+  check_citations: boolean;
+  /** The resolved citation cap; `null` when citations are not checked. */
+  max_citations: number | null;
 }
 
 /** Why a claim did or did not get a deep check. */
@@ -1126,7 +1134,23 @@ export interface ReviewVerificationCounts {
   failed: number;
 }
 
-/** Counters are `null` until their denominator is known. */
+/**
+ * Three disjoint counts over the citation rows. `checked`: a finding other
+ * than `unchecked`. `unchecked`: could not be checked, for a reason of the
+ * page or the draft. `failed`: no finding, for a reason of ours. A row still
+ * running is in none of the three.
+ */
+export interface ReviewCitationCheckCounts {
+  checked: number;
+  unchecked: number;
+  failed: number;
+}
+
+/**
+ * Counters are `null` until their denominator is known. The `citation*`
+ * counts are `null` (`citation_issues` 0) on a review that did not ask for
+ * the citation check.
+ */
 export interface ReviewSummary {
   /** Claims this review works on; `null` until the draft is read. */
   claims_selected: number | null;
@@ -1140,6 +1164,22 @@ export interface ReviewSummary {
   verifications: ReviewVerificationCounts | null;
   /** `issues.length`. */
   issues: number;
+  /** Citations with a URL or a DOI in the draft (exact; each use counts). */
+  citations_found: number | null;
+  /** How many of them the review checks: the first, in the draft's order. */
+  citations_selected: number | null;
+  /** The resolved `maxCitations`. */
+  citation_limit: number | null;
+  /** `citations_found` is over `citation_limit`. */
+  citation_limit_reached: boolean | null;
+  citation_checks: ReviewCitationCheckCounts | null;
+  /** `citation_issues.length`. */
+  citation_issues: number;
+  /**
+   * Why the citation check was asked for and did not run: `url_input` (the
+   * draft was one URL) or `switched_off`.
+   */
+  citations_skipped: "url_input" | "switched_off" | (string & NonNullable<unknown>) | null;
 }
 
 export interface ReviewCredits {
@@ -1277,6 +1317,157 @@ export interface ReviewFailure {
   failure: ReviewFailureBlock | null;
 }
 
+/**
+ * What a citation check found, most serious first. The first seven are
+ * issues; `supported` and `unchecked` are not.
+ */
+export type ReviewCitationFinding =
+  | "doi_not_found"
+  | "page_not_found"
+  | "contradicted"
+  | "quote_not_in_source"
+  | "not_in_source"
+  | "partly_supported"
+  | "metadata_mismatch"
+  | "supported"
+  | "unchecked";
+
+/** Which check a citation's finding came from. */
+export type ReviewCitationSource = "doi" | "page" | "support" | "quote" | "metadata";
+
+/**
+ * Why a citation's finding is `unchecked`. An open set: a value this version
+ * does not list can arrive.
+ */
+export type ReviewCitationUncheckedReason =
+  | "no_text"
+  | "partial_text"
+  | "login_required"
+  | "unsupported_site"
+  | "no_statement"
+  | "invalid_url"
+  | "other_version"
+  | "ambiguous"
+  | "ambiguous_reference"
+  | (string & NonNullable<unknown>);
+
+/**
+ * Where a citation's `statement` sits in the text as sent: `start` and `end`
+ * in Unicode code points, link syntax included.
+ */
+export interface ReviewCitationPosition {
+  start: number;
+  end: number;
+}
+
+/** The one answer to read for a citation, derived from its `check`. */
+export interface ReviewCitationResult {
+  finding: ReviewCitationFinding;
+  /** `null` on `unchecked`. */
+  source: ReviewCitationSource | null;
+  /** The row is in `citation_issues`. */
+  is_issue: boolean;
+}
+
+/** A DOI's record in the registry. */
+export interface ReviewCitationRecord {
+  title: string | null;
+  authors: string[];
+  year: number | null;
+  journal: string | null;
+}
+
+/** One way the reference differs from the registry's record. */
+export interface ReviewCitationDifference {
+  field: "title" | "authors" | "year" | "journal";
+  cited: string | null;
+  registered: string | null;
+}
+
+/** A citation's check. `status` is progress, as on `assessment`. */
+export interface ReviewCitationCheck {
+  status: "pending" | "running" | "completed" | "failed";
+  /** What reading the source gave. */
+  page_read: "full" | "partial" | "not_found" | "none" | null;
+  page_title: string | null;
+  page_published_date: string | null;
+  page_language: string | null;
+  /** Where the text was actually read from (after redirects, or a free copy of a paper). */
+  source_url: string | null;
+  /** For a DOI: which version of the paper was read. */
+  source_version: "published" | "accepted" | "submitted" | null;
+  support: "supported" | "partly_supported" | "contradicted" | "not_in_source" | "unchecked" | null;
+  /** The verified passage of the source the support answer rests on. */
+  snippet: string | null;
+  /** A reviewer's note: reasoning, not a checked source. */
+  rationale: string | null;
+  /** `null` when the draft quoted nothing from this source. */
+  quote: "matched" | "not_in_source" | "unchecked" | null;
+  /** `null` with no DOI, or when the registry did not answer. */
+  doi_registered: boolean | null;
+  /** `null` with no DOI. */
+  metadata: "consistent" | "mismatch" | "unchecked" | null;
+  metadata_differences: ReviewCitationDifference[];
+  registered: ReviewCitationRecord | null;
+  unchecked_reason: ReviewCitationUncheckedReason | null;
+  /** One sentence on what to do next, on an `unchecked` row. */
+  hint: string | null;
+  failure: ReviewFailureBlock | null;
+}
+
+/**
+ * One citation of the draft (a URL or a DOI where the draft uses it), in the
+ * draft's order.
+ */
+export interface ReviewCitation {
+  index: number;
+  /** The citation as the draft writes it. */
+  reference: string | null;
+  cited_url: string | null;
+  /** The DOI, normalised. */
+  doi: string | null;
+  /** The draft's sentence the citation is attached to, link syntax reduced to its words. */
+  statement: string | null;
+  /** The words the draft quotes from this source; `[]` when none. */
+  quotes: string[];
+  position: ReviewCitationPosition | null;
+  /** `null` until the check has ended, and on a failed row with nothing established. */
+  result: ReviewCitationResult | null;
+  check: ReviewCitationCheck;
+}
+
+/**
+ * A citation whose finding is an issue; most serious first, then in the
+ * draft's order. `snippet` and `rationale` are set only when `source` is
+ * `support`.
+ */
+export interface ReviewCitationIssue {
+  citation_index: number;
+  reference: string | null;
+  cited_url: string | null;
+  doi: string | null;
+  statement: string | null;
+  quotes: string[];
+  position: ReviewCitationPosition | null;
+  finding: Exclude<ReviewCitationFinding, "supported" | "unchecked">;
+  source: ReviewCitationSource;
+  snippet: string | null;
+  rationale: string | null;
+  metadata_differences: ReviewCitationDifference[];
+  page_title: string | null;
+  /** Set when another part of the check failed after the finding was established. */
+  failure: ReviewFailureBlock | null;
+}
+
+/** A citation whose check failed with nothing established. */
+export interface ReviewCitationFailure {
+  citation_index: number;
+  reference: string | null;
+  cited_url: string | null;
+  doi: string | null;
+  failure: ReviewFailureBlock | null;
+}
+
 /** What both views of a review share. */
 export interface ReviewEnvelope {
   review_id: string;
@@ -1296,6 +1487,10 @@ export interface ReviewEnvelope {
   /** Ordered by severity, then confidence, then position. */
   issues: ReviewIssue[];
   failures: ReviewFailure[];
+  /** Citations whose finding is an issue; `[]` when the check was not asked for. */
+  citation_issues: ReviewCitationIssue[];
+  /** Citations whose check failed with nothing established; `[]` when not asked for. */
+  citation_failures: ReviewCitationFailure[];
   /** On `failed`, why. */
   failure: ReviewFailureBlock | null;
 }
@@ -1304,6 +1499,8 @@ export interface ReviewEnvelope {
 export interface ReviewFull extends ReviewEnvelope {
   view: "full";
   claims: ReviewClaim[];
+  /** Every checked citation; `[]` when the check was not asked for. */
+  citations: ReviewCitation[];
 }
 
 /** `GET /reviews/{id}?view=issues`: the envelope without `claims`. */
@@ -1327,12 +1524,25 @@ export interface ReviewInput {
   verdicts?: VerdictLabel[];
   /** Quick-check confidence bands that get a deep check. Default `["low"]`; `[]` means no band rule. */
   confidence?: ConfidenceBand[];
-  /** How many of the draft's claims, most check-worthy first, get a quick verdict (1-20). Default 20. */
+  /**
+   * How many of the draft's claims, most check-worthy first, get a quick
+   * verdict (0-20). Default 20; `0` checks no claim (with `checkCitations`:
+   * a review of the draft's citations only).
+   */
   maxAssessments?: number;
   /** The deep-check cap (0-20). Default 5; `0` makes an assess-only review. */
   maxVerifications?: number;
   /** Depth of every deep check. Default `"standard"`. */
   depth?: "standard" | "low";
+  /**
+   * Also check the draft's citations (links and DOIs, read from `text`; keep
+   * a link as a markdown link, `[words](https://...)`): does each source say
+   * what the draft says it does? Free. Omitted with `maxCitations`: nothing is
+   * sent, and the review is exactly as without them.
+   */
+  checkCitations?: boolean;
+  /** With `checkCitations`: check the first N citations in the draft's order (1-20). Default 20. */
+  maxCitations?: number;
   /** Output language of every claim and rewrite (ISO 639-1). Omit for English. */
   language?: string;
   /**

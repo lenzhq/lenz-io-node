@@ -27,7 +27,14 @@ import {
   ReviewFailedError,
   ReviewTimeoutError,
 } from "../src/index.js";
-import type { ReviewEntity, ReviewFull, ReviewIssues, VerdictLabel } from "../src/index.js";
+import { withReviewDefaults } from "../src/reviewDefaults.js";
+import type {
+  ReviewEntity,
+  ReviewFull,
+  ReviewInput,
+  ReviewIssues,
+  VerdictLabel,
+} from "../src/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -574,7 +581,8 @@ describe("reviewAndWait()", () => {
       const review = await drain(
         client.reviewAndWait({ text: DRAFT }, { onUpdate: (r) => seen.push(r.status) }),
       );
-      expect(review).toEqual(COMPLETED);
+      // As the server sent it, with the citation keys an older server omits.
+      expect(review).toEqual(withReviewDefaults(COMPLETED));
       expect(seen).toEqual(["verifying", "completed"]);
     });
   }
@@ -860,5 +868,163 @@ describe("review types", () => {
     expect(name).toBe("EU AI Act");
     const nullable: ReviewEntity = { name: null, qid: null };
     expect(nullable.name).toBeNull();
+  });
+});
+
+// ── citations ────────────────────────────────────────────────────────────
+
+const CIT_COMPLETED = fixture<ReviewFull>("review_citations_completed.json");
+const CIT_VERIFYING = fixture<ReviewFull>("review_citations_verifying.json");
+const CIT_ISSUES = fixture<ReviewIssues>("review_citations_completed_issues.json");
+
+describe("review() citations option", () => {
+  async function sent(input: Partial<ReviewInput>): Promise<Record<string, unknown>> {
+    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.review({ text: DRAFT, idempotencyKey: "k", ...input });
+    return sentBody(calls[0]!);
+  }
+
+  it("not asked: nothing is sent, and the body is as before", async () => {
+    expect(await sent({})).toEqual({ text: DRAFT, visibility: "private" });
+    expect(await sent({ checkCitations: undefined, maxCitations: undefined })).toEqual({
+      text: DRAFT,
+      visibility: "private",
+    });
+  });
+
+  it.each([
+    [{ checkCitations: true }, { check: true }],
+    [
+      { checkCitations: true, maxCitations: 10 },
+      { check: true, max: 10 },
+    ],
+    [{ checkCitations: false }, { check: false }],
+    [
+      { checkCitations: false, maxCitations: 5 },
+      { check: false, max: 5 },
+    ],
+  ])("%o is sent as the citations object", async (input, expected) => {
+    const body = await sent(input);
+    expect(body["citations"]).toEqual(expected);
+    expect("escalate" in body).toBe(false);
+  });
+
+  it("maxCitations alone is refused before any request", async () => {
+    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.review({ text: DRAFT, maxCitations: 5 })).rejects.toThrow(
+      "maxCitations needs checkCitations: true.",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a citations-only review sends maxAssessments 0", async () => {
+    const body = await sent({ checkCitations: true, maxAssessments: 0 });
+    expect(body["escalate"]).toEqual({ max_assessments: 0 });
+    expect(body["citations"]).toEqual({ check: true });
+  });
+});
+
+describe("getReview() citations", () => {
+  async function read(body: unknown, view?: "issues") {
+    const { fetch } = makeFetch([{ body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    return view ? client.getReview("7c1e0d52", { view }) : client.getReview("7c1e0d52");
+  }
+
+  it("every row state reads through", async () => {
+    const review = (await read(CIT_COMPLETED)) as ReviewFull;
+    expect(review.policy.check_citations).toBe(true);
+    expect(review.policy.max_citations).toBe(10);
+    const s = review.summary;
+    expect([
+      s.citations_found,
+      s.citations_selected,
+      s.citation_limit,
+      s.citation_limit_reached,
+    ]).toEqual([23, 10, 10, true]);
+    expect(s.citation_checks).toEqual({ checked: 6, unchecked: 3, failed: 1 });
+    expect(s.citation_issues).toBe(5);
+    const byIndex = new Map(review.citations.map((c) => [c.index, c]));
+    expect(byIndex.get(0)!.result!.finding).toBe("contradicted");
+    expect(byIndex.get(1)!.check.quote).toBe("not_in_source");
+    expect(byIndex.get(3)!.check.unchecked_reason).toBe("partial_text");
+    expect(byIndex.get(4)!.check.registered!.year).toBe(2013);
+    expect(byIndex.get(4)!.check.metadata_differences[0]!.field).toBe("year");
+    expect(byIndex.get(5)!.statement).toBeNull();
+    expect(byIndex.get(6)!.check.status).toBe("failed");
+    expect(byIndex.get(6)!.result!.finding).toBe("page_not_found");
+    expect(byIndex.get(7)!.result).toBeNull();
+    expect(review.citation_issues.map((i) => i.finding)).toEqual([
+      "doi_not_found",
+      "page_not_found",
+      "contradicted",
+      "quote_not_in_source",
+      "metadata_mismatch",
+    ]);
+    expect(review.citation_failures.map((f) => f.citation_index)).toEqual([7]);
+    expect(review.issues).toEqual([]);
+    expect(review.outcome).toBe("incomplete");
+  });
+
+  it("waiting rows have no result", async () => {
+    const review = (await read(CIT_VERIFYING)) as ReviewFull;
+    expect(review.status).toBe("verifying");
+    expect(review.citations.slice(1).map((c) => [c.check.status, c.result])).toEqual([
+      ["pending", null],
+      ["running", null],
+    ]);
+  });
+
+  it("the issues view carries both citation lists and no rows", async () => {
+    const review = await read(CIT_ISSUES, "issues");
+    expect(review.citation_issues).toHaveLength(5);
+    expect(review.citation_failures).toHaveLength(1);
+    expect("citations" in review).toBe(false);
+  });
+
+  it.each(["review_completed.json", "review_failed_no_claim.json"])(
+    "a body from a server without the feature (%s) reads with the defaults",
+    async (name) => {
+      const body = fixture(name);
+      expect(Object.keys(body).some((k) => k.startsWith("citation"))).toBe(false);
+      const review = (await read(body)) as ReviewFull;
+      expect([review.citations, review.citation_issues, review.citation_failures]).toEqual([
+        [],
+        [],
+        [],
+      ]);
+      expect(review.policy.check_citations).toBe(false);
+      expect(review.policy.max_citations).toBeNull();
+      const s = review.summary;
+      expect([
+        s.citations_found,
+        s.citations_selected,
+        s.citation_limit,
+        s.citation_limit_reached,
+        s.citation_checks,
+        s.citation_issues,
+        s.citations_skipped,
+      ]).toEqual([null, null, null, null, null, 0, null]);
+      // the defaults are added, never over what the server sent
+      expect(review.claims).toEqual((body as unknown as ReviewFull).claims);
+    },
+  );
+
+  it("an old server's issues view gets the two lists but no rows", async () => {
+    const review = await read(ISSUES, "issues");
+    expect(review.citation_issues).toEqual([]);
+    expect("citations" in review).toBe(false);
+  });
+
+  it("reviewAndWait returns the citations of the finished review", async () => {
+    const { fetch } = makeFetch([
+      { status: 202, body: { ...ACCEPTED, review_id: "7c1e0d52" } },
+      { body: CIT_COMPLETED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const review = await client.reviewAndWait({ text: DRAFT, checkCitations: true });
+    expect(review.citations).toHaveLength(10);
   });
 });

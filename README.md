@@ -78,6 +78,35 @@ await client.review({
   before you use it.
 - **`failures`** lists the claims outside the issues whose check failed.
 
+**Checking the draft's sources.** `checkCitations: true` also checks the
+draft's citations, its links and DOIs: does each source say what the draft
+says it does? Links are read from `text`, so keep a link as a markdown link
+(`[words](https://...)`); a Word or Google document pasted as plain text loses
+them. The first `maxCitations` (1-20, default 20) in the draft's order are
+checked, at no charge. With `maxAssessments: 0` the review checks the sources
+and no claim.
+
+```ts
+const review = await client.reviewAndWait({ text: draft, checkCitations: true, maxAssessments: 0 });
+const s = review.summary;
+console.log(`${s.citations_found} found, ${s.citations_selected} checked`);
+for (const c of review.citation_issues) {
+  // most serious first
+  console.log(c.finding, c.cited_url ?? c.doi, c.statement);
+  if (c.snippet) console.log("  The source says:", c.snippet);
+}
+```
+
+`finding` is one of `doi_not_found`, `page_not_found`, `contradicted`,
+`quote_not_in_source`, `not_in_source`, `partly_supported` or
+`metadata_mismatch`, most serious first. `citations` lists every checked
+citation with its `check`; a row that could not be checked says why in
+`check.unchecked_reason` and what to do in `check.hint`, and
+`citation_failures` lists the ones that failed on our side. A citation issue
+makes `outcome` `issues_found` even when `issues` is empty. `rationale` is a
+reviewer's note, not a checked source; `snippet` is the passage from the page.
+Leave both options out and nothing is sent: the review is as before.
+
 `reviewAndWait` polls on the review's own `poll_after_seconds` and takes
 `{ timeoutMs, onUpdate }`: `onUpdate(review)` fires on every poll that changed
 the review, so you can show the quick verdicts as they land. It throws

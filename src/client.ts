@@ -156,6 +156,7 @@ const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
 // published package.
 import { VERSION as SDK_VERSION } from "./_version.js";
+import { withReviewDefaults } from "./reviewDefaults.js";
 
 /**
  * Cross-runtime UUID. Prefers the WebCrypto global (browsers, Node ≥20, Deno,
@@ -222,6 +223,22 @@ const REVIEW_STATUSES: readonly string[] = [
   "completed",
   "failed",
 ];
+
+/**
+ * The request's `citations` object, or `undefined` to send no key at all (so
+ * the body, and what its idempotency key covers, stay what they were without
+ * the option). Only the options set are sent.
+ */
+function citationsOption(
+  check: boolean | undefined,
+  max: number | undefined,
+): { check: boolean; max?: number } | undefined {
+  if (check === undefined && max === undefined) return undefined;
+  if (check === undefined) {
+    throw new Error("maxCitations needs checkCitations: true.");
+  }
+  return max === undefined ? { check } : { check, max };
+}
 
 /** The full view of THIS review: its id, a known status, and every list. */
 function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
@@ -781,6 +798,8 @@ export class Lenz {
     if (input.maxVerifications !== undefined) escalate.max_verifications = input.maxVerifications;
     if (input.depth !== undefined) escalate.depth = input.depth;
     if (Object.keys(escalate).length > 0) body.escalate = escalate;
+    const citations = citationsOption(input.checkCitations, input.maxCitations);
+    if (citations !== undefined) body.citations = citations;
     // Always keyed: this client retries a failed POST, and a retry without a
     // key could start a second review. Random per call, never derived from
     // the text: the same draft submitted again later is a new review.
@@ -833,12 +852,13 @@ export class Lenz {
     if (!reviewId) {
       throw new Error("getReview() requires a non-empty review_id.");
     }
-    return this.request<ReviewFull | ReviewIssues>({
+    const body = await this.request<ReviewFull | ReviewIssues>({
       method: "GET",
       path: `/reviews/${encodeURIComponent(reviewId)}`,
       query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
       ...transport,
     });
+    return withReviewDefaults(body);
   }
 
   /**

@@ -20,6 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
+import { withReviewDefaults } from "./reviewDefaults.js";
 import type { Coverage, FailureClass, ReviewFull } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
@@ -235,7 +236,7 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
         event,
         eventId: String(payload["event_id"] ?? ""),
         reviewId: String(payload["review_id"] ?? ""),
-        review: review as ReviewFull,
+        review: withReviewDefaults(review) as ReviewFull,
       };
     }
   }
