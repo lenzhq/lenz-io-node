@@ -370,7 +370,8 @@ describe("LenzWebhooks — review events with citations", () => {
       [],
       [],
     ]);
-    expect(r.review.policy.check_citations).toBe(false);
+    expect(r.review.policy.max_citations).toBeNull();
+    expect(r.review.more_citations).toBeNull();
     expect(r.review.summary.citations_found).toBeNull();
     expect(r.review.summary.citation_issues).toBe(0);
   });

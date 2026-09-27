@@ -100,6 +100,7 @@ export type {
   ReviewCitationResult,
   ReviewCitationSource,
   ReviewCitationUncheckedReason,
+  ReviewMoreCitation,
   ReviewClaim,
   ReviewCredits,
   ReviewEntity,

@@ -1095,9 +1095,10 @@ export interface EscalationPolicy {
   max_verifications: number;
   max_assessments: number;
   depth: "standard" | "low";
-  /** Whether the review checks the draft's citations. */
-  check_citations: boolean;
-  /** The resolved citation cap; `null` when citations are not checked. */
+  /**
+   * How many of the draft's citations the review checks; `0` (or `null` from
+   * an older server) when it checks none.
+   */
   max_citations: number | null;
 }
 
@@ -1177,9 +1178,14 @@ export interface ReviewSummary {
   citation_issues: number;
   /**
    * Why the citation check was asked for and did not run: `url_input` (the
-   * draft was one URL) or `switched_off`.
+   * draft was one URL), `insufficient_credits` or `switched_off`.
    */
-  citations_skipped: "url_input" | "switched_off" | (string & NonNullable<unknown>) | null;
+  citations_skipped:
+    | "url_input"
+    | "insufficient_credits"
+    | "switched_off"
+    | (string & NonNullable<unknown>)
+    | null;
 }
 
 export interface ReviewCredits {
@@ -1464,6 +1470,20 @@ export interface ReviewCitationIssue {
   failure: ReviewFailureBlock | null;
 }
 
+/**
+ * A citation found in the draft past the ones this review checked: found but
+ * not checked. Send it in a later request to check it.
+ */
+export interface ReviewMoreCitation {
+  index: number;
+  reference: string | null;
+  cited_url: string | null;
+  doi: string | null;
+  /** The draft's sentence around the citation. */
+  sentence: string;
+  position: ReviewCitationPosition | null;
+}
+
 /** A citation whose check failed with nothing established. */
 export interface ReviewCitationFailure {
   citation_index: number;
@@ -1496,6 +1516,16 @@ export interface ReviewEnvelope {
   citation_issues: ReviewCitationIssue[];
   /** Citations whose check failed with nothing established; `[]` when not asked for. */
   citation_failures: ReviewCitationFailure[];
+  /**
+   * Claims found past `maxAssessments`, in the draft's order: found but not
+   * checked. `null` until the draft is read, `[]` when there are none.
+   */
+  more_claims: string[] | null;
+  /**
+   * Citations found past the ones checked (up to 100): found but not checked.
+   * `null` until the draft is read, `[]` when there are none.
+   */
+  more_citations: ReviewMoreCitation[] | null;
   /** On `failed`, why. */
   failure: ReviewFailureBlock | null;
 }
@@ -1531,7 +1561,7 @@ export interface ReviewInput {
   confidence?: ConfidenceBand[];
   /**
    * How many of the draft's claims, most check-worthy first, get a quick
-   * verdict (0-20). Default 20; `0` checks no claim (with `checkCitations`:
+   * verdict (0-20). Default 20; `0` checks no claim (with `maxCitations`:
    * a review of the draft's citations only).
    */
   maxAssessments?: number;
@@ -1540,13 +1570,12 @@ export interface ReviewInput {
   /** Depth of every deep check. Default `"standard"`. */
   depth?: "standard" | "low";
   /**
-   * Also check the draft's citations (links and DOIs, read from `text`; keep
-   * a link as a markdown link, `[words](https://...)`): does each source say
-   * what the draft says it does? Omitted with `maxCitations`: nothing is
-   * sent, and the review is exactly as without them.
+   * Also check the draft's first N citations (1-20; links and DOIs, read from
+   * `text`; keep a link as a markdown link, `[words](https://...)`): does
+   * each source say what the draft says it does? Sent as
+   * `escalate.max_citations`. Omitted or `0`: no citation is checked and
+   * nothing is sent.
    */
-  checkCitations?: boolean;
-  /** With `checkCitations`: check the first N citations in the draft's order (1-20). Default 20. */
   maxCitations?: number;
   /** Output language of every claim and rewrite (ISO 639-1). Omit for English. */
   language?: string;
