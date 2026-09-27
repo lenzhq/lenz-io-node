@@ -347,7 +347,7 @@ describe("LenzWebhooks — review events", () => {
 describe("LenzWebhooks — review events with citations", () => {
   const hooks = new LenzWebhooks({ secret: SECRET });
   const citations = JSON.parse(
-    readFileSync(join(REVIEW_FIXTURES, "review_citations_completed.json"), "utf-8"),
+    readFileSync(join(REVIEW_FIXTURES, "review_citations_constructed.json"), "utf-8"),
   ) as Record<string, unknown>;
 
   it("carries the citation rows, issues and failures", () => {

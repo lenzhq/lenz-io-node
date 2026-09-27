@@ -874,8 +874,11 @@ describe("review types", () => {
 
 // ── citations ────────────────────────────────────────────────────────────
 
-const CIT_COMPLETED = fixture<ReviewFull>("review_citations_completed.json");
+const CIT_CONSTRUCTED = fixture<ReviewFull>("review_citations_constructed.json");
 const CIT_VERIFYING = fixture<ReviewFull>("review_citations_verifying.json");
+const CIT_PENDING = fixture<ReviewFull>("review_citations_pending.json");
+const CIT_RECORDED = fixture<ReviewFull>("review_citations_completed.json");
+const CIT_QUOTE = fixture<ReviewFull>("review_citations_quote.json");
 const CIT_ISSUES = fixture<ReviewIssues>("review_citations_completed_issues.json");
 
 describe("review() citations option", () => {
@@ -935,7 +938,7 @@ describe("getReview() citations", () => {
   }
 
   it("every row state reads through", async () => {
-    const review = (await read(CIT_COMPLETED)) as ReviewFull;
+    const review = (await read(CIT_CONSTRUCTED)) as ReviewFull;
     expect(review.policy.check_citations).toBe(true);
     expect(review.policy.max_citations).toBe(10);
     const s = review.summary;
@@ -973,7 +976,7 @@ describe("getReview() citations", () => {
   });
 
   it("an unchecked reason this version does not list passes through", async () => {
-    const body = JSON.parse(JSON.stringify(CIT_COMPLETED)) as ReviewFull;
+    const body = JSON.parse(JSON.stringify(CIT_CONSTRUCTED)) as ReviewFull;
     body.citations[3]!.check.unchecked_reason = "inconclusive";
     const review = (await read(body)) as ReviewFull;
     const reason: ReviewCitationUncheckedReason | null =
@@ -982,7 +985,7 @@ describe("getReview() citations", () => {
   });
 
   it("missing_quote reads as null on a body without it", async () => {
-    const body = JSON.parse(JSON.stringify(CIT_COMPLETED)) as Record<string, unknown>;
+    const body = JSON.parse(JSON.stringify(CIT_CONSTRUCTED)) as Record<string, unknown>;
     const rows = body["citations"] as Array<{ check: Record<string, unknown> }>;
     delete rows[1]!.check["missing_quote"];
     const issues = body["citation_issues"] as Array<Record<string, unknown>>;
@@ -994,18 +997,51 @@ describe("getReview() citations", () => {
   });
 
   it("waiting rows have no result", async () => {
-    const review = (await read(CIT_VERIFYING)) as ReviewFull;
-    expect(review.status).toBe("verifying");
-    expect(review.citations.slice(1).map((c) => [c.check.status, c.result])).toEqual([
-      ["pending", null],
-      ["running", null],
-    ]);
+    const pending = (await read(CIT_PENDING)) as ReviewFull;
+    expect(pending.status).toBe("verifying");
+    expect(new Set(pending.citations.map((c) => c.check.status))).toEqual(new Set(["pending"]));
+    expect(pending.citations.every((c) => c.result === null)).toBe(true);
+    const running = (await read(CIT_VERIFYING)) as ReviewFull;
+    expect(new Set(running.citations.map((c) => c.check.status))).toEqual(
+      new Set(["running", "completed"]),
+    );
+    for (const c of running.citations) {
+      expect(c.result === null).toBe(c.check.status === "running");
+    }
+  });
+
+  it("a recorded review reads through", async () => {
+    const review = (await read(CIT_RECORDED)) as ReviewFull;
+    expect([review.status, review.outcome]).toEqual(["completed", "issues_found"]);
+    const s = review.summary;
+    const counts = s.citation_checks!;
+    expect(s.citations_selected).toBe(counts.checked + counts.unchecked + counts.failed);
+    expect(s.citation_issues).toBe(review.citation_issues.length);
+    const findings = new Set(review.citations.map((c) => c.result?.finding));
+    for (const f of [
+      "contradicted",
+      "page_not_found",
+      "metadata_mismatch",
+      "doi_not_found",
+      "unchecked",
+    ]) {
+      expect(findings.has(f as never)).toBe(true);
+    }
+  });
+
+  it("a recorded quote finding names the missing excerpt", async () => {
+    const review = (await read(CIT_QUOTE)) as ReviewFull;
+    const issue = review.citation_issues.find((i) => i.finding === "quote_not_in_source")!;
+    expect(issue.quotes).toContain(issue.missing_quote);
+    expect(review.citations[issue.citation_index]!.check.missing_quote).toBe(issue.missing_quote);
   });
 
   it("the issues view carries both citation lists and no rows", async () => {
     const review = await read(CIT_ISSUES, "issues");
-    expect(review.citation_issues).toHaveLength(5);
-    expect(review.citation_failures).toHaveLength(1);
+    expect(review.citation_issues.map((i) => i.finding)).toEqual(
+      CIT_RECORDED.citation_issues.map((i) => i.finding),
+    );
+    expect(review.citation_failures).toEqual([]);
     expect("citations" in review).toBe(false);
   });
 
@@ -1046,7 +1082,7 @@ describe("getReview() citations", () => {
   it("reviewAndWait returns the citations of the finished review", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: { ...ACCEPTED, review_id: "7c1e0d52" } },
-      { body: CIT_COMPLETED },
+      { body: CIT_CONSTRUCTED },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const review = await client.reviewAndWait({ text: DRAFT, checkCitations: true });
