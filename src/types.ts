@@ -1333,7 +1333,6 @@ export interface ReviewVerification {
   failure: ReviewFailureBlock | null;
 }
 
-/** One claim of the draft, in the order the draft's claims were read. */
 /**
  * One replacement in the draft: the span `start`..`end` of the `text` you
  * sent (Unicode code points, `end` exclusive, as in {@link Position}), `text`
@@ -1357,7 +1356,8 @@ export interface SuggestedEdit {
  * check `suggested_rewrite` says, in the draft's own language
  * (`review({ suggestEdits: true })`). `status` is `"pending"` while they are
  * computed (`edits` is `null`; keep polling) and `"completed"` once settled,
- * which includes settling on none (`edits` is `[]`). Not themselves verified:
+ * which includes settling on none (`edits` is `[]`: no edit could be made
+ * safely, or it could not be computed). Not themselves verified:
  * review them before you publish.
  */
 export interface SuggestedEdits {
@@ -1365,6 +1365,7 @@ export interface SuggestedEdits {
   edits: SuggestedEdit[] | null;
 }
 
+/** One claim of the draft, in the order the draft's claims were read. */
 export interface ReviewClaim {
   index: number;
   /** The claim as Lenz states it. */
@@ -1390,8 +1391,8 @@ export interface ReviewClaim {
   verification: ReviewVerification | null;
   /**
    * The claim's suggested edits to the draft (`review({ suggestEdits: true })`).
-   * `null` when not asked, when the claim got no deep check with a suggested
-   * rewrite, when its passage is not in a supported language or could not be
+   * `null` when not asked, when the claim got no completed deep check with a
+   * suggested rewrite, when its passage is not in a supported language or could not be
    * placed, once a zero-retention draft is gone, and from an API that
    * predates the field.
    */

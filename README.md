@@ -124,18 +124,25 @@ the deep check, and the review completes once they are settled. Each claim row
 (and its issue) carries `suggested_edits`: `status` `"pending"` or
 `"completed"`, and `edits`, each a span of the `text` you sent (`start`/`end` in
 code points, `text` the exact slice) and its `replacement`. An empty `edits`
-means no edit could be made safely. They are not themselves verified.
+means no edit could be made safely, or it could not be computed. They are not
+themselves verified. Two claims that share a passage can return overlapping
+edits: apply one of them.
+
+Offsets all index the text you sent, so apply every claim's edits together,
+from the end of the text back:
 
 ```ts
 const review = await client.reviewAndWait({ text: draft, suggestEdits: true });
+const edits = review.claims
+  .flatMap((c) => c.suggested_edits?.edits ?? [])
+  .sort((a, b) => b.start - a.start);
 const chars = Array.from(draft); // code points
-for (const claim of review.claims) {
-  const edits = [...(claim.suggested_edits?.edits ?? [])].sort((a, b) => b.start - a.start);
-  for (const e of edits) {
-    // skip an edit whose text the draft no longer holds
-    if (chars.slice(e.start, e.end).join("") === e.text) {
-      chars.splice(e.start, e.end - e.start, ...Array.from(e.replacement));
-    }
+let takenFrom = chars.length;
+for (const e of edits) {
+  // skip an edit that overlaps one applied, or whose text the draft no longer holds
+  if (e.end <= takenFrom && chars.slice(e.start, e.end).join("") === e.text) {
+    chars.splice(e.start, e.end - e.start, ...Array.from(e.replacement));
+    takenFrom = e.start;
   }
 }
 const edited = chars.join("");
