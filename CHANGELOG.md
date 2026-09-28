@@ -11,9 +11,9 @@ All notable changes to this SDK are documented here. Format follows
 `review` can check a draft's citations, and `citecheck` runs that check on
 its own, on a draft or on statement-source pairs: does each linked source (a
 URL or a DOI) say what the draft says it does? Nothing the SDK already sends changes:
-leave `maxCitations` out and the request is exactly what 2.17.0 sends. A
+leave `maxCitations` and `locate` out and the request is exactly what 2.17.0 sends. A
 review body without the citation keys reads with the new keys at their
-defaults.
+defaults. `extract` can also say where the text makes each claim.
 
 ### Added
 
@@ -63,6 +63,28 @@ webhookUrl?, idempotencyKey? })` takes a draft (its first `maxCitations`,
   `more_claims`, `more_citations` and the policy's `max_citations`, `0` for
   `citation_issues`), so the types
   hold for every review body. A key the server sent is never changed.
+- **`client.extract({ text, locate: true })`**: only the claims that could be
+  traced directly back to the text are returned, and `locations` says where
+  the text makes each one. A claim found nowhere in the text, or found with a
+  different figure, is left out; a list that ends up empty answers
+  `status: "not_a_claim"`. Locating adds a few seconds. If the claims cannot
+  be located, `locations` is `null` and the list is returned unfiltered.
+  `locate` defaults to `false`; it is sent only when you set it, so an
+  explicit `false` is sent and an omitted value leaves the API's default in
+  charge.
+- **`ExtractedClaims.locations`** (`ClaimLocation[] | null`): one entry per
+  returned claim, in the order of `identified_claims` (one entry for a single
+  `claim`); `[]` when every claim was left out; `null` when `locate` was not
+  set, when the extraction found no claims, or
+  when the claims could not be located. A `ClaimLocation` is the `claim`
+  (exactly as in `claim` / `identified_claims`) and its `positions`: every
+  place the text makes it, in text order, 1 to 10. A `ClaimPosition` is
+  `start`, `end` (exclusive) and `text`, the passage as it appears in the
+  text. `start` and `end` count Unicode **code points** in the text as sent;
+  both are `null` when the text was a URL. JavaScript's `text.slice(start,
+end)` counts UTF-16 units and shifts after an emoji; slice with
+  `Array.from(text).slice(start, end).join("")`. `ClaimLocation` and
+  `ClaimPosition` are exported.
 
 ### Deprecated
 

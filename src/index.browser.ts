@@ -120,6 +120,8 @@ export type {
   BatchAccepted,
   BatchItemResult,
   CandidateClaim,
+  ClaimLocation,
+  ClaimPosition,
   DebateSide,
   EntityRef,
   ExtractInput,

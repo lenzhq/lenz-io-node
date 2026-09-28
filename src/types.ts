@@ -346,6 +346,40 @@ export interface ExtractedEntity {
  */
 export type ExtractStatus = "ready" | "not_a_claim" | "no_match" | (string & NonNullable<unknown>);
 
+/**
+ * One place the submitted text makes a claim, from `extract({ locate: true })`.
+ *
+ * `start` and `end` index the text AS SENT, in Unicode code points (not
+ * UTF-16 code units, not bytes); `end` is exclusive. JavaScript's
+ * `text.slice(start, end)` counts UTF-16 units and shifts after an emoji or
+ * any other character outside the Basic Multilingual Plane. Slice by code
+ * point instead:
+ *
+ * ```ts
+ * Array.from(text).slice(start, end).join("");
+ * ```
+ *
+ * Both are `null` when the text sent was a URL: the page is not returned, so
+ * there is nothing to index. `text` is the passage as it appears in the text,
+ * always present.
+ */
+export interface ClaimPosition {
+  start: number | null;
+  end: number | null;
+  text: string;
+}
+
+/**
+ * Where the submitted text makes one returned claim.
+ *
+ * `claim` is exactly as in `claim` / `identified_claims`. `positions` is
+ * every place the text makes it, in text order: at least one, at most 10.
+ */
+export interface ClaimLocation {
+  claim: string;
+  positions: ClaimPosition[];
+}
+
 export interface ExtractedClaims {
   status?: ExtractStatus;
   claim?: string;
@@ -359,6 +393,19 @@ export interface ExtractedClaims {
   key_entities?: ExtractedEntity[];
   presumed_intent?: string;
   original_input?: string;
+  /**
+   * Where the text makes each returned claim, when the call set
+   * `locate: true`: one entry per returned claim, in the order of
+   * `identified_claims` (one entry for a single `claim`).
+   *
+   * `[]` when every claim was left out (`status` is then `"not_a_claim"`);
+   * `null` when `locate` was not set (or `false`), when the extraction found no claims,
+   * or when the claims could not be located (the list is then returned
+   * unfiltered). Offsets are code points — see {@link ClaimPosition}.
+   * Optional only so a response from an API that predates the field still
+   * fits; read it as `out.locations ?? null`.
+   */
+  locations?: ClaimLocation[] | null;
 }
 
 /**
@@ -916,6 +963,20 @@ export interface ExtractInput {
    * A focused call costs the same single unit of the daily cap.
    */
   focus?: string;
+  /**
+   * Keep only the claims that can be traced directly back to the text, and
+   * say where the text makes each one (`locations` on the result). A claim
+   * found nowhere in the text, or found with a different figure, is left out;
+   * a list that ends up empty answers `status: "not_a_claim"`. Locating adds
+   * a few seconds.
+   *
+   * If the claims cannot be located, `locations` is `null` and the list is
+   * returned unfiltered.
+   *
+   * Defaults to `false`. Sent only when set, so an explicit `false` is sent
+   * and an omitted value leaves the server's default in charge.
+   */
+  locate?: boolean;
   /**
    * Per-call HTTP timeout. When omitted, `extract` waits at least 90s rather
    * than the client's default: a long input can take more than 30s to

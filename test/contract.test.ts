@@ -28,7 +28,7 @@ import {
   LenzUpstreamUnavailableError,
   mapResponseToError,
 } from "../src/index.js";
-import type { AssessClaim, Verification } from "../src/types.js";
+import type { AssessClaim, ExtractedClaims, Verification } from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
 import type { VerificationFailed } from "../src/webhooks.js";
 import { createHmac } from "node:crypto";
@@ -53,8 +53,11 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "key_entities",
     "presumed_intent",
     "original_input",
+    "locations",
   ]),
   ExtractedEntity: new Set(["name", "type"]),
+  ClaimLocation: new Set(["claim", "positions"]),
+  ClaimPosition: new Set(["start", "end", "text"]),
   AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims"]),
   AssessClaim: new Set([
     "claim",
@@ -474,7 +477,8 @@ const NESTED: Record<string, Record<string, string | null>> = {
   ReviewAssessment: { failure: "ReviewFailureBlock" },
   ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
   ReviewWebhookPayload: { review: "ReviewFull" },
-  ExtractedClaims: { key_entities: "ExtractedEntity" },
+  ExtractedClaims: { key_entities: "ExtractedEntity", locations: "ClaimLocation" },
+  ClaimLocation: { positions: "ClaimPosition" },
   AssessResponse: { claims: "AssessClaim" },
   TaskStatus: {
     result: "Verification",
@@ -555,6 +559,9 @@ describe("contract", () => {
     // `no_match` (a focus that nothing matched) must deserialize into the
     // same model with the same key set — a new status, never a new shape.
     ["extract_response_no_match.json", "ExtractedClaims"],
+    // `locate: true`: the claims traced back to the text, with where each is
+    // made. The text opens with an emoji, so a UTF-16 slice would be off.
+    ["extract_response_located.json", "ExtractedClaims"],
     ["assess_single_claim.json", "AssessResponse"],
     ["assess_multiclaim.json", "AssessResponse"],
     // The list form: one row per item sent, Error rows in position. The
@@ -664,6 +671,34 @@ describe("contract", () => {
         `webhook_payload_completed.json → Verification (via .result):\n${errors.join("\n")}`,
       );
     }
+  });
+
+  it("extract locations slice the text by code point, one entry per claim in order", () => {
+    const out = loadFixture("extract_response_located.json") as ExtractedClaims;
+    const text = out.original_input!;
+    const locations = out.locations!;
+    expect(locations.map((l) => l.claim)).toEqual(out.identified_claims);
+    for (const location of locations) {
+      expect(location.positions.length).toBeGreaterThanOrEqual(1);
+      expect(location.positions.length).toBeLessThanOrEqual(10);
+      for (const p of location.positions) {
+        expect(p.start).not.toBeNull();
+        expect(p.end).not.toBeNull();
+        // In bounds first: slice silently clamps an end past the text.
+        expect(p.start!).toBeGreaterThanOrEqual(0);
+        expect(p.end!).toBeGreaterThan(p.start!);
+        expect(p.end!).toBeLessThanOrEqual(Array.from(text).length);
+        expect(Array.from(text).slice(p.start!, p.end!).join("")).toBe(p.text);
+      }
+    }
+    // The offsets are code points: a UTF-16 slice lands one unit early after
+    // the leading emoji.
+    const first = locations[0]!.positions[0]!;
+    expect(text.slice(first.start!, first.end!)).not.toBe(first.text);
+
+    // The other extract fixtures predate `locations`; they read as null.
+    const plain = loadFixture("extract_response.json") as ExtractedClaims;
+    expect(plain.locations ?? null).toBeNull();
   });
 
   it("suggested_rewrite: a rewrite on a False verdict, null on a True one, absent on an older one", () => {

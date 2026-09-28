@@ -207,6 +207,44 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
     await client.extract({ text: "x", focus: "" });
     expect(bodyOf(calls)).not.toHaveProperty("focus");
   });
+
+  it("extract: no locate key when omitted", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { status: "ready", claim: "x", identified_claims: ["x"], locations: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x" });
+    // Omitted means the server's default governs.
+    expect(bodyOf(calls)).not.toHaveProperty("locate");
+  });
+
+  it("extract: sends locate: true", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { status: "ready", claim: "x", identified_claims: ["x"], locations: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", locate: true });
+    expect(bodyOf(calls).locate).toBe(true);
+  });
+
+  it("extract: sends an explicit locate: false", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { status: "ready", claim: "x", identified_claims: ["x"], locations: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", locate: false });
+    // Unlike an empty focus, false is a value the caller chose: it is sent.
+    expect(bodyOf(calls)).toHaveProperty("locate", false);
+  });
+
+  it("extract: sends locate alongside focus and language", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { status: "ready", claim: "x", identified_claims: ["x"], locations: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", language: "es", focus: "competidores", locate: true });
+    expect(bodyOf(calls)).toMatchObject({ language: "es", focus: "competidores", locate: true });
+  });
 });
 
 // ─────────────────────────────────────────────── HAPPY PATH ──

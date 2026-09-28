@@ -14,3 +14,6 @@ dist/
 test/fixtures/contract/review_*.json
 test/fixtures/contract/error_review_*.json
 test/fixtures/contract/citecheck_*.json
+
+# The located /extract fixture — the SAME bytes as the server's copy.
+test/fixtures/contract/extract_response_located.json

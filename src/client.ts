@@ -620,6 +620,10 @@ export class Lenz {
    * `"market size and competitors"`. A focus can only SELECT from the claims
    * the extractor found — see {@link ExtractInput.focus}.
    *
+   * Pass `locate: true` to keep only the claims traced back to the text,
+   * with where the text makes each one in `locations` (code-point offsets —
+   * see {@link ClaimPosition}).
+   *
    * `status` is `"ready"`, `"not_a_claim"` (no verifiable claim in the text
    * at all), or `"no_match"` (claims were found, none fell within `focus`).
    */
@@ -629,6 +633,9 @@ export class Lenz {
     // No client-side length check on `focus`: the server's 422 is the
     // contract, and a cap duplicated here would drift from it.
     if (input.focus) body.focus = input.focus;
+    // Unlike `focus`, an explicit `false` is sent too; only an omitted value
+    // is left out, so the server's default governs it.
+    if (input.locate !== undefined) body.locate = input.locate;
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",

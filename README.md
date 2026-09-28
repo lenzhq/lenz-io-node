@@ -252,7 +252,7 @@ your own claims. Use webhooks for production async flows.
 
 ## What you get on the client
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list — see [Steering extract](#steering-extract). Each attempt waits up to 90s by default (a timeout is retried like any transport error); `timeoutMs` overrides it for that call.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 90s by default (a timeout is retried like any transport error); `timeoutMs` overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Both forms take a per-call `timeoutMs` (default 45s).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
@@ -684,6 +684,43 @@ if (out.status === "no_match") {
 ```
 
 A focused call costs the same single unit of the daily cap as an unfocused one.
+
+### Locating claims in the text
+
+Pass `locate: true` to keep only the claims that could be traced directly back
+to your text, with where the text makes each one:
+
+```ts
+const out = await client.extract({ text: draft, locate: true });
+
+for (const location of out.locations ?? []) {
+  for (const p of location.positions) {
+    if (p.start === null || p.end === null) continue; // the text was a URL
+    // Offsets are code points: slice with Array.from, not text.slice.
+    const passage = Array.from(draft).slice(p.start, p.end).join("");
+    console.log(location.claim, "->", passage); // passage === p.text
+  }
+}
+```
+
+A claim found nowhere in the text, or found with a different figure, is left
+out; if none is left, `status` is `"not_a_claim"`. `locations` has one entry
+per returned claim, in the order of `identified_claims` (one entry for a single
+`claim`), and each entry lists every place the text makes the claim, in text
+order (1 to 10). Locating adds a few seconds.
+
+`start` and `end` (exclusive) count Unicode **code points** in the text as you
+sent it. JavaScript's `text.slice(start, end)` counts UTF-16 units, so it
+shifts after an emoji; `Array.from(text).slice(start, end).join("")` is the
+correct slice. Both are `null` when the text was a URL (the page is not
+returned, so there is nothing to index); `text` is always the passage as it
+appears.
+
+`locations` is `[]` when every claim was left out (`status` is then
+`"not_a_claim"`), and `null` when `locate` was not set, when the extraction
+found no claims, or
+when the claims could not be located, in which case the list is returned
+unfiltered. `locate` defaults to `false`.
 
 ## Multi-language output
 
