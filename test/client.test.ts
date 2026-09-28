@@ -367,7 +367,7 @@ describe("Marquee verbs", () => {
     const [location] = out.locations!;
     expect(location!.claim).toBe(out.claim);
     expect(location!.positions).toHaveLength(2);
-    for (const p of location!.positions) {
+    for (const p of location!.positions!) {
       expect(Array.from(text).slice(p.start!, p.end!).join("")).toBe(p.text);
     }
   });
@@ -394,9 +394,9 @@ describe("Marquee verbs", () => {
     const out = await client.extract({ text: "https://example.com/article", locate: true });
     expect(out.locations!.map((l) => l.claim)).toEqual(["A", "B"]);
     for (const l of out.locations!) {
-      expect(l.positions[0]!.start).toBeNull();
-      expect(l.positions[0]!.end).toBeNull();
-      expect(l.positions[0]!.text).toBeTruthy();
+      expect(l.positions![0]!.start).toBeNull();
+      expect(l.positions![0]!.end).toBeNull();
+      expect(l.positions![0]!.text).toBeTruthy();
     }
   });
 

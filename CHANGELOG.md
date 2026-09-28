@@ -52,8 +52,9 @@ webhookUrl?, idempotencyKey? })` takes a draft (its first `maxCitations`,
   (`ReviewMoreCitation`: `index`, `reference`, `cited_url`, `doi`,
   `sentence`, `position`) list what the draft holds past `maxAssessments`
   and `maxCitations`: found but not checked; `null` until the draft is read.
-  Also exported:
-  `ReviewCitationCheck`, `ReviewCitationResult`, `ReviewCitationPosition`,
+  A citation's `position` is a `Position` (below) whose `text` is `null`: the
+  row carries the statement. Also exported:
+  `ReviewCitationCheck`, `ReviewCitationResult`,
   `ReviewCitationRecord`, `ReviewCitationDifference`,
   `ReviewCitationCheckCounts`, and the unions `ReviewCitationFinding`,
   `ReviewCitationSource` and `ReviewCitationUncheckedReason` (an open set).
@@ -78,27 +79,40 @@ webhookUrl?, idempotencyKey? })` takes a draft (its first `maxCitations`,
   set, when the extraction found no claims, or
   when the claims could not be located. A `ClaimLocation` is the `claim`
   (exactly as in `claim` / `identified_claims`) and its `positions`: every
-  place the text makes it, in text order, 1 to 10. A `ClaimPosition` is
-  `start`, `end` (exclusive) and `text`, the passage as it appears in the
-  text. `start` and `end` count Unicode **code points** in the text as sent;
-  both are `null` when the text was a URL. JavaScript's `text.slice(start,
-end)` counts UTF-16 units and shifts after an emoji; slice with
+  place the text makes it, in text order, 1 to 10 (`Position[] | null`:
+  `null` only when that claim could not be placed; on `extract` every
+  returned claim is placed).
+- **`Position`**, one type for claim and citation positions:
+  `{ start: number | null; end: number | null; text: string | null }`.
+  `start` and `end` (exclusive) count Unicode **code points** in the text as
+  sent; both are `null` when the text was a URL. `text` is the passage as it
+  appears in the text, and `null` on a citation's position (its row carries
+  the statement). JavaScript's `text.slice(start, end)` counts UTF-16 units
+  and shifts after an emoji; slice with
   `Array.from(text).slice(start, end).join("")`. `ClaimLocation` and
-  `ClaimPosition` are exported.
+  `Position` are exported.
 - **Review claim rows say where the draft makes each claim.** A review now
   checks only the claims traced directly back to the draft: a claim found
   nowhere in it, or found with a different figure, is left out, as
   `extract({ locate: true })` does. Each `ReviewClaim` gains `positions`
-  (`ClaimPosition[] | null`): every place the draft makes the claim, in text
+  (`Position[] | null`): every place the draft makes the claim, in text
   order, at most 10, with `start` and `end` in code points of `text` as sent,
-  the same coordinates as a citation's `position` (slice as above). `null`
-  when the draft was a URL, when the claims could not be located, or once a
-  zero-retention draft is gone.
-- **`more_claim_positions`** on both review views
-  (`(ClaimPosition[] | null)[] | null`): one entry per `more_claims` string,
-  same order. `null` until the draft is read, for a URL, or when the claims
-  could not be located. A body without either key (an older API) reads both
-  as `null`; a key the server sent is never changed.
+  the same shape as a citation's `position` (slice as above). For a URL
+  draft `start` / `end` are `null` and `text` carries the passage, as
+  `extract` does for a URL. `null` when the claim could not be located, or
+  once a zero-retention draft is gone.
+- **`more_claim_locations`** on both review views (`ClaimLocation[] | null`):
+  one `{ claim, positions }` per `more_claims` string, same order
+  (`more_claims` stays `string[]`). `null` until the draft is read. A body
+  without either key (an older API) reads both as `null`; a key the server
+  sent is never changed.
+
+### Fixed
+
+- **`ReviewFailureBlock.failure_reason`** is `string | null`: the API can
+  send `null` when a stored failure names no specific cause. A failed review
+  or citation check with a `null` reason reads, and `ReviewFailedError` /
+  `CitecheckFailedError` carry an empty `errorCode`.
 
 ### Deprecated
 
