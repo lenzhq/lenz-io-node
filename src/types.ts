@@ -1621,8 +1621,6 @@ export interface CitationPair {
   cited_year?: string;
   /** With `doi`: the journal the reference gives. */
   cited_journal?: string;
-  /** The statement's language; overrides the request's. */
-  language?: string;
 }
 
 /** Send exactly one of `text` and `pairs`. */
@@ -1636,7 +1634,11 @@ export interface CitecheckInput {
   pairs?: CitationPair[];
   /** With `text`: check its first N citations (1-20). Default 20. */
   maxCitations?: number;
-  /** The language of the draft or the statements. Detected when omitted. */
+  /**
+   * The language Lenz writes the reasoning in. English when omitted. Hints
+   * are always in English, and the passage and the quote stay verbatim in the
+   * page's language.
+   */
   language?: string;
   /**
    * Where `citecheck.completed` / `citecheck.failed` go. Omitted or `null`:
