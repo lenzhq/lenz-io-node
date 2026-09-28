@@ -121,6 +121,8 @@ export type {
   CandidateClaim,
   ClaimLocation,
   Position,
+  SuggestedEdit,
+  SuggestedEdits,
   DebateSide,
   EntityRef,
   ExtractInput,

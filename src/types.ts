@@ -1164,6 +1164,8 @@ export interface EscalationPolicy {
    * an older server) when it checks none.
    */
   max_citations: number | null;
+  /** Whether the review computes suggested edits (`false` from an older server). */
+  suggest_edits: boolean;
 }
 
 /** Why a claim did or did not get a deep check. */
@@ -1332,6 +1334,37 @@ export interface ReviewVerification {
 }
 
 /** One claim of the draft, in the order the draft's claims were read. */
+/**
+ * One replacement in the draft: the span `start`..`end` of the `text` you
+ * sent (Unicode code points, `end` exclusive, as in {@link Position}), `text`
+ * exactly that slice, and `replacement` what takes its place (`""` deletes
+ * it). `position` is the index of the claim row's `positions` entry the edit
+ * sits in, for grouping by passage.
+ *
+ * Compare `text` with your draft before you apply an edit, so a draft that
+ * changed since is never edited in the wrong place.
+ */
+export interface SuggestedEdit {
+  position: number;
+  start: number;
+  end: number;
+  text: string;
+  replacement: string;
+}
+
+/**
+ * The smallest edits to the draft that make it say what the claim's deep
+ * check `suggested_rewrite` says, in the draft's own language
+ * (`review({ suggestEdits: true })`). `status` is `"pending"` while they are
+ * computed (`edits` is `null`; keep polling) and `"completed"` once settled,
+ * which includes settling on none (`edits` is `[]`). Not themselves verified:
+ * review them before you publish.
+ */
+export interface SuggestedEdits {
+  status: "pending" | "completed";
+  edits: SuggestedEdit[] | null;
+}
+
 export interface ReviewClaim {
   index: number;
   /** The claim as Lenz states it. */
@@ -1355,6 +1388,14 @@ export interface ReviewClaim {
   escalation: Escalation | null;
   /** `null` unless a deep check was planned. */
   verification: ReviewVerification | null;
+  /**
+   * The claim's suggested edits to the draft (`review({ suggestEdits: true })`).
+   * `null` when not asked, when the claim got no deep check with a suggested
+   * rewrite, when its passage is not in a supported language or could not be
+   * placed, once a zero-retention draft is gone, and from an API that
+   * predates the field.
+   */
+  suggested_edits: SuggestedEdits | null;
 }
 
 /**
@@ -1391,6 +1432,8 @@ export interface ReviewIssue {
   suggested_rewrite: string | null;
   /** The deep check's failure, when it failed. */
   failure: ReviewFailureBlock | null;
+  /** A copy of its claim row's `suggested_edits`. */
+  suggested_edits: SuggestedEdits | null;
 }
 
 /** A claim outside the issue set whose work failed. */
@@ -1656,6 +1699,14 @@ export interface ReviewInput {
    * nothing is sent.
    */
   maxCitations?: number;
+  /**
+   * Also return, for each claim whose deep check suggests a rewrite, the
+   * smallest edits to the draft that make it say what the rewrite says, in
+   * the draft's own language (`ReviewClaim.suggested_edits`, copied on its
+   * issue). No credits beyond the deep check; the review completes once they
+   * are settled. Sent as `escalate.suggest_edits` only when `true`.
+   */
+  suggestEdits?: boolean;
   /** Output language of every claim and rewrite (ISO 639-1). Omit for English. */
   language?: string;
   /**

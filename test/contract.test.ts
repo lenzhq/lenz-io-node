@@ -250,6 +250,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "max_assessments",
     "depth",
     "max_citations",
+    "suggest_edits",
   ]),
   ReviewSummary: new Set([
     "claims_selected",
@@ -369,6 +370,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "rationale",
     "suggested_rewrite",
     "failure",
+    "suggested_edits",
   ]),
   ReviewFailure: new Set(["claim_index", "claim", "stage", "failure"]),
   ReviewClaim: new Set([
@@ -379,7 +381,10 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "assessment",
     "escalation",
     "verification",
+    "suggested_edits",
   ]),
+  SuggestedEdits: new Set(["status", "edits"]),
+  SuggestedEdit: new Set(["position", "start", "end", "text", "replacement"]),
   ReviewResult: new Set(["verdict", "confidence", "source", "is_issue"]),
   ReviewEntity: new Set(["name", "qid"]),
   ReviewAssessment: new Set([
@@ -483,7 +488,11 @@ const NESTED: Record<string, Record<string, string | null>> = {
     failure: "ReviewFailureBlock",
   },
   CitecheckSummary: { citation_checks: "ReviewCitationCheckCounts" },
-  ReviewIssue: { escalation: "Escalation", failure: "ReviewFailureBlock" },
+  ReviewIssue: {
+    escalation: "Escalation",
+    failure: "ReviewFailureBlock",
+    suggested_edits: "SuggestedEdits",
+  },
   ReviewFailure: { failure: "ReviewFailureBlock" },
   ReviewClaim: {
     positions: "Position",
@@ -491,7 +500,9 @@ const NESTED: Record<string, Record<string, string | null>> = {
     assessment: "ReviewAssessment",
     escalation: "Escalation",
     verification: "ReviewVerification",
+    suggested_edits: "SuggestedEdits",
   },
+  SuggestedEdits: { edits: "SuggestedEdit" },
   ReviewAssessment: { failure: "ReviewFailureBlock" },
   ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
   ReviewWebhookPayload: { review: "ReviewFull" },
@@ -626,6 +637,9 @@ describe("contract", () => {
     ["review_citations_more.json", "ReviewFull"],
     // A review whose claim rows say where the draft makes each claim, recorded.
     ["review_completed_located.json", "ReviewFull"],
+    // A review that asked for suggested edits: a claim row's and its issue's
+    // `suggested_edits`. Same fixture as the Python SDK.
+    ["review_completed_suggested_edits.json", "ReviewFull"],
     // /citecheck, recorded: the receipt, a check of a draft's first four
     // citations, and a check of two statement-source pairs.
     ["citecheck_accepted.json", "CitecheckStarted"],

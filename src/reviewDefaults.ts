@@ -24,7 +24,9 @@ function withNull(v: unknown, key: string): unknown {
  * review that checks no citation: `[]` for the lists, `null` for the counts,
  * `more_claims`, `more_citations` and `policy.max_citations`, `0` for
  * `citation_issues`. The claim positions an older body lacks
- * (`more_claim_locations`, each claim row's `positions`) read as `null`.
+ * (`more_claim_locations`, each claim row's `positions`) read as `null`, and
+ * so do the suggested edits (each claim row's and issue's `suggested_edits`;
+ * `policy.suggest_edits` reads as `false`).
  * Keys the server sent are never touched. Returns a copy.
  */
 export function withReviewDefaults<T>(body: T): T {
@@ -39,7 +41,12 @@ export function withReviewDefaults<T>(body: T): T {
   }
   // A row key the body does not carry reads as null.
   if (Array.isArray(b["claims"])) {
-    b["claims"] = (b["claims"] as unknown[]).map((c) => withNull(c, "positions"));
+    b["claims"] = (b["claims"] as unknown[]).map((c) =>
+      withNull(withNull(c, "positions"), "suggested_edits"),
+    );
+  }
+  if (Array.isArray(b["issues"])) {
+    b["issues"] = (b["issues"] as unknown[]).map((i) => withNull(i, "suggested_edits"));
   }
   if (Array.isArray(b["citation_issues"])) {
     b["citation_issues"] = (b["citation_issues"] as unknown[]).map((i) =>
@@ -72,6 +79,7 @@ export function withReviewDefaults<T>(body: T): T {
   if (policy && typeof policy === "object" && !Array.isArray(policy)) {
     const p = { ...(policy as Record<string, unknown>) };
     if (p["max_citations"] === undefined) p["max_citations"] = null;
+    if (p["suggest_edits"] === undefined) p["suggest_edits"] = false;
     b["policy"] = p;
   }
   return b as T;

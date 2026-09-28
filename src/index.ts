@@ -145,6 +145,8 @@ export type {
   CandidateClaim,
   ClaimLocation,
   Position,
+  SuggestedEdit,
+  SuggestedEdits,
   Certificate,
   Coverage,
   CoverageReason,

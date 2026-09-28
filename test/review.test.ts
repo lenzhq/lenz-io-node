@@ -1086,7 +1086,11 @@ describe("getReview() citations", () => {
       ]).toEqual([null, null, null, null, null, 0, null]);
       // the defaults are added, never over what the server sent
       expect(review.claims).toEqual(
-        (body as unknown as ReviewFull).claims.map((c) => ({ ...c, positions: null })),
+        (body as unknown as ReviewFull).claims.map((c) => ({
+          ...c,
+          positions: null,
+          suggested_edits: null,
+        })),
       );
     },
   );
@@ -1119,7 +1123,8 @@ describe("getReview() claim positions", () => {
 
   it("a located review reads through as the server sent it", async () => {
     const review = (await read(LOCATED)) as ReviewFull;
-    expect(review.claims).toEqual(LOCATED.claims);
+    // A body from before suggested edits: that key reads as null.
+    expect(review.claims).toEqual(LOCATED.claims.map((c) => ({ ...c, suggested_edits: null })));
     expect(review.more_claim_locations).toEqual(LOCATED.more_claim_locations);
     for (const claim of review.claims) {
       const p = claim.positions![0]!;
@@ -1173,5 +1178,84 @@ describe("getReview() claim positions", () => {
     const issues = await read(ISSUES, "issues");
     expect(issues.more_claim_locations).toBeNull();
     expect("more_claim_positions" in issues).toBe(false);
+  });
+});
+
+// ── suggested edits ──────────────────────────────────────────────────────
+
+describe("review() suggested edits", () => {
+  const EDITS = fixture<ReviewFull>("review_completed_suggested_edits.json");
+
+  async function sent(input: Partial<ReviewInput>): Promise<Record<string, unknown>> {
+    const { fetch, calls } = makeFetch([{ status: 202, body: ACCEPTED }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.review({ text: DRAFT, idempotencyKey: "k", ...input });
+    return sentBody(calls[0]!);
+  }
+
+  async function read(body: unknown) {
+    const { fetch } = makeFetch([{ body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    return (await client.getReview("50f0785a")) as ReviewFull;
+  }
+
+  it("not asked: nothing is sent, and the body is as before", async () => {
+    expect(await sent({})).toEqual({ text: DRAFT, visibility: "private" });
+    expect(await sent({ suggestEdits: false })).toEqual({ text: DRAFT, visibility: "private" });
+  });
+
+  it("asked: sent inside escalate", async () => {
+    expect((await sent({ suggestEdits: true }))["escalate"]).toEqual({ suggest_edits: true });
+    expect((await sent({ suggestEdits: true, maxVerifications: 2 }))["escalate"]).toEqual({
+      max_verifications: 2,
+      suggest_edits: true,
+    });
+  });
+
+  it("the block reads through on the claim row and its issue", async () => {
+    const review = await read(EDITS);
+    expect(review.policy.suggest_edits).toBe(true);
+    const block = review.claims[0]!.suggested_edits!;
+    expect(block.status).toBe("completed");
+    expect(block.edits).toEqual([
+      { position: 0, start: 23, end: 26, text: "20%", replacement: "15%" },
+    ]);
+    const position = review.claims[0]!.positions![block.edits![0]!.position]!;
+    expect(position.start! <= 23 && 26 <= position.end!).toBe(true);
+    expect(review.issues[0]!.suggested_edits).toEqual(block);
+  });
+
+  it("applies to the text as sent, by code point", async () => {
+    const review = await read(EDITS);
+    const position = review.claims[0]!.positions![0]!;
+    const sentText = " ".repeat(position.start!) + position.text!;
+    const chars = Array.from(sentText);
+    const edits = [...review.claims[0]!.suggested_edits!.edits!].sort((a, b) => b.start - a.start);
+    for (const e of edits) {
+      expect(chars.slice(e.start, e.end).join("")).toBe(e.text);
+      chars.splice(e.start, e.end - e.start, ...Array.from(e.replacement));
+    }
+    expect(chars.join("").trim()).toBe(position.text!.replace("20%", "15%"));
+  });
+
+  it("a body from an older API reads the keys as null and false", async () => {
+    const body = JSON.parse(JSON.stringify(EDITS)) as Record<string, unknown>;
+    for (const c of body["claims"] as Array<Record<string, unknown>>) delete c["suggested_edits"];
+    for (const i of body["issues"] as Array<Record<string, unknown>>) delete i["suggested_edits"];
+    delete (body["policy"] as Record<string, unknown>)["suggest_edits"];
+    const review = await read(body);
+    expect(review.claims.every((c) => c.suggested_edits === null)).toBe(true);
+    expect(review.issues.every((i) => i.suggested_edits === null)).toBe(true);
+    expect(review.policy.suggest_edits).toBe(false);
+  });
+
+  it("a pending block keeps edits null", async () => {
+    const body = JSON.parse(JSON.stringify(EDITS)) as Record<string, unknown>;
+    (body["claims"] as Array<Record<string, unknown>>)[0]!["suggested_edits"] = {
+      status: "pending",
+      edits: null,
+    };
+    const review = await read(body);
+    expect(review.claims[0]!.suggested_edits).toEqual({ status: "pending", edits: null });
   });
 });
