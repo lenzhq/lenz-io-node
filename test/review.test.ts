@@ -781,6 +781,30 @@ describe("reviewAndWait()", () => {
     expect(err.fix).not.toContain("different draft");
   });
 
+  it("a failure block with failure_reason: null reads, and the wait throws with an empty code", async () => {
+    const body: ReviewFull = {
+      ...NO_CLAIM,
+      failure: { ...NO_CLAIM.failure!, failure_reason: null },
+    };
+    const read = await new Lenz({
+      apiKey: "lenz_t",
+      fetch: makeFetch([{ body }]).fetch,
+    }).getReview(body.review_id);
+    expect(read.failure!.failure_reason).toBeNull();
+    expect(read.failure!.failure_class).toBe(NO_CLAIM.failure!.failure_class);
+
+    const { fetch } = makeFetch([
+      { status: 202, body: { review_id: body.review_id, status: "queued" } },
+      { body },
+    ]);
+    const err = (await drain(
+      new Lenz({ apiKey: "lenz_t", fetch }).reviewAndWait({ text: DRAFT }).catch((e: unknown) => e),
+    )) as ReviewFailedError;
+    expect(err).toBeInstanceOf(ReviewFailedError);
+    expect(err.errorCode).toBe("");
+    expect(err.hint).toBe(NO_CLAIM.failure!.hint);
+  });
+
   it("a purged review mid-wait throws LenzGoneError, not a timeout", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: ACCEPTED },
@@ -1045,7 +1069,7 @@ describe("getReview() citations", () => {
         [],
       ]);
       expect(review.policy.max_citations).toBeNull();
-      expect([review.more_claims, review.more_claim_positions, review.more_citations]).toEqual([
+      expect([review.more_claims, review.more_claim_locations, review.more_citations]).toEqual([
         null,
         null,
         null,
@@ -1096,39 +1120,58 @@ describe("getReview() claim positions", () => {
   it("a located review reads through as the server sent it", async () => {
     const review = (await read(LOCATED)) as ReviewFull;
     expect(review.claims).toEqual(LOCATED.claims);
-    expect(review.more_claim_positions).toEqual(LOCATED.more_claim_positions);
+    expect(review.more_claim_locations).toEqual(LOCATED.more_claim_locations);
     for (const claim of review.claims) {
       const p = claim.positions![0]!;
-      expect(p.end! - p.start!).toBe(Array.from(p.text).length);
+      expect(p.end! - p.start!).toBe(Array.from(p.text!).length);
     }
-    expect(review.more_claim_positions!.length).toBe(review.more_claims!.length);
+    expect(review.more_claim_locations!.map((l) => l.claim)).toEqual(review.more_claims);
   });
 
   it("positions: null is kept as null", async () => {
     const body = JSON.parse(JSON.stringify(LOCATED)) as Record<string, unknown>;
     for (const c of body["claims"] as Array<Record<string, unknown>>) c["positions"] = null;
-    body["more_claim_positions"] = null;
+    body["more_claim_locations"] = null;
     const review = (await read(body)) as ReviewFull;
     expect(review.claims.every((c) => c.positions === null)).toBe(true);
-    expect(review.more_claim_positions).toBeNull();
+    expect(review.more_claim_locations).toBeNull();
   });
 
-  it("a more_claims entry with no positions stays null beside the others", async () => {
+  it("a more_claims entry that could not be placed has null positions beside the others", async () => {
     const body = JSON.parse(JSON.stringify(LOCATED)) as ReviewFull;
     body.more_claims = [...body.more_claims!, "Another claim."];
-    body.more_claim_positions = [...body.more_claim_positions!, null];
+    body.more_claim_locations = [
+      ...body.more_claim_locations!,
+      { claim: "Another claim.", positions: null },
+    ];
     const review = (await read(body)) as ReviewFull;
-    expect(review.more_claim_positions!.at(-1)).toBeNull();
+    expect(review.more_claim_locations!.at(-1)).toEqual({
+      claim: "Another claim.",
+      positions: null,
+    });
+  });
+
+  it("a URL review's rows carry the passage with null offsets", async () => {
+    const body = JSON.parse(JSON.stringify(LOCATED)) as ReviewFull;
+    for (const c of body.claims) {
+      c.positions = c.positions!.map((p) => ({ start: null, end: null, text: p.text }));
+    }
+    const review = (await read(body)) as ReviewFull;
+    for (const c of review.claims) {
+      expect(c.positions![0]!.start).toBeNull();
+      expect(typeof c.positions![0]!.text).toBe("string");
+    }
   });
 
   it("a body from an older server, with neither key, reads both as null", async () => {
     const body = JSON.parse(JSON.stringify(LOCATED)) as Record<string, unknown>;
     for (const c of body["claims"] as Array<Record<string, unknown>>) delete c["positions"];
-    delete body["more_claim_positions"];
+    delete body["more_claim_locations"];
     const review = (await read(body)) as ReviewFull;
     expect(review.claims.every((c) => c.positions === null)).toBe(true);
-    expect(review.more_claim_positions).toBeNull();
+    expect(review.more_claim_locations).toBeNull();
     const issues = await read(ISSUES, "issues");
-    expect(issues.more_claim_positions).toBeNull();
+    expect(issues.more_claim_locations).toBeNull();
+    expect("more_claim_positions" in issues).toBe(false);
   });
 });

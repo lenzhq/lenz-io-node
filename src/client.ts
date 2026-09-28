@@ -622,7 +622,7 @@ export class Lenz {
    *
    * Pass `locate: true` to keep only the claims traced back to the text,
    * with where the text makes each one in `locations` (code-point offsets —
-   * see {@link ClaimPosition}).
+   * see {@link Position}).
    *
    * `status` is `"ready"`, `"not_a_claim"` (no verifiable claim in the text
    * at all), or `"no_match"` (claims were found, none fell within `focus`).

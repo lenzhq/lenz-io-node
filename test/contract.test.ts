@@ -30,7 +30,7 @@ import {
 } from "../src/index.js";
 import type {
   AssessClaim,
-  ClaimPosition,
+  Position,
   ExtractedClaims,
   ReviewFull,
   ReviewIssues,
@@ -64,7 +64,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   ExtractedEntity: new Set(["name", "type"]),
   ClaimLocation: new Set(["claim", "positions"]),
-  ClaimPosition: new Set(["start", "end", "text"]),
+  Position: new Set(["start", "end", "text"]),
   AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims"]),
   AssessClaim: new Set([
     "claim",
@@ -215,7 +215,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "citation_issues",
     "citation_failures",
     "more_claims",
-    "more_claim_positions",
+    "more_claim_locations",
     "more_citations",
     "failure",
     "claims",
@@ -239,7 +239,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "citation_issues",
     "citation_failures",
     "more_claims",
-    "more_claim_positions",
+    "more_claim_locations",
     "more_citations",
     "failure",
   ]),
@@ -279,7 +279,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "result",
     "check",
   ]),
-  ReviewCitationPosition: new Set(["start", "end"]),
   ReviewCitationResult: new Set(["finding", "source", "is_issue"]),
   ReviewCitationCheck: new Set([
     "status",
@@ -443,6 +442,7 @@ const REVIEW_ENVELOPE_NESTED: Record<string, string | null> = {
   failures: "ReviewFailure",
   citation_issues: "ReviewCitationIssue",
   citation_failures: "ReviewCitationFailure",
+  more_claim_locations: "ClaimLocation",
   more_citations: "ReviewMoreCitation",
   failure: "ReviewFailureBlock",
 };
@@ -456,7 +456,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
     citation_checks: "ReviewCitationCheckCounts",
   },
   ReviewCitation: {
-    position: "ReviewCitationPosition",
+    position: "Position",
     result: "ReviewCitationResult",
     check: "ReviewCitationCheck",
   },
@@ -466,12 +466,12 @@ const NESTED: Record<string, Record<string, string | null>> = {
     failure: "ReviewFailureBlock",
   },
   ReviewCitationIssue: {
-    position: "ReviewCitationPosition",
+    position: "Position",
     metadata_differences: "ReviewCitationDifference",
     failure: "ReviewFailureBlock",
   },
   ReviewCitationFailure: { failure: "ReviewFailureBlock" },
-  ReviewMoreCitation: { position: "ReviewCitationPosition" },
+  ReviewMoreCitation: { position: "Position" },
   Citecheck: {
     policy: "CitecheckPolicy",
     summary: "CitecheckSummary",
@@ -486,7 +486,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
   ReviewIssue: { escalation: "Escalation", failure: "ReviewFailureBlock" },
   ReviewFailure: { failure: "ReviewFailureBlock" },
   ReviewClaim: {
-    positions: "ClaimPosition",
+    positions: "Position",
     result: "ReviewResult",
     assessment: "ReviewAssessment",
     escalation: "Escalation",
@@ -496,7 +496,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
   ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
   ReviewWebhookPayload: { review: "ReviewFull" },
   ExtractedClaims: { key_entities: "ExtractedEntity", locations: "ClaimLocation" },
-  ClaimLocation: { positions: "ClaimPosition" },
+  ClaimLocation: { positions: "Position" },
   AssessResponse: { claims: "AssessClaim" },
   TaskStatus: {
     result: "Verification",
@@ -699,9 +699,11 @@ describe("contract", () => {
     const locations = out.locations!;
     expect(locations.map((l) => l.claim)).toEqual(out.identified_claims);
     for (const location of locations) {
-      expect(location.positions.length).toBeGreaterThanOrEqual(1);
-      expect(location.positions.length).toBeLessThanOrEqual(10);
-      for (const p of location.positions) {
+      // On /extract every returned claim is placed.
+      expect(location.positions).not.toBeNull();
+      expect(location.positions!.length).toBeGreaterThanOrEqual(1);
+      expect(location.positions!.length).toBeLessThanOrEqual(10);
+      for (const p of location.positions!) {
         expect(p.start).not.toBeNull();
         expect(p.end).not.toBeNull();
         // In bounds first: slice silently clamps an end past the text.
@@ -713,7 +715,7 @@ describe("contract", () => {
     }
     // The offsets are code points: a UTF-16 slice lands one unit early after
     // the leading emoji.
-    const first = locations[0]!.positions[0]!;
+    const first = locations[0]!.positions![0]!;
     expect(text.slice(first.start!, first.end!)).not.toBe(first.text);
 
     // The other extract fixtures predate `locations`; they read as null.
@@ -1009,7 +1011,7 @@ describe("review fixtures", () => {
 
   it("review positions: every row and every more_claims entry says where the draft makes it", () => {
     const body = loadFixture("review_completed_located.json") as unknown as ReviewFull;
-    const checkPositions = (positions: ClaimPosition[]) => {
+    const checkPositions = (positions: Position[]) => {
       expect(positions.length).toBeGreaterThanOrEqual(1);
       expect(positions.length).toBeLessThanOrEqual(10);
       let previous = -1;
@@ -1022,7 +1024,7 @@ describe("review fixtures", () => {
         expect(p.start!).toBeGreaterThanOrEqual(previous);
         previous = p.start!;
         // Code points, not UTF-16 units.
-        expect(p.end! - p.start!).toBe(Array.from(p.text).length);
+        expect(p.end! - p.start!).toBe(Array.from(p.text!).length);
       }
     };
     expect(body.claims.length).toBeGreaterThan(0);
@@ -1031,37 +1033,64 @@ describe("review fixtures", () => {
       checkPositions(claim.positions!);
     }
     const more = body.more_claims!;
-    const morePositions = body.more_claim_positions!;
-    expect(Array.isArray(morePositions)).toBe(true);
-    expect(morePositions.length).toBe(more.length);
-    for (const positions of morePositions) {
-      if (positions !== null) checkPositions(positions);
+    const moreLocations = body.more_claim_locations!;
+    expect(Array.isArray(moreLocations)).toBe(true);
+    // One `{claim, positions}` per more_claims entry, same order.
+    expect(moreLocations.map((l) => l.claim)).toEqual(more);
+    for (const location of moreLocations) {
+      if (location.positions !== null) checkPositions(location.positions);
     }
+  });
+
+  it("citation positions share the claim position shape, with text null", () => {
+    const names = [
+      "review_citations_completed.json",
+      "review_citations_more.json",
+      "citecheck_completed.json",
+    ];
+    let seen = 0;
+    for (const name of names) {
+      const body = loadFixture(name) as Record<string, unknown>;
+      const rows = [
+        ...((body["citations"] as Array<Record<string, unknown>> | undefined) ?? []),
+        ...((body["citation_issues"] as Array<Record<string, unknown>> | undefined) ?? []),
+        ...((body["more_citations"] as Array<Record<string, unknown>> | null | undefined) ?? []),
+      ];
+      for (const row of rows) {
+        const p = row["position"] as Position | null;
+        if (p === null) continue;
+        expect(Object.keys(p).sort(), name).toEqual(["end", "start", "text"]);
+        expect(p.text, name).toBeNull();
+        expect(typeof p.start, name).toBe("number");
+        seen += 1;
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
   });
 
   it("review positions read as null when null, and when an older server omits them", () => {
     const located = loadFixture("review_completed_located.json") as unknown as ReviewFull;
     const nulled: ReviewFull = {
       ...located,
-      more_claim_positions: null,
+      more_claim_locations: null,
       claims: located.claims.map((c) => ({ ...c, positions: null })),
     };
     const roundTripped = JSON.parse(JSON.stringify(nulled)) as ReviewFull;
     expect(walk(roundTripped, "ReviewFull", "")).toEqual([]);
     for (const claim of roundTripped.claims) expect(claim.positions ?? null).toBeNull();
-    expect(roundTripped.more_claim_positions ?? null).toBeNull();
+    expect(roundTripped.more_claim_locations ?? null).toBeNull();
 
     // The earlier recorded bodies predate both keys.
     const older = loadFixture("review_completed.json") as unknown as ReviewFull;
-    expect("more_claim_positions" in older).toBe(false);
+    expect("more_claim_locations" in older).toBe(false);
     expect(walk(older, "ReviewFull", "")).toEqual([]);
     for (const claim of older.claims) {
       expect("positions" in claim).toBe(false);
       expect(claim.positions ?? null).toBeNull();
     }
-    expect(older.more_claim_positions ?? null).toBeNull();
+    expect(older.more_claim_locations ?? null).toBeNull();
     const olderIssues = loadFixture("review_completed_issues.json") as unknown as ReviewIssues;
-    expect(olderIssues.more_claim_positions ?? null).toBeNull();
+    expect(olderIssues.more_claim_locations ?? null).toBeNull();
   });
 
   it("the review_in_flight 429 maps to a rate-limit error with retryAfter", () => {

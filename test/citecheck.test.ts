@@ -263,6 +263,36 @@ describe("citecheckAndWait()", () => {
     expect(seen).toEqual(["checking", "completed"]);
   });
 
+  it("waits the body's poll_after_seconds between polls", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 202, body: ACCEPTED },
+      { body: { ...running(), poll_after_seconds: 12 } },
+      { body: COMPLETED },
+    ]);
+    const pending = new Lenz({ apiKey: "lenz_t", fetch }).citecheckAndWait({ text: DRAFT });
+    await vi.advanceTimersByTimeAsync(11_999);
+    expect(calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).status).toBe("completed");
+  });
+
+  for (const hint of [null, undefined]) {
+    it(`falls back to the fixed 5 s interval when poll_after_seconds is ${String(hint)}`, async () => {
+      const body: Record<string, unknown> = { ...running(), poll_after_seconds: hint };
+      if (hint === undefined) delete body["poll_after_seconds"];
+      const { fetch, calls } = makeFetch([
+        { status: 202, body: ACCEPTED },
+        { body },
+        { body: COMPLETED },
+      ]);
+      const pending = new Lenz({ apiKey: "lenz_t", fetch }).citecheckAndWait({ text: DRAFT });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(calls).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await pending).status).toBe("completed");
+    });
+  }
+
   it("a bare body with this id and a terminal status is a failed poll, not a result", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: ACCEPTED },
