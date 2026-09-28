@@ -1045,7 +1045,11 @@ describe("getReview() citations", () => {
         [],
       ]);
       expect(review.policy.max_citations).toBeNull();
-      expect([review.more_claims, review.more_citations]).toEqual([null, null]);
+      expect([review.more_claims, review.more_claim_positions, review.more_citations]).toEqual([
+        null,
+        null,
+        null,
+      ]);
       const s = review.summary;
       expect([
         s.citations_found,
@@ -1057,7 +1061,9 @@ describe("getReview() citations", () => {
         s.citations_skipped,
       ]).toEqual([null, null, null, null, null, 0, null]);
       // the defaults are added, never over what the server sent
-      expect(review.claims).toEqual((body as unknown as ReviewFull).claims);
+      expect(review.claims).toEqual(
+        (body as unknown as ReviewFull).claims.map((c) => ({ ...c, positions: null })),
+      );
     },
   );
 
@@ -1075,5 +1081,54 @@ describe("getReview() citations", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const review = await client.reviewAndWait({ text: DRAFT, maxCitations: 10 });
     expect(review.citations).toHaveLength(10);
+  });
+});
+
+describe("getReview() claim positions", () => {
+  const LOCATED = fixture<ReviewFull>("review_completed_located.json");
+
+  async function read(body: unknown, view?: "issues") {
+    const { fetch } = makeFetch([{ body }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    return view ? client.getReview("7c1e0d52", { view }) : client.getReview("7c1e0d52");
+  }
+
+  it("a located review reads through as the server sent it", async () => {
+    const review = (await read(LOCATED)) as ReviewFull;
+    expect(review.claims).toEqual(LOCATED.claims);
+    expect(review.more_claim_positions).toEqual(LOCATED.more_claim_positions);
+    for (const claim of review.claims) {
+      const p = claim.positions![0]!;
+      expect(p.end! - p.start!).toBe(Array.from(p.text).length);
+    }
+    expect(review.more_claim_positions!.length).toBe(review.more_claims!.length);
+  });
+
+  it("positions: null is kept as null", async () => {
+    const body = JSON.parse(JSON.stringify(LOCATED)) as Record<string, unknown>;
+    for (const c of body["claims"] as Array<Record<string, unknown>>) c["positions"] = null;
+    body["more_claim_positions"] = null;
+    const review = (await read(body)) as ReviewFull;
+    expect(review.claims.every((c) => c.positions === null)).toBe(true);
+    expect(review.more_claim_positions).toBeNull();
+  });
+
+  it("a more_claims entry with no positions stays null beside the others", async () => {
+    const body = JSON.parse(JSON.stringify(LOCATED)) as ReviewFull;
+    body.more_claims = [...body.more_claims!, "Another claim."];
+    body.more_claim_positions = [...body.more_claim_positions!, null];
+    const review = (await read(body)) as ReviewFull;
+    expect(review.more_claim_positions!.at(-1)).toBeNull();
+  });
+
+  it("a body from an older server, with neither key, reads both as null", async () => {
+    const body = JSON.parse(JSON.stringify(LOCATED)) as Record<string, unknown>;
+    for (const c of body["claims"] as Array<Record<string, unknown>>) delete c["positions"];
+    delete body["more_claim_positions"];
+    const review = (await read(body)) as ReviewFull;
+    expect(review.claims.every((c) => c.positions === null)).toBe(true);
+    expect(review.more_claim_positions).toBeNull();
+    const issues = await read(ISSUES, "issues");
+    expect(issues.more_claim_positions).toBeNull();
   });
 });

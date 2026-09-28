@@ -78,6 +78,12 @@ await client.review({
   none. It is not verified itself: review it, or run it through `verify`,
   before you use it.
 - **`failures`** lists the claims outside the issues whose check failed.
+- **`positions`** on each claim row says where the draft makes the claim
+  (every place, at most 10), and **`more_claim_positions`** does the same for
+  each of `more_claims`. A review checks only the claims it traced back to
+  the draft. `start` / `end` count code points, so slice with
+  `Array.from(text).slice(start, end).join("")`; `null` for a URL or when the
+  claims could not be located.
 
 **Checking the draft's sources.** `maxCitations: N` (1-20) also checks the
 draft's first N citations, its links and DOIs: does each source say what the

@@ -28,7 +28,14 @@ import {
   LenzUpstreamUnavailableError,
   mapResponseToError,
 } from "../src/index.js";
-import type { AssessClaim, ExtractedClaims, Verification } from "../src/types.js";
+import type {
+  AssessClaim,
+  ClaimPosition,
+  ExtractedClaims,
+  ReviewFull,
+  ReviewIssues,
+  Verification,
+} from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
 import type { VerificationFailed } from "../src/webhooks.js";
 import { createHmac } from "node:crypto";
@@ -208,6 +215,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "citation_issues",
     "citation_failures",
     "more_claims",
+    "more_claim_positions",
     "more_citations",
     "failure",
     "claims",
@@ -231,6 +239,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "citation_issues",
     "citation_failures",
     "more_claims",
+    "more_claim_positions",
     "more_citations",
     "failure",
   ]),
@@ -363,7 +372,15 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "failure",
   ]),
   ReviewFailure: new Set(["claim_index", "claim", "stage", "failure"]),
-  ReviewClaim: new Set(["index", "claim", "result", "assessment", "escalation", "verification"]),
+  ReviewClaim: new Set([
+    "index",
+    "claim",
+    "positions",
+    "result",
+    "assessment",
+    "escalation",
+    "verification",
+  ]),
   ReviewResult: new Set(["verdict", "confidence", "source", "is_issue"]),
   ReviewEntity: new Set(["name", "qid"]),
   ReviewAssessment: new Set([
@@ -469,6 +486,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
   ReviewIssue: { escalation: "Escalation", failure: "ReviewFailureBlock" },
   ReviewFailure: { failure: "ReviewFailureBlock" },
   ReviewClaim: {
+    positions: "ClaimPosition",
     result: "ReviewResult",
     assessment: "ReviewAssessment",
     escalation: "Escalation",
@@ -606,6 +624,8 @@ describe("contract", () => {
     ["review_citations_constructed.json", "ReviewFull"],
     // A review with the claims and citations found past its caps, recorded.
     ["review_citations_more.json", "ReviewFull"],
+    // A review whose claim rows say where the draft makes each claim, recorded.
+    ["review_completed_located.json", "ReviewFull"],
     // /citecheck, recorded: the receipt, a check of a draft's first four
     // citations, and a check of two statement-source pairs.
     ["citecheck_accepted.json", "CitecheckStarted"],
@@ -985,6 +1005,63 @@ describe("review fixtures", () => {
       expect(Array.isArray(body["issues"]), name).toBe(true);
       expect(Array.isArray(body["failures"]), name).toBe(true);
     }
+  });
+
+  it("review positions: every row and every more_claims entry says where the draft makes it", () => {
+    const body = loadFixture("review_completed_located.json") as unknown as ReviewFull;
+    const checkPositions = (positions: ClaimPosition[]) => {
+      expect(positions.length).toBeGreaterThanOrEqual(1);
+      expect(positions.length).toBeLessThanOrEqual(10);
+      let previous = -1;
+      for (const p of positions) {
+        expect(typeof p.start).toBe("number");
+        expect(typeof p.end).toBe("number");
+        expect(p.start!).toBeGreaterThanOrEqual(0);
+        expect(p.end!).toBeGreaterThan(p.start!);
+        // Text order.
+        expect(p.start!).toBeGreaterThanOrEqual(previous);
+        previous = p.start!;
+        // Code points, not UTF-16 units.
+        expect(p.end! - p.start!).toBe(Array.from(p.text).length);
+      }
+    };
+    expect(body.claims.length).toBeGreaterThan(0);
+    for (const claim of body.claims) {
+      expect(Array.isArray(claim.positions)).toBe(true);
+      checkPositions(claim.positions!);
+    }
+    const more = body.more_claims!;
+    const morePositions = body.more_claim_positions!;
+    expect(Array.isArray(morePositions)).toBe(true);
+    expect(morePositions.length).toBe(more.length);
+    for (const positions of morePositions) {
+      if (positions !== null) checkPositions(positions);
+    }
+  });
+
+  it("review positions read as null when null, and when an older server omits them", () => {
+    const located = loadFixture("review_completed_located.json") as unknown as ReviewFull;
+    const nulled: ReviewFull = {
+      ...located,
+      more_claim_positions: null,
+      claims: located.claims.map((c) => ({ ...c, positions: null })),
+    };
+    const roundTripped = JSON.parse(JSON.stringify(nulled)) as ReviewFull;
+    expect(walk(roundTripped, "ReviewFull", "")).toEqual([]);
+    for (const claim of roundTripped.claims) expect(claim.positions ?? null).toBeNull();
+    expect(roundTripped.more_claim_positions ?? null).toBeNull();
+
+    // The earlier recorded bodies predate both keys.
+    const older = loadFixture("review_completed.json") as unknown as ReviewFull;
+    expect("more_claim_positions" in older).toBe(false);
+    expect(walk(older, "ReviewFull", "")).toEqual([]);
+    for (const claim of older.claims) {
+      expect("positions" in claim).toBe(false);
+      expect(claim.positions ?? null).toBeNull();
+    }
+    expect(older.more_claim_positions ?? null).toBeNull();
+    const olderIssues = loadFixture("review_completed_issues.json") as unknown as ReviewIssues;
+    expect(olderIssues.more_claim_positions ?? null).toBeNull();
   });
 
   it("the review_in_flight 429 maps to a rate-limit error with retryAfter", () => {

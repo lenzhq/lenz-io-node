@@ -85,6 +85,20 @@ webhookUrl?, idempotencyKey? })` takes a draft (its first `maxCitations`,
 end)` counts UTF-16 units and shifts after an emoji; slice with
   `Array.from(text).slice(start, end).join("")`. `ClaimLocation` and
   `ClaimPosition` are exported.
+- **Review claim rows say where the draft makes each claim.** A review now
+  checks only the claims traced directly back to the draft: a claim found
+  nowhere in it, or found with a different figure, is left out, as
+  `extract({ locate: true })` does. Each `ReviewClaim` gains `positions`
+  (`ClaimPosition[] | null`): every place the draft makes the claim, in text
+  order, at most 10, with `start` and `end` in code points of `text` as sent,
+  the same coordinates as a citation's `position` (slice as above). `null`
+  when the draft was a URL, when the claims could not be located, or once a
+  zero-retention draft is gone.
+- **`more_claim_positions`** on both review views
+  (`(ClaimPosition[] | null)[] | null`): one entry per `more_claims` string,
+  same order. `null` until the draft is read, for a URL, or when the claims
+  could not be located. A body without either key (an older API) reads both
+  as `null`; a key the server sent is never changed.
 
 ### Deprecated
 
