@@ -347,7 +347,9 @@ export interface ExtractedEntity {
 export type ExtractStatus = "ready" | "not_a_claim" | "no_match" | (string & NonNullable<unknown>);
 
 /**
- * One place the submitted text makes a claim, from `extract({ locate: true })`.
+ * One place in the text as sent: where a claim is made (`extract({ locate:
+ * true })`, a review's claim rows and `more_claim_locations`) or where a
+ * citation's statement sits (review and citation-check citation rows).
  *
  * `start` and `end` index the text AS SENT, in Unicode code points (not
  * UTF-16 code units, not bytes); `end` is exclusive. JavaScript's
@@ -360,24 +362,25 @@ export type ExtractStatus = "ready" | "not_a_claim" | "no_match" | (string & Non
  * ```
  *
  * Both are `null` when the text sent was a URL: the page is not returned, so
- * there is nothing to index. `text` is the passage as it appears in the text,
- * always present.
+ * there is nothing to index. `text` is the passage as it appears in the
+ * text; `null` on a citation's position, whose row carries the statement.
  */
-export interface ClaimPosition {
+export interface Position {
   start: number | null;
   end: number | null;
-  text: string;
+  text: string | null;
 }
 
 /**
  * Where the submitted text makes one returned claim.
  *
- * `claim` is exactly as in `claim` / `identified_claims`. `positions` is
- * every place the text makes it, in text order: at least one, at most 10.
+ * `claim` is exactly as returned. `positions` is every place the text makes
+ * it, in text order: at least one, at most 10. `null` only when that claim
+ * could not be placed; on `/extract` every returned claim is placed.
  */
 export interface ClaimLocation {
   claim: string;
-  positions: ClaimPosition[];
+  positions: Position[] | null;
 }
 
 export interface ExtractedClaims {
@@ -401,7 +404,7 @@ export interface ExtractedClaims {
    * `[]` when every claim was left out (`status` is then `"not_a_claim"`);
    * `null` when `locate` was not set (or `false`), when the extraction found no claims,
    * or when the claims could not be located (the list is then returned
-   * unfiltered). Offsets are code points — see {@link ClaimPosition}.
+   * unfiltered). Offsets are code points — see {@link Position}.
    * Optional only so a response from an API that predates the field still
    * fits; read it as `out.locations ?? null`.
    */
@@ -1174,9 +1177,10 @@ export interface Escalation {
 export interface ReviewFailureBlock {
   /**
    * The specific cause, e.g. `no_claim`, `insufficient_credits`,
-   * `assessment_failed`, `timeout`. An open set.
+   * `assessment_failed`, `timeout`. An open set; `null` when the API has
+   * no specific cause to name.
    */
-  failure_reason: string;
+  failure_reason: string | null;
   failure_class: FailureClass;
   /** Resubmitting the same input can succeed. */
   retryable: boolean;
@@ -1335,15 +1339,15 @@ export interface ReviewClaim {
   /**
    * Every place the draft makes this claim, in text order: at most 10.
    * `start` / `end` are Unicode code points of `text` as you sent it,
-   * half-open, the same coordinates as a citation's `position` — see
-   * {@link ClaimPosition} for slicing by code point. They are numbers
-   * whenever `positions` is not `null`.
+   * half-open, the same shape as a citation's `position` — see
+   * {@link Position} for slicing by code point. `text` is the passage. For a
+   * URL draft `start` / `end` are `null` and `text` carries the passage.
    *
-   * `null` when the draft was a URL, when the claims could not be located,
-   * or once a zero-retention draft is gone. A body from an API that predates
-   * the field reads as `null` too.
+   * `null` when the claim could not be located, or once a zero-retention
+   * draft is gone. A body from an API that predates the field reads as
+   * `null` too.
    */
-  positions: ClaimPosition[] | null;
+  positions: Position[] | null;
   /** `null` while the quick check runs, and on a failed one. */
   result: ReviewResult | null;
   assessment: ReviewAssessment;
@@ -1431,15 +1435,6 @@ export type ReviewCitationUncheckedReason =
   | "ambiguous_reference"
   | (string & NonNullable<unknown>);
 
-/**
- * Where a citation's `statement` sits in the text as sent: `start` and `end`
- * in Unicode code points, link syntax included.
- */
-export interface ReviewCitationPosition {
-  start: number;
-  end: number;
-}
-
 /** The one answer to read for a citation, derived from its `check`. */
 export interface ReviewCitationResult {
   finding: ReviewCitationFinding;
@@ -1512,7 +1507,8 @@ export interface ReviewCitation {
   statement: string | null;
   /** The words the draft quotes from this source; `[]` when none. */
   quotes: string[];
-  position: ReviewCitationPosition | null;
+  /** Where `statement` sits in the text as sent, link syntax included (`text` is `null`). */
+  position: Position | null;
   /** `null` until the check has ended, and on a failed row with nothing established. */
   result: ReviewCitationResult | null;
   check: ReviewCitationCheck;
@@ -1530,7 +1526,8 @@ export interface ReviewCitationIssue {
   doi: string | null;
   statement: string | null;
   quotes: string[];
-  position: ReviewCitationPosition | null;
+  /** Where `statement` sits in the text as sent, link syntax included (`text` is `null`). */
+  position: Position | null;
   finding: Exclude<ReviewCitationFinding, "supported" | "unchecked">;
   source: ReviewCitationSource;
   snippet: string | null;
@@ -1554,7 +1551,8 @@ export interface ReviewMoreCitation {
   doi: string | null;
   /** The draft's sentence around the citation. */
   sentence: string;
-  position: ReviewCitationPosition | null;
+  /** Where `statement` sits in the text as sent, link syntax included (`text` is `null`). */
+  position: Position | null;
 }
 
 /** A citation whose check failed with nothing established. */
@@ -1595,13 +1593,13 @@ export interface ReviewEnvelope {
    */
   more_claims: string[] | null;
   /**
-   * Where the draft makes each of `more_claims`: one entry per string, same
-   * order, each every place the draft makes it (see {@link ReviewClaim.positions}).
-   * `null` until the draft is read, when the draft was a URL, or when the
-   * claims could not be located. A body from an API that predates the field
-   * reads as `null` too.
+   * Where the draft makes each of `more_claims`: one `{claim, positions}`
+   * entry per string, same order (see {@link ReviewClaim.positions}; an
+   * entry's `positions` is `null` when that claim could not be placed).
+   * `null` until the draft is read. A body from an API that predates the
+   * field reads as `null` too.
    */
-  more_claim_positions: (ClaimPosition[] | null)[] | null;
+  more_claim_locations: ClaimLocation[] | null;
   /**
    * Citations found past the ones checked (up to 100): found but not checked.
    * `null` until the draft is read, `[]` when there are none.

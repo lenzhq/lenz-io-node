@@ -79,11 +79,13 @@ await client.review({
   before you use it.
 - **`failures`** lists the claims outside the issues whose check failed.
 - **`positions`** on each claim row says where the draft makes the claim
-  (every place, at most 10), and **`more_claim_positions`** does the same for
-  each of `more_claims`. A review checks only the claims it traced back to
-  the draft. `start` / `end` count code points, so slice with
-  `Array.from(text).slice(start, end).join("")`; `null` for a URL or when the
-  claims could not be located.
+  (every place, at most 10), and **`more_claim_locations`** gives
+  `{ claim, positions }` for each of `more_claims`, in the same order. A
+  review checks only the claims it traced back to the draft. A `Position` is
+  `{ start, end, text }`: `start` / `end` count code points, so slice with
+  `Array.from(text).slice(start, end).join("")`, and `text` is the passage.
+  For a URL draft `start` / `end` are `null` and `text` still carries the
+  passage. `positions` is `null` when the claim could not be located.
 
 **Checking the draft's sources.** `maxCitations: N` (1-20) also checks the
 draft's first N citations, its links and DOIs: does each source say what the
@@ -700,7 +702,7 @@ to your text, with where the text makes each one:
 const out = await client.extract({ text: draft, locate: true });
 
 for (const location of out.locations ?? []) {
-  for (const p of location.positions) {
+  for (const p of location.positions ?? []) {
     if (p.start === null || p.end === null) continue; // the text was a URL
     // Offsets are code points: slice with Array.from, not text.slice.
     const passage = Array.from(draft).slice(p.start, p.end).join("");
@@ -720,7 +722,8 @@ sent it. JavaScript's `text.slice(start, end)` counts UTF-16 units, so it
 shifts after an emoji; `Array.from(text).slice(start, end).join("")` is the
 correct slice. Both are `null` when the text was a URL (the page is not
 returned, so there is nothing to index); `text` is always the passage as it
-appears.
+appears. The same `Position` shape marks a claim in a review and a citation's
+statement (where `text` is `null`: the row carries the statement).
 
 `locations` is `[]` when every claim was left out (`status` is then
 `"not_a_claim"`), and `null` when `locate` was not set, when the extraction
