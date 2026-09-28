@@ -817,6 +817,8 @@ export class Lenz {
     // 0 means no citation check, the server default: sent as nothing, so the
     // body (and what its idempotency key covers) is what it is without it.
     if (input.maxCitations) escalate.max_citations = input.maxCitations;
+    // Sent only when asked, for the same reason.
+    if (input.suggestEdits) escalate.suggest_edits = true;
     if (Object.keys(escalate).length > 0) body.escalate = escalate;
     // Always keyed: this client retries a failed POST, and a retry without a
     // key could start a second review. Random per call, never derived from

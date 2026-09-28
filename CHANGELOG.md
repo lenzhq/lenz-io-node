@@ -6,6 +6,19 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`review({ suggestEdits: true })`**: for each claim whose deep check
+  suggests a rewrite, the smallest edits to the draft that make it say what
+  the rewrite says, in the draft's own language, as
+  `ReviewClaim.suggested_edits` (copied on `ReviewIssue.suggested_edits`): a
+  `SuggestedEdits` block (`status`, `edits`) of `SuggestedEdit` spans
+  (`position`, `start`, `end`, `text`, `replacement`) of the text you sent.
+  `review.policy.suggest_edits` (`EscalationPolicy`) echoes the option. Leave it out and the request,
+  and what its idempotency key covers, are exactly as before; a body without
+  the keys reads them as `null` / `false`. Needs a server that knows the
+  option: an older one refuses it with a 422.
+
 ## [2.18.0] - 2026-09-27
 
 `review` can check a draft's citations, and `citecheck` runs that check on
