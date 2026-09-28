@@ -322,6 +322,84 @@ describe("Marquee verbs", () => {
     expect(out.claim).toBe("");
   });
 
+  it("extract tolerates locations: null (locate unset, or the claims could not be located)", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "",
+          identified_claims: ["A", "B"],
+          original_input: "A. B.",
+          locations: null,
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "A. B.", locate: true });
+    expect(out.locations).toBeNull();
+    expect(out.identified_claims).toEqual(["A", "B"]);
+  });
+
+  it("extract returns one location per claim, positions in code points", async () => {
+    const text = "🚀 Sharks get cancer. Sharks get cancer, rarely.";
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "Sharks get cancer.",
+          identified_claims: [],
+          original_input: text,
+          locations: [
+            {
+              claim: "Sharks get cancer.",
+              positions: [
+                { start: 2, end: 20, text: "Sharks get cancer." },
+                { start: 21, end: 38, text: "Sharks get cancer" },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text, locate: true });
+    expect(out.locations).toHaveLength(1);
+    const [location] = out.locations!;
+    expect(location!.claim).toBe(out.claim);
+    expect(location!.positions).toHaveLength(2);
+    for (const p of location!.positions) {
+      expect(Array.from(text).slice(p.start!, p.end!).join("")).toBe(p.text);
+    }
+  });
+
+  it("extract tolerates null start/end when the text sent was a URL", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claim: "",
+          identified_claims: ["A", "B"],
+          original_input: "https://example.com/article",
+          locations: [
+            {
+              claim: "A",
+              positions: [{ start: null, end: null, text: "A, as the page puts it." }],
+            },
+            { claim: "B", positions: [{ start: null, end: null, text: "B." }] },
+          ],
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "https://example.com/article", locate: true });
+    expect(out.locations!.map((l) => l.claim)).toEqual(["A", "B"]);
+    for (const l of out.locations!) {
+      expect(l.positions[0]!.start).toBeNull();
+      expect(l.positions[0]!.end).toBeNull();
+      expect(l.positions[0]!.text).toBeTruthy();
+    }
+  });
+
   it("getStatus returns typed status", async () => {
     const { fetch } = makeFetch([
       { body: { status: "processing", progress: { step: "Framing..." } } },

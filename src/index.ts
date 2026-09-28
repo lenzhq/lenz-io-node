@@ -144,6 +144,8 @@ export type {
   BatchAccepted,
   BatchItemResult,
   CandidateClaim,
+  ClaimLocation,
+  ClaimPosition,
   Certificate,
   Coverage,
   CoverageReason,
