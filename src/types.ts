@@ -1332,6 +1332,18 @@ export interface ReviewClaim {
   index: number;
   /** The claim as Lenz states it. */
   claim: string | null;
+  /**
+   * Every place the draft makes this claim, in text order: at most 10.
+   * `start` / `end` are Unicode code points of `text` as you sent it,
+   * half-open, the same coordinates as a citation's `position` — see
+   * {@link ClaimPosition} for slicing by code point. They are numbers
+   * whenever `positions` is not `null`.
+   *
+   * `null` when the draft was a URL, when the claims could not be located,
+   * or once a zero-retention draft is gone. A body from an API that predates
+   * the field reads as `null` too.
+   */
+  positions: ClaimPosition[] | null;
   /** `null` while the quick check runs, and on a failed one. */
   result: ReviewResult | null;
   assessment: ReviewAssessment;
@@ -1582,6 +1594,14 @@ export interface ReviewEnvelope {
    * checked. `null` until the draft is read, `[]` when there are none.
    */
   more_claims: string[] | null;
+  /**
+   * Where the draft makes each of `more_claims`: one entry per string, same
+   * order, each every place the draft makes it (see {@link ReviewClaim.positions}).
+   * `null` until the draft is read, when the draft was a URL, or when the
+   * claims could not be located. A body from an API that predates the field
+   * reads as `null` too.
+   */
+  more_claim_positions: (ClaimPosition[] | null)[] | null;
   /**
    * Citations found past the ones checked (up to 100): found but not checked.
    * `null` until the draft is read, `[]` when there are none.
