@@ -54,7 +54,6 @@ All notable changes to this SDK are documented here. Format follows
   is left out of `citation_issues` and `summary.citation_issues`, so on its own
   it no longer makes `outcome` `issues_found`.
 
-
 `review` can check a draft's citations, and `citecheck` runs that check on
 its own, on a draft or on statement-source pairs: does each linked source (a
 URL or a DOI) say what the draft says it does? Nothing the SDK already sends changes:
