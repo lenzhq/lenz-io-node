@@ -74,9 +74,10 @@ await client.review({
   issue carries `key_finding`, `verification_id` and `suggested_rewrite`; an
   issue that stayed on its quick verdict carries `rationale` and an
   `escalation` saying why it stayed quick (`cap`, `credits`, …).
-- **`suggested_rewrite`** comes from a `verify` run, so a quick-only issue has
-  none. It is not verified itself: review it, or run it through `verify`,
-  before you use it.
+- **`suggested_rewrite`** comes from the deep check; an issue that stayed on its
+  quick verdict has one only when the review asked for suggested edits
+  (`suggestEdits: true`). It is not verified itself: review it, or run it
+  through `verify`, before you use it.
 - **`failures`** lists the claims outside the issues whose check failed.
 - **`positions`** on each claim row says where the draft makes the claim
   (every place, at most 10), and **`more_claim_locations`** gives
@@ -119,10 +120,11 @@ reviewer's note, not a checked source; `snippet` is the passage from the page.
 `maxAssessments` and `maxCitations`: found, not checked, to send in a later
 request. Leave `maxCitations` out (or `0`) and no citation is checked.
 
-**Suggested edits.** `suggestEdits: true` also returns, for each claim whose
-deep check suggests a rewrite, the smallest edits to the draft that make it say
-what the rewrite says, in the draft's own language. They cost no credits beyond
-the deep check, and the review completes once they are settled. Each claim row
+**Suggested edits.** `suggestEdits: true` also returns, for each claim with a
+suggested rewrite (from its deep check, or from its quick check when it stayed
+on the quick verdict), the smallest edits to the draft that make it say what
+the rewrite says, in the draft's own language. They cost no extra credits, and
+the review completes once they are settled. Each claim row
 (and its issue) carries `suggested_edits`: `status` `"pending"` or
 `"completed"`, and `edits`, each a span of the `text` you sent (`start`/`end` in
 code points, `text` the exact slice) and its `replacement`. An empty `edits`
@@ -257,6 +259,19 @@ reasoning of a reviewer who agrees with the panel's verdict; `dissent`, when
 set, is the reasoning of the reviewer farthest from it. Both are reviewers'
 notes, not checked sources; for sourced evidence, call `verify`. Read them as
 optional: either can be `null` or absent.
+
+**Suggested rewrite.** `suggestRewrite: true` also writes, on each row the
+check found `False` or `Mostly False` with high confidence, the claim with its
+wrong part corrected (`suggested_rewrite`, else `null`), at no extra credit.
+It is not itself verified: review it, or run it through `verify`, before
+using it.
+
+```ts
+const [row] = (
+  await client.assess({ claim: "Venus is the closest planet to the Sun.", suggestRewrite: true })
+).claims;
+if (row?.suggested_rewrite) console.log(row.suggested_rewrite); // e.g. "Mercury is the closest planet to the Sun."
+```
 
 `assess` and `verify` share a result cache server-side: if a claim
 already has a deep verification, `assess` returns it via
@@ -394,8 +409,8 @@ it or run it through `client.verify({ claim })`. It is `null` for a true
 claim, when no correction is established, and on verifications that predate
 the field, and absent on responses from an API that predates it. It is on every verification, single or listed:
 `verifications.get`, `verifications.list`, `library.list`, `verifyAndWait`,
-`wait`, and the `verification.completed` webhook's `result`. It is not on
-`assess` rows.
+`wait`, and the `verification.completed` webhook's `result`. `assess` rows
+carry their own with `suggestRewrite: true`.
 
 ```ts
 const rewrite = v.suggested_rewrite ?? null;
