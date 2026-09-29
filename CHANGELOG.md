@@ -19,6 +19,13 @@ All notable changes to this SDK are documented here. Format follows
   the keys reads them as `null` / `false`. Needs a server that knows the
   option: an older one refuses it with a 422.
 
+### Changed
+
+- **`partly_supported` is no longer a citation issue** (an API change; the SDK
+  code is unchanged). The row stays in `citations` with `is_issue` false, and
+  is left out of `citation_issues` and `summary.citation_issues`, so on its own
+  it no longer makes `outcome` `issues_found`.
+
 ## [2.18.0] - 2026-09-27
 
 `review` can check a draft's citations, and `citecheck` runs that check on
