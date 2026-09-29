@@ -675,6 +675,11 @@ export class Lenz {
    *
    * Pass `language: "es"` (or any of the 12 supported codes) to receive
    * the claim text in that language. Verdict labels stay English.
+   *
+   * Pass `suggestRewrite: true` to also get `suggested_rewrite` on each row
+   * the check found `"False"` or `"Mostly False"` with high confidence: the
+   * claim with its wrong part corrected. No extra credit; not itself
+   * verified.
    */
   async assess(input: AssessInput): Promise<AssessResponse> {
     // A random key per invocation, reused across this client's own retries so
@@ -707,6 +712,9 @@ export class Lenz {
       }
       const body: Record<string, unknown> = { claims: list };
       if (input.language) body.language = input.language;
+      // Sent only when asked, so a request without the option (and what its
+      // idempotency key covers) is exactly what it was before.
+      if (input.suggestRewrite) body.suggest_rewrite = true;
       return this.request<AssessResponse>({
         method: "POST",
         path: "/assess",
@@ -717,6 +725,7 @@ export class Lenz {
     }
     const body: Record<string, unknown> = { text: single };
     if (input.language) body.language = input.language;
+    if (input.suggestRewrite) body.suggest_rewrite = true;
     return this.request<AssessResponse>({
       method: "POST",
       path: "/assess",

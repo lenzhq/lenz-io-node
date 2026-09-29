@@ -814,6 +814,56 @@ describe("verifyAndWait", () => {
     expect(keys.size).toBe(1);
   });
 
+  it("assess sends suggest_rewrite only when asked, in both forms", async () => {
+    const empty = { body: { claims: [], error: null } };
+    const { fetch, calls } = makeFetch([empty, empty, empty, empty, empty, empty]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.assess({ claim: "a" });
+    await client.assess({ claim: "a", suggestRewrite: false });
+    await client.assess({ claim: "a", suggestRewrite: true });
+    await client.assess({ claims: ["a", "b"] });
+    await client.assess({ claims: ["a", "b"], suggestRewrite: false });
+    await client.assess({ claims: ["a", "b"], suggestRewrite: true });
+    const bodies = calls.map((c) => JSON.parse(String(c.init.body)) as Record<string, unknown>);
+    expect(bodies).toEqual([
+      { text: "a" },
+      { text: "a" },
+      { text: "a", suggest_rewrite: true },
+      { claims: ["a", "b"] },
+      { claims: ["a", "b"] },
+      { claims: ["a", "b"], suggest_rewrite: true },
+    ]);
+  });
+
+  it("assess rows read suggested_rewrite, and a row without it reads as absent", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          claims: [
+            {
+              claim: "Venus is the closest planet to the Sun.",
+              verdict: "False",
+              confidence: "high",
+              suggested_rewrite: "Mercury is the closest planet to the Sun.",
+            },
+            { claim: "b", verdict: "True", confidence: "high", suggested_rewrite: null },
+            // A response replayed from before the API added the key.
+            { claim: "c", verdict: "Mixed", confidence: "medium" },
+          ],
+          error: null,
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const rows = (await client.assess({ claims: ["a", "b", "c"], suggestRewrite: true })).claims;
+    expect(rows.map((r) => r.suggested_rewrite ?? null)).toEqual([
+      "Mercury is the closest planet to the Sun.",
+      null,
+      null,
+    ]);
+    expect(rows[2]).not.toHaveProperty("suggested_rewrite");
+  });
+
   it("forwards depth to the submit body, and omits it when unset", async () => {
     const polled = {
       body: {

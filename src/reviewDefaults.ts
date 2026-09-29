@@ -26,7 +26,8 @@ function withNull(v: unknown, key: string): unknown {
  * `citation_issues`. The claim positions an older body lacks
  * (`more_claim_locations`, each claim row's `positions`) read as `null`, and
  * so do the suggested edits (each claim row's and issue's `suggested_edits`;
- * `policy.suggest_edits` reads as `false`).
+ * `policy.suggest_edits` reads as `false`) and the quick check's rewrite
+ * (each claim row's `assessment.suggested_rewrite`).
  * Keys the server sent are never touched. Returns a copy.
  */
 export function withReviewDefaults<T>(body: T): T {
@@ -41,9 +42,11 @@ export function withReviewDefaults<T>(body: T): T {
   }
   // A row key the body does not carry reads as null.
   if (Array.isArray(b["claims"])) {
-    b["claims"] = (b["claims"] as unknown[]).map((c) =>
-      withNull(withNull(c, "positions"), "suggested_edits"),
-    );
+    b["claims"] = (b["claims"] as unknown[]).map((c) => {
+      const row = withNull(withNull(c, "positions"), "suggested_edits");
+      if (!isObject(row) || !isObject(row["assessment"])) return row;
+      return { ...row, assessment: withNull(row["assessment"], "suggested_rewrite") };
+    });
   }
   if (Array.isArray(b["issues"])) {
     b["issues"] = (b["issues"] as unknown[]).map((i) => withNull(i, "suggested_edits"));

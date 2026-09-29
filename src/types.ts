@@ -176,8 +176,13 @@ export interface Verification {
    * `null` for a true claim, when no correction is established, and on
    * verifications that predate the field. Absent on responses from an API
    * that predates it, so read it as `v.suggested_rewrite ?? null`. On every
-   * verification, single or listed (`VerificationListItem` carries it too);
-   * not on `assess` rows.
+   * verification, single or listed (`VerificationListItem` carries it too).
+   *
+   * It answers the same question the claim answers: it may replace the
+   * claim's subject when the subject is the wrong part, negates the claim
+   * when the findings establish it is false but name no right answer, and is
+   * `null` when the findings only find no support. `assess` rows carry their
+   * own (`AssessClaim.suggested_rewrite`, with `suggestRewrite: true`).
    */
   suggested_rewrite?: string | null;
 }
@@ -442,6 +447,17 @@ export interface AssessClaim {
    * otherwise.
    */
   dissent?: string | null;
+  /**
+   * The claim with its wrong part corrected, when the request set
+   * `suggestRewrite: true` and the check found the claim `"False"` or
+   * `"Mostly False"` with high confidence. `null` when not requested,
+   * outside that, or when there was no correction to write; absent on a
+   * response replayed from before the API added it, so read it as
+   * `row.suggested_rewrite ?? null`. Written from the quick check's reasoning
+   * and not itself verified: review it, or run it through `verify`, before
+   * using it.
+   */
+  suggested_rewrite?: string | null;
   /**
    * Why this row has no verdict — set only when `verdict === "Error"`:
    * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`.
@@ -1009,6 +1025,14 @@ export interface AssessInput {
   /** Output language (ISO 639-1). See `VerifyInput.language`. */
   language?: string;
   /**
+   * Also write `suggested_rewrite` on each row: the claim with its wrong part
+   * corrected, for a claim the check found `"False"` or `"Mostly False"` with
+   * high confidence. Both forms, per row, no extra credit. Not itself
+   * verified: review it, or run it through `verify`, before using it. Sent
+   * as `suggest_rewrite` only when `true`.
+   */
+  suggestRewrite?: boolean;
+  /**
    * Send an `Idempotency-Key` so a retry after a network drop replays the
    * first response instead of running — and paying for — the call twice.
    * Defaults to `true`, generating a random key per invocation that is reused
@@ -1288,6 +1312,14 @@ export interface ReviewAssessment {
   error_code: string | null;
   identified_claims: string[];
   hint: string | null;
+  /**
+   * With `suggestEdits: true`: the claim with its wrong part corrected, from
+   * the quick check's reasoning, when it found the claim `"False"` or
+   * `"Mostly False"` with high confidence. `null` otherwise, and on a body
+   * from an API that predates the field. Not itself verified: review it, or
+   * run it through `verify`, before using it.
+   */
+  suggested_rewrite: string | null;
   failure: ReviewFailureBlock | null;
 }
 
@@ -1352,8 +1384,9 @@ export interface SuggestedEdit {
 }
 
 /**
- * The smallest edits to the draft that make it say what the claim's deep
- * check `suggested_rewrite` says, in the draft's own language
+ * The smallest edits to the draft that make it say what the claim's
+ * `suggested_rewrite` says (the deep check's, or the quick check's on a
+ * claim that stayed on the quick verdict), in the draft's own language
  * (`review({ suggestEdits: true })`). `status` is `"pending"` while they are
  * computed (`edits` is `null`; keep polling) and `"completed"` once settled,
  * which includes settling on none (`edits` is `[]`: no edit could be made
@@ -1391,8 +1424,8 @@ export interface ReviewClaim {
   verification: ReviewVerification | null;
   /**
    * The claim's suggested edits to the draft (`review({ suggestEdits: true })`).
-   * `null` when not asked, when the claim got no completed deep check with a
-   * suggested rewrite, when its passage is not in a supported language or could not be
+   * `null` when not asked, when the claim got no suggested rewrite from a
+   * completed deep check or its quick check, when its passage is not in a supported language or could not be
    * placed, once a zero-retention draft is gone, and from an API that
    * predates the field.
    */
@@ -1424,8 +1457,11 @@ export interface ReviewIssue {
   /** The quick check's reasoning; may be `null`. */
   rationale: string | null;
   /**
-   * The claim rewritten to fit what the deep check found; `null` on a
-   * quick-only row and when the check found nothing to correct.
+   * The claim rewritten to fit what the check found: the deep check's when
+   * the claim has one, otherwise, when the review asked for suggested edits,
+   * the quick check's (for a claim found `"False"` or `"Mostly False"` with
+   * high confidence); `source` says which check it came from. `null` when
+   * neither suggested one.
    *
    * A suggestion, not itself verified: review it or run it through /verify
    * before you use it.
@@ -1701,11 +1737,12 @@ export interface ReviewInput {
    */
   maxCitations?: number;
   /**
-   * Also return, for each claim whose deep check suggests a rewrite, the
+   * Also return, for each claim with a suggested rewrite (from its deep
+   * check, or from its quick check when it stayed on the quick verdict), the
    * smallest edits to the draft that make it say what the rewrite says, in
    * the draft's own language (`ReviewClaim.suggested_edits`, copied on its
-   * issue). No credits beyond the deep check; the review completes once they
-   * are settled. Sent as `escalate.suggest_edits` only when `true`.
+   * issue). No extra credits; the review completes once they are settled.
+   * Sent as `escalate.suggest_edits` only when `true`.
    */
   suggestEdits?: boolean;
   /** Output language of every claim and rewrite (ISO 639-1). Omit for English. */
