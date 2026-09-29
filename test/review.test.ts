@@ -1090,6 +1090,7 @@ describe("getReview() citations", () => {
           ...c,
           positions: null,
           suggested_edits: null,
+          assessment: { ...c.assessment, suggested_rewrite: null },
         })),
       );
     },
@@ -1123,8 +1124,14 @@ describe("getReview() claim positions", () => {
 
   it("a located review reads through as the server sent it", async () => {
     const review = (await read(LOCATED)) as ReviewFull;
-    // A body from before suggested edits: that key reads as null.
-    expect(review.claims).toEqual(LOCATED.claims.map((c) => ({ ...c, suggested_edits: null })));
+    // A body from before suggested edits: those keys read as null.
+    expect(review.claims).toEqual(
+      LOCATED.claims.map((c) => ({
+        ...c,
+        suggested_edits: null,
+        assessment: { ...c.assessment, suggested_rewrite: null },
+      })),
+    );
     expect(review.more_claim_locations).toEqual(LOCATED.more_claim_locations);
     for (const claim of review.claims) {
       const p = claim.positions![0]!;
@@ -1257,5 +1264,17 @@ describe("review() suggested edits", () => {
     };
     const review = await read(body);
     expect(review.claims[0]!.suggested_edits).toEqual({ status: "pending", edits: null });
+  });
+
+  it("the quick check's rewrite reads on the assessment, and as null when absent", async () => {
+    const body = JSON.parse(JSON.stringify(EDITS)) as Record<string, unknown>;
+    const rows = body["claims"] as Array<Record<string, unknown>>;
+    const assessment = rows[0]!["assessment"] as Record<string, unknown>;
+    assessment["suggested_rewrite"] = "Mercury is the closest planet to the Sun.";
+    expect((await read(body)).claims[0]!.assessment.suggested_rewrite).toBe(
+      "Mercury is the closest planet to the Sun.",
+    );
+    delete assessment["suggested_rewrite"];
+    expect((await read(body)).claims[0]!.assessment.suggested_rewrite).toBeNull();
   });
 });

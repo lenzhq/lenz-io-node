@@ -1312,6 +1312,14 @@ export interface ReviewAssessment {
   error_code: string | null;
   identified_claims: string[];
   hint: string | null;
+  /**
+   * With `suggestEdits: true`: the claim with its wrong part corrected, from
+   * the quick check's reasoning, when it found the claim `"False"` or
+   * `"Mostly False"` with high confidence. `null` otherwise, and on a body
+   * from an API that predates the field. Not itself verified: review it, or
+   * run it through `verify`, before using it.
+   */
+  suggested_rewrite: string | null;
   failure: ReviewFailureBlock | null;
 }
 
