@@ -6,6 +6,8 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-09-30
+
 ### Added
 
 - **`review({ suggestEdits: true })`**: for each claim whose deep check
@@ -51,8 +53,6 @@ All notable changes to this SDK are documented here. Format follows
   code is unchanged). The row stays in `citations` with `is_issue` false, and
   is left out of `citation_issues` and `summary.citation_issues`, so on its own
   it no longer makes `outcome` `issues_found`.
-
-## [2.18.0] - 2026-09-27
 
 `review` can check a draft's citations, and `citecheck` runs that check on
 its own, on a draft or on statement-source pairs: does each linked source (a
