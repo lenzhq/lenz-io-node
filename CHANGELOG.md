@@ -21,6 +21,13 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Changed
 
+- **A verdict served from the server's cache is free** (an API change; the
+  SDK code is unchanged). A `verify`, `assess` or `review` claim that gets back
+  a verdict checked in the last hour is no longer charged, so a tool that
+  resends the same request pays once. A citation judged from the server's
+  judgment cache is refunded like an unchecked one. The exception is a
+  `verify` that issues a business plan a new warranty certificate, still
+  charged at the requested depth.
 - **`assess` waits up to 100s** (was 45s), both forms. The server's `/assess`
   budget is now 90s, so a long text can answer in up to 90s instead of failing
   early with a 503; the SDK waits 10s longer than the server works. A per-call
