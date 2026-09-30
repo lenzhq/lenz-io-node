@@ -918,6 +918,17 @@ export interface VerifyInput {
    * for a "low" request served from cache.
    */
   depth?: "standard" | "low";
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout replays the first response instead of running the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
   idempotencyKey?: string;
 }
 
@@ -997,11 +1008,23 @@ export interface ExtractInput {
    */
   locate?: boolean;
   /**
-   * Per-call HTTP timeout. When omitted, `extract` waits at least 90s rather
+   * Per-call HTTP timeout. When omitted, `extract` waits at least 150s rather
    * than the client's default: a long input can take more than 30s to
    * extract.
    */
   timeoutMs?: number;
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout replays the first response instead of running the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
 }
 
 export interface AssessInput {
@@ -1045,9 +1068,10 @@ export interface AssessInput {
    */
   idempotencyKey?: string;
   /**
-   * Per-call HTTP timeout. When omitted, both forms wait at least 45s rather
+   * Per-call HTTP timeout. When omitted, both forms wait at least 100s rather
    * than the client's default: the server finds the claims and runs a
-   * 3-model panel inside one request (~10-25s).
+   * 3-model panel inside one request (typically 10-25s; a long text can take
+   * up to 90s).
    */
   timeoutMs?: number;
 }
@@ -1084,6 +1108,18 @@ export interface SelectInput {
   claims?: string[];
   /** Accepted alias for `claims`; `claims` wins if both are given. */
   texts?: string[];
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout replays the first response instead of running the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
 }
 
 export interface LibraryListInput {
@@ -1109,14 +1145,14 @@ export interface LibraryListInput {
 export type OnProgress = (taskId: string, progress: Progress) => void;
 
 export interface VerifyAndWaitInput extends VerifyInput {
+  /** Deadline for polling to a terminal state. Default 300s. */
   timeoutMs?: number;
-  idempotency?: boolean;
   /** See {@link OnProgress}. The only way to see the stage during the ~90s wait. */
   onProgress?: OnProgress;
 }
 
 export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
-  /** Overall deadline for polling every item to a terminal state. Default 180s. */
+  /** Overall deadline for polling every item to a terminal state. Default 300s. */
   timeoutMs?: number;
   /** See {@link OnProgress}. Fires per still-running item per round. */
   onProgress?: OnProgress;
@@ -1124,7 +1160,7 @@ export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
 
 /** Options for `wait()`. */
 export interface WaitOptions {
-  /** Deadline before raising `LenzTimeoutError`. Default 120s. */
+  /** Deadline before raising `LenzTimeoutError`. Default 300s. */
   timeoutMs?: number;
   /** See {@link OnProgress}. */
   onProgress?: OnProgress;

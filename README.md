@@ -308,9 +308,9 @@ your own claims. Use webhooks for production async flows.
 
 ## What you get on the client
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 90s by default (a timeout is retried like any transport error); `timeoutMs` overrides it for that call.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
-- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Both forms take a per-call `timeoutMs` (default 45s).
+- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
@@ -628,7 +628,7 @@ add a `LenzQuotaExceededError` case.
 
 ## Resuming a verification
 
-If a `verifyAndWait` call exceeds its `timeoutMs` (default 120000) or your
+If a `verifyAndWait` call exceeds its `timeoutMs` (default 300000) or your
 process dies mid-poll, the pipeline keeps running. The exception carries the
 `taskId`:
 
@@ -679,10 +679,12 @@ covered verification is kept and can still be downloaded.
 
 ## Idempotency
 
-`verifyAndWait` sends an auto-generated `Idempotency-Key` on every call by
-default, so a network drop after submit doesn't spawn a duplicate verification
-or charge a second credit. Override with `idempotencyKey: "..."` to pin a
-specific key, or `idempotency: false` to opt out. `assess` does the same.
+`verify`, `verifyAndWait`, `select`, `assess` and `extract` send an
+auto-generated `Idempotency-Key` on every call by default: a random key per
+call, reused across that call's own retries, so a network drop or a client
+timeout doesn't spawn a duplicate verification or charge a second credit. The
+key is never derived from the request. Override with `idempotencyKey: "..."`
+to pin a specific key, or `idempotency: false` to opt out.
 
 `review` always sends one: a random key per call unless you pass
 `idempotencyKey`. A resend with the same key within 24 hours returns the same
