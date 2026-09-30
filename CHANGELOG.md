@@ -21,8 +21,8 @@ All notable changes to this SDK are documented here. Format follows
 
 - **`assess` waits up to 100s** (was 45s), both forms. The server's `/assess`
   budget is now 90s, so a long text can answer in up to 90s instead of failing
-  early with a 503; the SDK waits 10s longer than the server works. A longer
-  per-call `timeoutMs`, or a longer client-wide one, still wins.
+  early with a 503; the SDK waits 10s longer than the server works. A per-call
+  `timeoutMs`, or a longer client-wide one, still wins.
 - **`extract` waits up to 150s** (was 90s) per attempt.
 - **`wait` and `verifyAndWait` default to a 300s deadline** (was 120s), and
   **`verifyBatchAndWait` to 300s** (was 180s). On the deadline they behave as
