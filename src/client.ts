@@ -118,26 +118,30 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /**
  * Floor on the per-call timeout for `assess`, BOTH forms.
  *
- * The server runs framing and then a 3-model panel inside one synchronous
- * request and divides a single budget between them, so a single-claim call
- * can take as long as a list one. Typical calls answer in 10-25s; this is the
- * ceiling the server sizes its own budget against.
+ * The server finds the claims and then runs a 3-model panel inside one
+ * synchronous request and divides a single budget between them, so a
+ * single-claim call can take as long as a list one. Typical calls answer in
+ * 10-25s, but a long text can use the server's whole 90s budget. The SDK
+ * waits 10s longer than that, so it never gives up on a call the server is
+ * still working on.
  *
  * Applied to `assess({ claim })` as well as `assess({ claims })` since 2.12.0.
  * Before that the single form used the 30s default, and a call whose framing
  * was slow could time out client-side AFTER the server had charged it — and a
  * retry with no idempotency key charged again.
  */
-const ASSESS_TIMEOUT_MS = 45_000;
+const ASSESS_TIMEOUT_MS = 100_000;
 /**
  * Floor on the per-call timeout for `extract`.
  *
  * Extraction reads the whole input and enumerates its claims inside one
- * synchronous request. Most calls answer in 3-17s, but the slowest take
- * 30-60s, past the 30s default, and a client timeout makes the SDK re-send
- * the call, which runs the same extraction again. 90s leaves room above them.
+ * synchronous request. Most calls answer in seconds, but a long input can
+ * take well past the 30s default, and a client timeout makes the SDK re-send
+ * the call. 150s leaves room above the slowest.
  */
-const EXTRACT_TIMEOUT_MS = 90_000;
+const EXTRACT_TIMEOUT_MS = 150_000;
+/** Default deadline for `wait`, `verifyAndWait` and `verifyBatchAndWait`. */
+const WAIT_DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 const POLL_BACKOFF_MS = [2000, 4000, 8000];
@@ -179,6 +183,25 @@ async function generateUuid(): Promise<string> {
     /* @vite-ignore */ nodeCryptoSpecifier
   )) as typeof import("node:crypto");
   return mod.randomUUID();
+}
+
+/**
+ * The `Idempotency-Key` for one call: the caller's own key, else (unless the
+ * caller opted out with `idempotency: false`) a random one generated once per
+ * call and reused across that call's own retries, so a retried request is
+ * deduped server-side rather than run twice.
+ *
+ * Deliberately NOT derived from the request body: the same text sent again
+ * later is a new request, and a content-derived key would replay the first
+ * answer for 24h.
+ */
+async function callIdempotencyKey(input: {
+  idempotencyKey?: string;
+  idempotency?: boolean;
+}): Promise<string | undefined> {
+  if (input.idempotencyKey !== undefined) return input.idempotencyKey;
+  if (input.idempotency === false) return undefined;
+  return (await generateUuid()).replace(/-/g, "");
 }
 
 /** Read an env var without assuming a Node `process` exists (browser-safe). */
@@ -636,10 +659,16 @@ export class Lenz {
     // Unlike `focus`, an explicit `false` is sent too; only an omitted value
     // is left out, so the server's default governs it.
     if (input.locate !== undefined) body.locate = input.locate;
+    // One key per call, reused across its own retries: a retry after a client
+    // timeout replays the first extraction instead of starting it over.
+    const idempotencyKey = await callIdempotencyKey(input);
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
       json: body,
+      headers,
       // Never shortens a client configured with a longer timeout: the caller
       // asked for it.
       timeoutMs: input.timeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
@@ -689,9 +718,7 @@ export class Lenz {
     // hour later is a new question, and a content-derived key would replay the
     // first answer for 24h — including for a claim whose verdict the server
     // would otherwise refresh.
-    const idempotencyKey =
-      input.idempotencyKey ??
-      (input.idempotency !== false ? (await generateUuid()).replace(/-/g, "") : undefined);
+    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     // Never shortens a client configured with a longer timeout: the caller
@@ -748,10 +775,16 @@ export class Lenz {
     if (!chosen || chosen.length === 0) {
       throw new Error("select requires a non-empty claims array");
     }
+    // One key per call, reused across its own retries, so a retried select
+    // does not start (and charge for) the chosen claims twice.
+    const idempotencyKey = await callIdempotencyKey(input);
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.request<BatchAccepted>({
       method: "POST",
       path: `/verify/${taskId}/select`,
       json: { texts: chosen },
+      headers,
     });
   }
 
@@ -1120,12 +1153,8 @@ export class Lenz {
    * so a network retry on submit doesn't spawn a duplicate task.
    */
   async verifyAndWait(input: VerifyAndWaitInput): Promise<Verification> {
-    const timeoutMs = input.timeoutMs ?? 120_000;
-    const idempotencyKey =
-      input.idempotencyKey ??
-      (input.idempotency !== false ? (await generateUuid()).replace(/-/g, "") : undefined);
-
-    const accepted = await this.submit({ ...input, idempotencyKey });
+    const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
+    const accepted = await this.submit(input);
     // eslint-disable-next-line no-console
     console.info(`[lenz-io] Submitted task: ${accepted.task_id}`);
     return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
@@ -1145,7 +1174,7 @@ export class Lenz {
     if (!taskId) {
       throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
     }
-    const timeoutMs = opts.timeoutMs ?? 120_000;
+    const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const { terminal, timedOut, gone } = await this._pollToTerminal(
       [taskId],
       timeoutMs,
@@ -1175,7 +1204,7 @@ export class Lenz {
    * (Transport/auth errors on the initial submit still throw.)
    */
   async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
-    const timeoutMs = input.timeoutMs ?? 180_000;
+    const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const accepted = await this.verifyBatch(input);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
     const { terminal, timedOut, gone } = await this._pollToTerminal(
@@ -1376,8 +1405,11 @@ export class Lenz {
     if (input.visibility) body.visibility = input.visibility;
     // Omit-when-empty: the server defaults to "standard".
     if (input.depth) body.depth = input.depth;
+    // One key per call, reused across its own retries, so a network retry
+    // does not start (and charge for) a second verification.
+    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
-    if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.request<TaskAccepted>({
       method: "POST",
       path: "/verify",

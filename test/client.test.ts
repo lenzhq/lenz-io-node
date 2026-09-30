@@ -656,26 +656,27 @@ describe("Per-call timeout floors (assess, extract)", () => {
     vi.useRealTimers();
   });
 
-  it("list form waits 45s by default (the client default is 30s)", async () => {
+  // The server's /assess budget is 90s; the client waits 10s longer so it
+  // never gives up on a call the server is still working on (and charging).
+  it("list form waits 100s by default (the client default is 30s)", async () => {
     const { fetch, signals } = hangingFetch();
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    await expectAbortAt(client.assess({ claims: ["a", "b"] }), signals, 45_000);
+    await expectAbortAt(client.assess({ claims: ["a", "b"] }), signals, 100_000);
   });
 
-  // The server runs framing and then a 3-model panel inside one request,
-  // dividing a single budget between them, so a single-claim call can take as
-  // long as a list one. On the 30s default it timed out AFTER the server had
-  // charged it, and the retry charged again.
-  it("single form waits 45s too, not the client's 30s default", async () => {
+  // The server finds the claims and then runs a 3-model panel inside one
+  // request, dividing a single budget between them, so a single-claim call can
+  // take as long as a list one.
+  it("single form waits 100s too, not the client's 30s default", async () => {
     const { fetch, signals } = hangingFetch();
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    await expectAbortAt(client.assess({ claim: "a" }), signals, 45_000);
+    await expectAbortAt(client.assess({ claim: "a" }), signals, 100_000);
   });
 
   it("a longer client-wide timeoutMs is never shortened for the single form", async () => {
     const { fetch, signals } = hangingFetch();
-    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 90_000 });
-    await expectAbortAt(client.assess({ claim: "a" }), signals, 90_000);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 180_000 });
+    await expectAbortAt(client.assess({ claim: "a" }), signals, 180_000);
   });
 
   it("per-call timeoutMs overrides the list default", async () => {
@@ -686,23 +687,22 @@ describe("Per-call timeout floors (assess, extract)", () => {
 
   it("a longer client-wide timeoutMs is never shortened for a list", async () => {
     const { fetch, signals } = hangingFetch();
-    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 90_000 });
-    await expectAbortAt(client.assess({ claims: ["a"] }), signals, 90_000);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 180_000 });
+    await expectAbortAt(client.assess({ claims: ["a"] }), signals, 180_000);
   });
 
   // Extraction runs in one synchronous request and a long input can take
-  // longer than 30s; on a client timeout the SDK re-sends the call, which
-  // starts the same extraction over on the server.
-  it("extract waits 90s by default (the client default is 30s)", async () => {
+  // well over 30s; on a client timeout the SDK re-sends the call.
+  it("extract waits 150s by default (the client default is 30s)", async () => {
     const { fetch, signals } = hangingFetch();
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    await expectAbortAt(client.extract({ text: "a" }), signals, 90_000);
+    await expectAbortAt(client.extract({ text: "a" }), signals, 150_000);
   });
 
   it("a longer client-wide timeoutMs is never shortened for extract", async () => {
     const { fetch, signals } = hangingFetch();
-    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 120_000 });
-    await expectAbortAt(client.extract({ text: "a" }), signals, 120_000);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0, timeoutMs: 200_000 });
+    await expectAbortAt(client.extract({ text: "a" }), signals, 200_000);
   });
 
   it("per-call timeoutMs overrides the extract default", async () => {
@@ -715,6 +715,162 @@ describe("Per-call timeout floors (assess, extract)", () => {
     const { fetch, signals } = hangingFetch();
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     await expectAbortAt(client.usage(), signals, 30_000);
+  });
+});
+
+describe("Default wait deadlines", () => {
+  /** A fetch whose every poll answers "still running" (a submit gets a receipt). */
+  function stillRunningFetch() {
+    const impl = vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      const body = u.endsWith("/verify/batch")
+        ? { batch_id: "b", items: [{ task_id: "t1", claim_text: "a" }] }
+        : u.endsWith("/verify")
+          ? { task_id: "t1", claim_text: "a" }
+          : { status: "processing", progress: {} };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    return impl as unknown as typeof fetch;
+  }
+
+  /** Still pending just before 300s; settled by 320s (the engine polls once more). */
+  async function expectDeadlineNear300s(pending: Promise<unknown>) {
+    let settled = false;
+    const result = pending.then(
+      (v) => {
+        settled = true;
+        return v;
+      },
+      (e: unknown) => {
+        settled = true;
+        return e;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(295_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(settled).toBe(true);
+    return result;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("wait gives up after 300s by default, with the resumable task id", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: stillRunningFetch() });
+    const err = await expectDeadlineNear300s(client.wait("t1"));
+    expect(err).toBeInstanceOf(LenzTimeoutError);
+    expect((err as LenzTimeoutError).taskId).toBe("t1");
+  });
+
+  it("verifyAndWait gives up after 300s by default", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: stillRunningFetch() });
+    const err = await expectDeadlineNear300s(client.verifyAndWait({ claim: "a" }));
+    expect(err).toBeInstanceOf(LenzTimeoutError);
+    expect((err as LenzTimeoutError).taskId).toBe("t1");
+  });
+
+  it("verifyBatchAndWait gives up after 300s by default", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: stillRunningFetch() });
+    const out = await expectDeadlineNear300s(
+      client.verifyBatchAndWait({ claims: [{ text: "a" }] }),
+    );
+    expect(out).toEqual([{ task_id: "t1", claim_text: "a", status: "timeout" }]);
+  });
+});
+
+describe("Automatic idempotency keys (extract, select, verify)", () => {
+  const EXTRACT_BODY = { status: "ready", claim: "a", identified_claims: [] };
+  const SELECT_BODY = { batch_id: "b", items: [{ task_id: "t2", claim_text: "a" }] };
+  const VERIFY_BODY = { task_id: "t", claim_text: "a" };
+
+  const key = (c: FetchCall) => new Headers(c.init.headers).get("Idempotency-Key");
+
+  const cases = [
+    {
+      name: "extract",
+      body: EXTRACT_BODY,
+      call: (client: Lenz, extra: Record<string, unknown> = {}) =>
+        client.extract({ text: "a", ...extra }),
+    },
+    {
+      name: "select",
+      body: SELECT_BODY,
+      call: (client: Lenz, extra: Record<string, unknown> = {}) =>
+        client.select("tsk_1", { claims: ["a"], ...extra }),
+    },
+    {
+      name: "verify",
+      body: VERIFY_BODY,
+      call: (client: Lenz, extra: Record<string, unknown> = {}) =>
+        client.verify({ claim: "a", ...extra }),
+    },
+  ] as const;
+
+  for (const c of cases) {
+    it(`${c.name} sends a fresh random key per call, never derived from the body`, async () => {
+      const { fetch, calls } = makeFetch([{ body: c.body }, { body: c.body }]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      await c.call(client);
+      await c.call(client);
+      const first = key(calls[0]!);
+      expect(first).toMatch(/^[0-9a-f]{32}$/);
+      expect(key(calls[1]!)).toMatch(/^[0-9a-f]{32}$/);
+      expect(key(calls[1]!)).not.toBe(first);
+    });
+
+    it(`${c.name} reuses one key across its own retries`, async () => {
+      const { fetch, calls } = makeFetch([
+        { status: 500, body: { detail: "boom" } },
+        { body: c.body },
+      ]);
+      vi.useFakeTimers();
+      try {
+        const client = new Lenz({ apiKey: "lenz_t", fetch });
+        const pending = c.call(client);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(calls).toHaveLength(2);
+      expect(key(calls[0]!)).toBeTruthy();
+      expect(key(calls[1]!)).toBe(key(calls[0]!));
+    });
+
+    it(`${c.name} honours a pinned key, and sends none with idempotency: false`, async () => {
+      const { fetch, calls } = makeFetch([{ body: c.body }, { body: c.body }]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      await c.call(client, { idempotencyKey: "pinned-1" });
+      await c.call(client, { idempotency: false });
+      expect(key(calls[0]!)).toBe("pinned-1");
+      expect(key(calls[1]!)).toBeNull();
+    });
+  }
+
+  it("the key does not change the request body", async () => {
+    const { fetch, calls } = makeFetch([{ body: EXTRACT_BODY }, { body: SELECT_BODY }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "a", idempotencyKey: "k" });
+    await client.select("tsk_1", { claims: ["a"], idempotencyKey: "k" });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ text: "a" });
+    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ texts: ["a"] });
+  });
+
+  it("ask.send still generates no key", async () => {
+    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.ask.send("vid_1", { message: "Why?" });
+    expect(key(calls[0]!)).toBeNull();
   });
 });
 

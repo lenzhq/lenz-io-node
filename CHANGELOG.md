@@ -6,6 +6,29 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic idempotency keys on `extract`, `select` and `verify`**, as
+  `assess` and `verifyAndWait` already did: a random `Idempotency-Key` per
+  call, reused across that call's own retries, so a retry after a network drop
+  or a client timeout replays the first response instead of running (and
+  charging for) the call twice. Never derived from the request body. Pin your
+  own with `idempotencyKey`, or send none with `idempotency: false` (both new
+  on `ExtractInput` and `SelectInput`; `idempotency` is new on `VerifyInput`).
+  `ask.send` is unchanged: it sends a key only when you pass one.
+
+### Changed
+
+- **`assess` waits up to 100s** (was 45s), both forms. The server's `/assess`
+  budget is now 90s, so a long text can answer in up to 90s instead of failing
+  early with a 503; the SDK waits 10s longer than the server works. A longer
+  per-call `timeoutMs`, or a longer client-wide one, still wins.
+- **`extract` waits up to 150s** (was 90s) per attempt.
+- **`wait` and `verifyAndWait` default to a 300s deadline** (was 120s), and
+  **`verifyBatchAndWait` to 300s** (was 180s). On the deadline they behave as
+  before: `LenzTimeoutError` with the resumable `taskId` (or `"timeout"` rows
+  for a batch).
+
 ## [2.18.0] - 2026-09-30
 
 ### Added
