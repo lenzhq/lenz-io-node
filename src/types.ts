@@ -1071,7 +1071,7 @@ export interface AssessInput {
   /**
    * Per-call HTTP timeout. When omitted, both forms wait at least 100s rather
    * than the client's default: the server finds the claims and runs a
-   * 3-model panel inside one request (typically 10-25s; a long text can take
+   * 3-model panel inside one request (typically ~15s; a long text can take
    * up to 90s).
    */
   timeoutMs?: number;

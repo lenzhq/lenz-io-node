@@ -12,7 +12,7 @@
  *
  * The demo claim is cached for an hour after anyone verifies it, so the
  * verify call can come back in seconds; otherwise it runs the full
- * pipeline (~60-90s) like your own claims. Use webhooks for production
+ * pipeline (~90s) like your own claims. Use webhooks for production
  * async flows.
  */
 
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   console.log("");
 
   // 2. assess — ONE call over the extracted claims (up to 20), one row per
-  //    claim in the same order (~10-25s, sync). A row with verdict "Error"
+  //    claim in the same order (~15s, sync). A row with verdict "Error"
   //    has error_code + hint; a compound item lists the rest of its claims
   //    in identified_claims.
   const quick = (await client.assess({ claims })).claims;

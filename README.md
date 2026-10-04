@@ -5,7 +5,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 **Six API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
 
 - `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
-- `assess` — fast 3-model panel verdict in ~10s; one claim, or up to 20 claims in one call. Sync, paid.
+- `assess` — fast 3-model panel verdict in ~15s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
 - `citecheck` — the citation check on its own: does each source a draft cites say what the draft says? Async.
 - `ask` — follow-up questions grounded on a verification. Sync, paid.
@@ -216,7 +216,7 @@ const out = await client.extract({ text: llmOutput });
 const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
 
 // 2. assess — ONE call over the extracted claims (up to 20), one row per
-//    claim, in the same order (~10-25s, sync)
+//    claim, in the same order (~15s, sync)
 const quick = (await client.assess({ claims })).claims;
 for (const c of quick) {
   console.log(c.verdict, c.confidence, c.claim);
@@ -284,7 +284,7 @@ resends the same request is not charged twice.
 Framing → Research → Debate (2 models, 2 rounds) → Panel Review
 (3 reviewers running the same checks, 2 more when they disagree) → Conclusion. ~90 seconds wall-clock
 per claim. `assess` runs a leaner 3-model panel against the same
-framing for the ~10s pass.
+framing for the ~15s pass.
 
 ## Quickstart demo
 
@@ -303,7 +303,7 @@ for (const source of (v.sources ?? []).slice(0, 3)) {
 ```
 
 The demo claim is cached for an hour after anyone verifies it, so it can
-come back in seconds; otherwise it runs the full pipeline (~60-90s) like
+come back in seconds; otherwise it runs the full pipeline (~90s) like
 your own claims. Use webhooks for production async flows.
 
 > **Get your webhook secret here →** [lenz.io/api-credentials](https://lenz.io/api-credentials)
@@ -311,7 +311,7 @@ your own claims. Use webhooks for production async flows.
 ## What you get on the client
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
-- **`client.assess({ claim })`** → `AssessResponse`. Sync, ~10s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
+- **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
@@ -325,7 +325,7 @@ your own claims. Use webhooks for production async flows.
 
 ## Polling without webhooks
 
-`verify()` returns immediately with a `task_id`; the pipeline runs async (~60-90s
+`verify()` returns immediately with a `task_id`; the pipeline runs async (~90s
 for a cold claim). You don't need webhooks to get the result — poll for it.
 
 The one-liner is `verifyAndWait()`. If you already hold a `task_id` (or want to
