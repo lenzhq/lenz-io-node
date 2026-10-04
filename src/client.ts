@@ -121,7 +121,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * The server finds the claims and then runs a 3-model panel inside one
  * synchronous request and divides a single budget between them, so a
  * single-claim call can take as long as a list one. Typical calls answer in
- * 10-25s, but a long text can use the server's whole 90s budget. The SDK
+ * ~15s, but a long text can use the server's whole 90s budget. The SDK
  * waits 10s longer than that, so it never gives up on a call the server is
  * still working on.
  *
@@ -676,11 +676,11 @@ export class Lenz {
   }
 
   /**
-   * Fast 3-model panel verdict. Sync, ~10s for one claim. Two forms:
+   * Fast 3-model panel verdict. Sync, ~15s for one claim. Two forms:
    *
    * - `assess({ claim })` — one text; returns one entry per claim found in
    *   it (up to 20, 1 credit each).
-   * - `assess({ claims })` — up to 20 claims in one call (~10-25s); returns
+   * - `assess({ claims })` — up to 20 claims in one call (~15s); returns
    *   exactly one entry per item, in the order sent. This is the step after
    *   `extract` in the ladder. A row with `verdict === "Error"` has
    *   `error_code` and `hint` and is free; a compound item is assessed on

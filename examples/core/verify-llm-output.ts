@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const claims = out.identified_claims?.length ? out.identified_claims : [out.claim ?? ""];
   console.log(`Extracted ${claims.length} claims.\n`);
 
-  // Step 2: assess — ONE sync call over all of them (~10-25s for the list).
+  // Step 2: assess — ONE sync call over all of them (~15s for the list).
   // Exactly one row comes back per claim, in the order sent. A row with
   // verdict "Error" had no verdict: error_code says why and hint says what
   // to send next; a compound item is assessed on its main claim and lists
