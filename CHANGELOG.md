@@ -19,6 +19,12 @@ All notable changes to this SDK are documented here. Format follows
 - **`extract` finds up to 100 claims** (an API change; was 20). The README's
   extract → assess example now sends them to `assess` 20 a call: a list of
   more than 20 is refused with a 422.
+- **Node 18 is no longer supported** (it reached end-of-life on 2025-04-30);
+  the minimum is now Node 20.19, the final Node 20 line (`engines.node`,
+  `package-lock.json`, the CI matrix, the README's Compatibility list).
+  Node 20 itself reached end-of-life on 2026-04-30 and support for it will be
+  dropped in a later release. Shipped as a minor, not a major: nothing in the
+  public surface (`src/index.ts`) changed.
 
 ### Docs
 
