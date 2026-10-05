@@ -28,15 +28,20 @@
  * const out = await client.extract({ text: llmOutput });
  * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
  *
- * // 2. assess — ONE call over the extracted claims (up to 20), one row per
- * //    claim in the same order. A row with verdict 'Error' has error_code +
- * //    hint; a compound item lists the rest in identified_claims.
- * const quick = (await client.assess({ claims })).claims;
+ * // 2. assess — one call per 20 claims (extract finds up to 100), one
+ * //    row per claim in the same order. A row with verdict 'Error' has
+ * //    error_code + hint; a compound item lists the rest in identified_claims.
+ * const quick: AssessClaim[] = [];
+ * for (let i = 0; i < claims.length; i += 20) {
+ *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
+ * }
  *
  * // 3. verify — escalate the low-confidence rows to the full pipeline (~90s, paid)
+ * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
  * const doubtful = quick
  *   .filter((c) => c.verdict !== 'Error' && c.confidence === 'low')
- *   .map((c) => ({ claim: c.claim! }));
+ *   .map((c) => ({ claim: c.claim! }))
+ *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
  *
  * // 4. ask — follow-up grounded on a verification
@@ -679,7 +684,8 @@ export class Lenz {
    * Fast 3-model panel verdict. Sync, ~15s for one claim. Two forms:
    *
    * - `assess({ claim })` — one text; returns one entry per claim found in
-   *   it (up to 20, 1 credit each).
+   *   it (up to 20, 1 credit each), and the claims past those in
+   *   `more_claims`, unchecked and free.
    * - `assess({ claims })` — up to 20 claims in one call (~15s); returns
    *   exactly one entry per item, in the order sent. This is the step after
    *   `extract` in the ladder. A row with `verdict === "Error"` has
@@ -689,10 +695,15 @@ export class Lenz {
    * ```ts
    * const out = await client.extract({ text: llmOutput });
    * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
-   * const quick = (await client.assess({ claims })).claims; // one row per claim, same order
+   * const quick: AssessClaim[] = []; // one row per claim, same order, 20 claims a call
+   * for (let i = 0; i < claims.length; i += 20) {
+   *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
+   * }
+   * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
    * const doubtful = quick
    *   .filter((c) => c.verdict !== "Error" && c.confidence === "low")
-   *   .map((c) => ({ claim: c.claim! }));
+   *   .map((c) => ({ claim: c.claim! }))
+   *   .slice(0, 20);
    * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
    * ```
    *

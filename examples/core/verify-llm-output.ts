@@ -14,6 +14,7 @@
  */
 
 import { Lenz } from "lenz-io";
+import type { AssessClaim } from "lenz-io";
 
 const LLM_OUTPUT = `
 The Eiffel Tower was completed in 1889 and stands 330 meters tall.
@@ -34,7 +35,11 @@ async function main(): Promise<void> {
   // verdict "Error" had no verdict: error_code says why and hint says what
   // to send next; a compound item is assessed on its main claim and lists
   // the rest in identified_claims. Error rows are free.
-  const quick = (await client.assess({ claims })).claims;
+  // One assess call takes 20 claims; extract finds up to 100.
+  const quick: AssessClaim[] = [];
+  for (let i = 0; i < claims.length; i += 20) {
+    quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
+  }
   console.log(`Assessed ${quick.length} claims:\n`);
   for (const c of quick) {
     console.log(
@@ -49,9 +54,11 @@ async function main(): Promise<void> {
   // all in parallel. `assess` and `verify` share a result cache server-side,
   // so a claim that already has a deep verification surfaces immediately via
   // `verification_url` and you can skip the escalation.
+  // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
   const doubtful = quick
     .filter((c) => c.verdict !== "Error" && c.confidence === "low")
-    .map((c) => ({ claim: c.claim ?? "" }));
+    .map((c) => ({ claim: c.claim ?? "" }))
+    .slice(0, 20);
   console.log(`Escalating ${doubtful.length} low-confidence claims to full verification:\n`);
   const results = doubtful.length
     ? await client.verifyBatchAndWait({ claims: doubtful, timeoutMs: 180_000 })
