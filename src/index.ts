@@ -17,15 +17,17 @@
  * // 2. /assess — one call per 20 claims (extract finds up to 100), one
  * //    row per claim in the same order. A row with verdict 'Error' has
  * //    error_code + hint; a compound item lists the rest in identified_claims.
- * const quick = [];
+ * const quick: AssessClaim[] = [];
  * for (let i = 0; i < claims.length; i += 20) {
  *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
  * }
  *
  * // 3. /verify — escalate the low-confidence rows to the full pipeline (~90s, paid)
+ * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
  * const doubtful = quick
  *   .filter((c) => c.verdict !== 'Error' && c.confidence === 'low')
- *   .map((c) => ({ claim: c.claim! }));
+ *   .map((c) => ({ claim: c.claim! }))
+ *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
  *
  * // 4. /ask — follow-up questions grounded on a verification

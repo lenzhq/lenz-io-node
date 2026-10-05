@@ -207,6 +207,7 @@ The body carries the same rows as a review's: `citations`, `citation_issues`,
 
 ```ts
 import { Lenz } from "lenz-io";
+import type { AssessClaim } from "lenz-io";
 
 const client = new Lenz({ apiKey: "lenz_..." });
 
@@ -217,7 +218,7 @@ const claims = out.identified_claims?.length ? out.identified_claims : [out.clai
 
 // 2. assess — one call per 20 claims (extract finds up to 100), one row per
 //    claim, in the same order (~15s a call, sync)
-const quick = [];
+const quick: AssessClaim[] = [];
 for (let i = 0; i < claims.length; i += 20) {
   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
 }
@@ -227,9 +228,11 @@ for (const c of quick) {
 }
 
 // 3. verify — escalate the low-confidence rows to the full panel + citations
+// verifyBatchAndWait takes up to 20 claims a call: the first 20 here
 const doubtful = quick
   .filter((c) => c.verdict !== "Error" && c.confidence === "low")
-  .map((c) => ({ claim: c.claim! }));
+  .map((c) => ({ claim: c.claim! }))
+  .slice(0, 20);
 const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
 for (const r of results) {
   if (r.status === "completed") {

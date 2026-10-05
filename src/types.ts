@@ -524,8 +524,8 @@ export interface AssessResponse {
   candidate_claims?: string[];
   /**
    * Single form: the claims found past the ones checked, most check-worthy
-   * first. `[]` otherwise; absent on the list form before the API sent it and
-   * from older servers, so read it as `more_claims ?? []`.
+   * first. `[]` otherwise. Absent from servers older than this field, so read
+   * it as `more_claims ?? []`.
    */
   more_claims?: string[];
 }
