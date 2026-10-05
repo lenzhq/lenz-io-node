@@ -848,7 +848,7 @@ An OAuth access token for the Lenz API works wherever the API key goes: pass it 
 
 ## Compatibility
 
-- Node 18, 20, 22
+- Node 20.19+, 22, 24
 - ESM + CJS dual exports
 - TypeScript types included
 - Works in Cloudflare Workers / edge runtimes — pass a `fetch` polyfill if `globalThis.fetch` isn't available
