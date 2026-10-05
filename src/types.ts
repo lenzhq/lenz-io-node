@@ -497,8 +497,11 @@ export interface AssessClaim {
  * Output of `POST /assess`.
  *
  * Single form (`claim`): `claims` is one entry per claim found in the
- * input — up to 20, at 1 credit each. `error` is set when the input holds
- * no checkable claim.
+ * input — up to 20, at 1 credit each. A text that makes more claims than one
+ * call checks gets its most check-worthy 20 checked and the rest listed in
+ * `more_claims`, unchecked and free: send them back with `assess({ claims })`,
+ * 20 a call, to check them. `error` is set when the input holds no checkable
+ * claim.
  *
  * List form (`claims`): exactly one entry per item sent, in the order
  * sent. An item that could not be given a verdict is still in position,
@@ -519,6 +522,12 @@ export interface AssessResponse {
    * sends the key.
    */
   candidate_claims?: string[];
+  /**
+   * Single form: the claims found past the ones checked, most check-worthy
+   * first. `[]` otherwise; absent on the list form before the API sent it and
+   * from older servers, so read it as `more_claims ?? []`.
+   */
+  more_claims?: string[];
 }
 
 export interface TaskAccepted {

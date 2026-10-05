@@ -17,6 +17,7 @@
  */
 
 import { Lenz } from "lenz-io";
+import type { AssessClaim } from "lenz-io";
 
 async function main(): Promise<void> {
   const client = new Lenz();
@@ -30,11 +31,14 @@ async function main(): Promise<void> {
   for (const c of claims) console.log(`  - ${c}`);
   console.log("");
 
-  // 2. assess — ONE call over the extracted claims (up to 20), one row per
-  //    claim in the same order (~15s, sync). A row with verdict "Error"
-  //    has error_code + hint; a compound item lists the rest of its claims
-  //    in identified_claims.
-  const quick = (await client.assess({ claims })).claims;
+  // 2. assess — one call per 20 claims (extract finds up to 100), one row
+  //    per claim in the same order (~15s a call, sync). A row with verdict
+  //    "Error" has error_code + hint; a compound item lists the rest of its
+  //    claims in identified_claims.
+  const quick: AssessClaim[] = [];
+  for (let i = 0; i < claims.length; i += 20) {
+    quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
+  }
   for (const c of quick) {
     console.log(
       `  ${(c.verdict ?? "").padEnd(12)}  conf=${(c.confidence ?? "").padEnd(7)}  ${c.claim}`,

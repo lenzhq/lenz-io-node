@@ -30,6 +30,7 @@ import {
 } from "../src/index.js";
 import type {
   AssessClaim,
+  AssessResponse,
   Position,
   ExtractedClaims,
   ReviewFull,
@@ -65,7 +66,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ExtractedEntity: new Set(["name", "type"]),
   ClaimLocation: new Set(["claim", "positions"]),
   Position: new Set(["start", "end", "text"]),
-  AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims"]),
+  AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims", "more_claims"]),
   AssessClaim: new Set([
     "claim",
     "verdict",
@@ -78,6 +79,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "candidate_claims",
     "identified_claims",
     "hint",
+    "suggested_rewrite",
   ]),
   TaskStatus: new Set([
     "status",
@@ -596,6 +598,9 @@ describe("contract", () => {
     // The list form: one row per item sent, Error rows in position. The
     // response shape is the single form's — the four row fields are new.
     ["assess_claims_list.json", "AssessResponse"],
+    // A long text: the checked rows, and the claims past them in
+    // `more_claims`. Same fixture as the Python SDK.
+    ["assess_more_claims.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
     ["verify_status_failed.json", "TaskStatus"],
     // The `processing` body. Under the server's `exclude_unset` a completed
@@ -771,6 +776,18 @@ describe("contract", () => {
     );
     expect(typeof byVerdict["False"]).toBe("string");
     expect(byVerdict["True"]).toBeNull();
+  });
+
+  it("assess lists the claims past the ones checked in more_claims", () => {
+    const payload = loadFixture("assess_more_claims.json") as unknown as AssessResponse;
+    expect(payload.claims).toHaveLength(2);
+    expect(payload.more_claims).toEqual([
+      "Kaleva Energy's Kuopio plant opened in 1967.",
+      "Kaleva Energy's Lahti plant employed 249 people at the end of 2025.",
+    ]);
+    // A response without the key (an older server) reads as none.
+    const old = loadFixture("assess_single_claim.json") as unknown as AssessResponse;
+    expect(old.more_claims ?? []).toEqual([]);
   });
 
   it("assess rows carry the reviewers' notes, and rows without them still fit", () => {

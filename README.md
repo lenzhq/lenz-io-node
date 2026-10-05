@@ -215,9 +215,12 @@ const client = new Lenz({ apiKey: "lenz_..." });
 const out = await client.extract({ text: llmOutput });
 const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
 
-// 2. assess — ONE call over the extracted claims (up to 20), one row per
-//    claim, in the same order (~15s, sync)
-const quick = (await client.assess({ claims })).claims;
+// 2. assess — one call per 20 claims (extract finds up to 100), one row per
+//    claim, in the same order (~15s a call, sync)
+const quick = [];
+for (let i = 0; i < claims.length; i += 20) {
+  quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
+}
 for (const c of quick) {
   console.log(c.verdict, c.confidence, c.claim);
   if (c.rationale) console.log("  ", c.rationale);
@@ -251,7 +254,9 @@ worth resending as-is) and `hint` says what to send next. Error rows are
 free. A compound item is assessed on its main claim and lists the rest in
 `identified_claims` — send those as their own items to check them. The
 single form, `assess({ claim })`, takes one text and answers with a row per
-claim found in it, up to 20, at 1 credit each; the two are mutually
+claim found in it, up to 20, at 1 credit each; a text that makes more claims
+gets its 20 most check-worthy checked and the rest in `more_claims`, unchecked
+and free — send them back as `claims`, 20 a call. The two are mutually
 exclusive.
 
 Each verdict row also carries two optional notes. `rationale` is the
