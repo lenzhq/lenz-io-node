@@ -36,8 +36,11 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     event = webhooks.parse(req.body, req.headers as Record<string, string>);
   } catch (exc) {
     if (exc instanceof LenzWebhookSignatureError) {
+      // Log the detail server-side only — never echo exception text/stack
+      // back to the caller, which could leak internals to whoever sent the
+      // (possibly forged) request.
       console.warn("Rejected webhook:", exc.message);
-      return res.status(400).send(String(exc));
+      return res.status(400).json({ error: "invalid signature" });
     }
     throw exc;
   }
