@@ -10,6 +10,11 @@ on:
     tags:
       - "v*"
 
+# Least-privilege default; jobs that need more (the npm publish's OIDC
+# token) declare their own `permissions:` below.
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: staging smoke
