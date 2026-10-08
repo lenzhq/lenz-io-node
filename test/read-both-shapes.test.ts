@@ -80,9 +80,12 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   // An internal id the newer shape no longer sends (never accepted anywhere).
   verify__submit_202: ["value.chain_id"],
   // The delivery id the newer review / citation-check events no longer carry
-  // (it was never pollable; dedupe on `eventId`).
+  // (never pollable; dedupe on `eventId`): `taskId` reads the review /
+  // citation-check id instead.
   webhook__review_failed: ["value.taskId"],
+  webhook__review_completed: ["value.taskId"],
   webhook__citecheck_failed: ["value.taskId"],
+  webhook__citecheck_completed: ["value.taskId"],
 };
 
 function differs(name: string, path: string): boolean {
@@ -135,17 +138,22 @@ const NAMES = readdirSync(join(ROOT, "oracle"))
   .map((f) => f.replace(/\.json$/, ""))
   .sort();
 
+/** Recordings of older servers (sparser bodies), original shape only. */
+const OLDER = new Set(readdirSync(join(ROOT, "older")).map((f) => f.replace(/\.json$/, "")));
+
 describe("both response shapes give what the previous release gave", () => {
-  it("every recording has both shapes and an oracle", () => {
-    expect(NAMES.length).toBeGreaterThan(30);
+  it("every recording has an oracle, and both shapes unless it is an older one", () => {
+    expect(NAMES.length).toBeGreaterThan(80);
     for (const name of NAMES) {
+      if (OLDER.has(name)) continue;
       expect(() => load("legacy", `${name}.json`)).not.toThrow();
       expect(() => load("canonical", `${name}.json`)).not.toThrow();
     }
   });
 
   for (const name of NAMES) {
-    it.each(["legacy", "canonical"] as const)(`${name} (%s)`, async (shape) => {
+    const shapes = OLDER.has(name) ? (["older"] as const) : (["legacy", "canonical"] as const);
+    it.each(shapes)(`${name} (%s)`, async (shape) => {
       const recorded = load(shape, `${name}.json`) as Recorded;
       const actual = await runScenario(sdk as unknown as SdkUnderTest, name, recorded);
       const oracle = load("oracle", `${name}.json`);

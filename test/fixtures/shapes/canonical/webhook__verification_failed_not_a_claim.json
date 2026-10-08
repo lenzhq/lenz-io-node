@@ -1,10 +1,8 @@
 {
   "payload": {
     "event": "verification.failed",
-    "event_id": "evt_3fb8b229610d463f75c09640",
+    "event_id": "evt_fd2254e805fd382669126c88",
     "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
-    "verification_id": null,
-    "batch_id": null,
     "status": "failed",
     "verification": {
       "status": "failed",
@@ -12,7 +10,7 @@
       "failure": {
         "code": "no_checkable_claim",
         "detail": "No claim in the input could be checked against public evidence.",
-        "hint": "The input is a greeting, not a statement that can be checked. Send one factual claim, or run the text through /extract to enumerate its claims.",
+        "hint": "It is a request to write an essay. Send one factual claim, or run the text through /extract to enumerate its claims.",
         "failure_class": "invalid_input",
         "retryable": false,
         "docs_url": "https://lenz.io/docs/errors#invalid-input"

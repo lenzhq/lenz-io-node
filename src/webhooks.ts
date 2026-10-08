@@ -21,7 +21,7 @@ import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
-import { normalizeTaskStatus, normalizeVerification } from "./compat.js";
+import { normalizeOptions, normalizeTaskStatus, normalizeVerification } from "./compat.js";
 import type {
   Citecheck,
   Coverage,
@@ -132,7 +132,7 @@ export interface VerificationFailed extends WebhookEventBase, VerificationEventB
    */
   error: string;
   /** Why it failed: `code`, `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. */
-  failure: ReviewFailureBlock | null;
+  failure?: ReviewFailureBlock | null;
   /** WHY it failed — the closed `FailureClass` set; "" when an older server omits it. */
   failureClass: FailureClass;
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
@@ -177,7 +177,8 @@ export interface CertificateTimestamped extends WebhookEventBase {
  * review's own deep checks fire no `verification.*` events.
  *
  * `taskId` is the delivery's identity, not a task you can poll on
- * `/verify/status`; read the review with `client.getReview(reviewId)`.
+ * `/verify/status`; read the review with `client.getReview(reviewId)`. In the
+ * API's newer payload shape, which sends no `task_id`, it is the `reviewId`.
  */
 export interface ReviewEventBase extends WebhookEventBase {
   event: "review.completed" | "review.failed";
@@ -202,7 +203,8 @@ export type ReviewEvent = ReviewCompleted | ReviewFailed;
  * `event=citecheck.completed` / `citecheck.failed` — a citation check ended.
  * `citecheck` is the whole check, as `client.getCitecheck` returns it.
  * **Dedupe on `eventId`**: it is stable across every retry, while `attempt`
- * changes. `taskId` is the delivery's identity, not pollable.
+ * changes. `taskId` is the delivery's identity, not pollable (the
+ * `citecheckId` in the API's newer payload shape, which sends no `task_id`).
  */
 export interface CitecheckEventBase extends WebhookEventBase {
   event: "citecheck.completed" | "citecheck.failed";
@@ -286,7 +288,15 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     : undefined;
   const base: WebhookEventBase = {
     event,
-    taskId: String(payload["task_id"] ?? verification?.task_id ?? ""),
+    // The newer review / citation-check events carry no `task_id`: their
+    // `review_id` / `citecheck_id` stands in, so `taskId` is never "".
+    taskId: String(
+      payload["task_id"] ??
+        verification?.task_id ??
+        payload["review_id"] ??
+        payload["citecheck_id"] ??
+        "",
+    ),
     attempt: Number(payload["attempt"] ?? 1) || 1,
     deliveredAt: String(payload["delivered_at"] ?? ""),
     verificationId: (payload["verification_id"] as string | null) ?? null,
@@ -305,12 +315,15 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
   }
   if (event === "verification.failed") {
     const failure = (verification?.failure ?? null) as ReviewFailureBlock | null;
-    const retryable = payload["retryable"] ?? failure?.retryable;
+    // The newer payload nests the failure in `verification`; the original's
+    // flat fields are read exactly as before.
+    const nested = asObject(payload["verification"]) !== null && !("error" in payload);
+    const retryable = nested ? failure?.retryable : payload["retryable"];
     return {
       ...base,
       event: "verification.failed",
-      error: String(payload["error"] ?? failure?.failure_reason ?? ""),
-      failureClass: String(payload["failure_class"] ?? failure?.failure_class ?? ""),
+      error: String((nested ? failure?.failure_reason : payload["error"]) ?? ""),
+      failureClass: String((nested ? failure?.failure_class : payload["failure_class"]) ?? ""),
       retryable: typeof retryable === "boolean" ? retryable : null,
       failure,
       verification,
@@ -330,14 +343,7 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     needsInput ??= {};
     if (Array.isArray(needsInput["claims"])) {
       // Each option under both names: `claim` (newer) and `text` (original).
-      needsInput = {
-        ...needsInput,
-        claims: needsInput["claims"].map((c: unknown) => {
-          const o = asObject(c);
-          if (!o) return c;
-          return { ...o, claim: o["claim"] ?? o["text"], text: o["text"] ?? o["claim"] };
-        }),
-      };
+      needsInput = { ...needsInput, claims: normalizeOptions(needsInput["claims"]) };
     }
     return {
       ...base,

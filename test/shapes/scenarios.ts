@@ -29,17 +29,21 @@ export interface Recorded {
 
 const SECRET = "whsec_test_shapes";
 
+/** How `snapshot` writes a key whose value is `undefined`. */
+export const UNDEFINED = "UNDEFINED";
+
 /**
  * Plain data: errors become their class, message and own fields (`body`, the
  * raw wire body, left out); webhook events lose `raw` (the wire payload) for
- * the same reason; `undefined` values are dropped, as JSON drops them.
+ * the same reason. A key that is there with the value `undefined` is kept as
+ * the string `UNDEFINED`, so "absent" and "present but undefined" differ.
  */
 export function snapshot(v: unknown): unknown {
   if (v instanceof Error) {
     const out: Record<string, unknown> = { class: v.constructor.name, message: v.message };
     for (const [k, val] of Object.entries(v)) {
-      if (k === "body" || val === undefined) continue;
-      out[k] = snapshot(val);
+      if (k === "body") continue;
+      out[k] = val === undefined ? UNDEFINED : snapshot(val);
     }
     return out;
   }
@@ -47,8 +51,8 @@ export function snapshot(v: unknown): unknown {
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) {
-      if (k === "raw" || val === undefined) continue;
-      out[k] = snapshot(val);
+      if (k === "raw") continue;
+      out[k] = val === undefined ? UNDEFINED : snapshot(val);
     }
     return out;
   }

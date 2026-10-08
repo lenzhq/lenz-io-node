@@ -1361,7 +1361,7 @@ export interface ReviewFailureBlock {
   retryable: boolean;
   /** One sentence on what to do next. */
   hint: string | null;
-  docs_url: string | null;
+  docs_url: string;
 }
 
 export interface ReviewAssessmentCounts {

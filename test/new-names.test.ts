@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import * as sdk from "../src/index.js";
+import { mapResponseToError } from "../src/index.js";
 import type {
   AssessResponse,
   BatchAccepted,
@@ -289,5 +290,96 @@ describe("webhook_url in request bodies", () => {
     expect(await reviewRequestBodies(SDK)).toEqual(pinned);
     expect(pinned["review: webhookUrl empty"]).toMatchObject({ webhook_url: "" });
     expect(pinned["citecheck: webhookUrl empty"]).toMatchObject({ webhook_url: "" });
+  });
+});
+
+describe("an original-shape body keeps every key and value it had", () => {
+  function clientFor(status: number, body: unknown): sdk.Lenz {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+    return new sdk.Lenz({ apiKey: "lenz_t", fetch: fetchImpl, maxRetries: 0 });
+  }
+
+  it("an assess row without error_code or hint does not gain them", async () => {
+    const out = await clientFor(200, {
+      claims: [{ claim: "c", verdict: "True", confidence: "high" }],
+      error: null,
+    }).assess({ claims: ["c"] });
+    const row = out.claims[0] as Record<string, unknown>;
+    expect("error_code" in row).toBe(false);
+    expect("hint" in row).toBe(false);
+    expect("identified_claims" in row).toBe(false);
+    expect("candidate_claims" in out).toBe(false);
+    // Only the newer names are added.
+    expect(row["status"]).toBe("completed");
+    expect(out.status).toBe("ok");
+  });
+
+  it("an extract body without locations does not gain it", async () => {
+    const out = await clientFor(200, {
+      status: "ready",
+      claim: "c",
+      identified_claims: [],
+    }).extract({ text: "c" });
+    expect("locations" in out).toBe(false);
+    expect(out.claims).toEqual([{ claim: "c", positions: null }]);
+  });
+
+  it("a 409 reads its flat fields even beside a nested failure", async () => {
+    const err = mapResponseToError(
+      409,
+      JSON.stringify({
+        code: "verification_failed",
+        failure_reason: "research_empty",
+        failure_class: "insufficient_evidence",
+        retryable: null,
+        failure: { code: "x", failure_class: "upstream_unavailable", retryable: true },
+      }),
+    ) as sdk.LenzPipelineError;
+    expect([err.failureReason, err.failureClass, err.retryable]).toEqual([
+      "research_empty",
+      "insufficient_evidence",
+      null,
+    ]);
+  });
+
+  it("a 429 with doc_url and retry_after keeps resetInSeconds null", () => {
+    const err = mapResponseToError(
+      429,
+      JSON.stringify({ code: "rate_limited", doc_url: "https://lenz.io/docs", retry_after: 30 }),
+    ) as sdk.LenzRateLimitError;
+    expect(err.resetInSeconds).toBeNull();
+    expect(err.retryAfter).toBe(30);
+  });
+
+  it("a needs_input option with text: null keeps it null", async () => {
+    const payload = {
+      event: "verification.needs_input",
+      task_id: "t",
+      status: "needs_input",
+      needs_input: { reason: "multi_claim", claims: [{ text: null, domain: "" }], hint: "h" },
+      attempt: 1,
+      delivered_at: new Date().toISOString(),
+    };
+    const out = (await runScenario(SDK, "webhook__adhoc", { payload })) as {
+      value: { needsInput: { claims: Array<Record<string, unknown>> } };
+    };
+    expect(out.value.needsInput.claims[0]).toEqual({ text: null, claim: null, domain: "" });
+  });
+
+  it("citecheckAndWait does not add more_citations to a body without it", async () => {
+    const body = JSON.parse(
+      readFileSync(join(ROOT, "older", "citecheck__get_older_completed.json"), "utf-8"),
+    ).body as Record<string, unknown>;
+    delete body["more_citations"];
+    const fetchImpl = (async (_u: string | URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(JSON.stringify({ citecheck_id: body["citecheck_id"], status: "queued" }), {
+            status: 202,
+          })
+        : new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+    const client = new sdk.Lenz({ apiKey: "lenz_t", fetch: fetchImpl, maxRetries: 0 });
+    const check = await client.citecheckAndWait({ text: "x" }, { timeoutMs: 50 });
+    expect("more_citations" in check).toBe(false);
   });
 });

@@ -44,6 +44,27 @@ All notable changes to this SDK are documented here. Format follows
   `credits.bonus` and `quota_resets_at` (recomputed from `credits` and
   `costs`); `VerificationFailed.error`. Only `raw` on a webhook event and
   `LenzError.body` show the wire form as sent.
+- A response in the original form is returned exactly as before: no key is
+  added under an original name and no value changes. It only gains the newer
+  names it lacks (`AssessResponse.status` reads `ok`, `no_checkable_claim` or
+  `error`).
+- On the newer form of `review.*` / `citecheck.*` webhook events, which carry
+  no `task_id`, the event's `taskId` is the review / citation-check id.
+
+### When the newer form is served
+
+These differences come from the server and show only when a call is answered
+in the newer form (this release does not ask for it):
+
+- Sentences are reworded: a failed verification's `error` (and the
+  `LenzPipelineError` message built from it), `/assess`'s `error`, some
+  `hint`s.
+- Some 422 codes are renamed (`blank_item` is `blank_input`), every 422 has a
+  `code` (`validation_error` for a schema error) and an `errors` list, and
+  its `detail` is a sentence, so `LenzValidationError.message` reads that
+  sentence instead of "Validation failed".
+- `/verify`'s receipt has no `chain_id`; a review row carries no stored
+  `hint`.
 
 ### Changed
 
@@ -51,8 +72,6 @@ All notable changes to this SDK are documented here. Format follows
   webhook URL is set; the field is omitted. The API treats the two the same
   on these endpoints (the key's default URL). `review` and `citecheck` are
   unchanged: there `""` means "no webhook" and is still sent.
-- `citecheckAndWait` returns the check with the same defaults `getCitecheck`
-  fills in.
 
 ### Fixed
 

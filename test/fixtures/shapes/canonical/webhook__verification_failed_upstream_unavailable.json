@@ -1,0 +1,22 @@
+{
+  "payload": {
+    "event": "verification.failed",
+    "event_id": "evt_fd2254e805fd382669126c88",
+    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "status": "failed",
+    "verification": {
+      "status": "failed",
+      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "failure": {
+        "code": "framing_failed",
+        "detail": "The input could not be read as a claim.",
+        "hint": null,
+        "failure_class": "upstream_unavailable",
+        "retryable": true,
+        "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
+      }
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-10T12:02:02.002222+00:00"
+  }
+}

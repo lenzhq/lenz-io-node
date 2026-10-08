@@ -75,7 +75,6 @@ export function withReviewDefaults<T>(body: T): T {
       "citations_selected",
       "citation_limit",
       "citation_limit_reached",
-      "citation_limit_exceeded",
       "citation_checks",
       "citations_skipped",
     ]) {

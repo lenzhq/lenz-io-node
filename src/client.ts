@@ -174,6 +174,7 @@ import { VERSION as SDK_VERSION } from "./_version.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 import {
   normalizeAssess,
+  normalizeCitecheck,
   normalizeBatchAccepted,
   normalizeExtract,
   normalizeTaskStatus,
@@ -1039,9 +1040,9 @@ export class Lenz {
       // filled first would let a bare `{citecheck_id, status}` pass as a result.
       read: async (transport) => {
         const raw = await this._readCitecheck(citecheckId, transport);
-        // Defaults only on a body that already passes as this check, so the
-        // guard still judges what the server sent.
-        return isCitecheckBody(raw, citecheckId) ? withCitecheckDefaults(raw) : raw;
+        // Both response shapes' names, on a body that already passes as this
+        // check, so the guard still judges what the server sent.
+        return isCitecheckBody(raw, citecheckId) ? normalizeCitecheck(raw) : raw;
       },
       isBody: (body) => isCitecheckBody(body, citecheckId),
       failed: (check) => new CitecheckFailedError(check),

@@ -1,10 +1,9 @@
 {
   "payload": {
     "event": "certificate.timestamped",
-    "event_id": "evt_e8fb72b0ff98153818b9c146",
+    "event_id": "evt_fd2254e805fd382669126c88",
     "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
     "verification_id": "c4ee0497",
-    "batch_id": null,
     "status": "completed",
     "coverage": {
       "status": "covered",
