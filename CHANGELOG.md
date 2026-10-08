@@ -6,22 +6,24 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [3.0.0] - unreleased
 
+Major release (3.0.0). Every field, error and webhook event reads what 2.x
+read, with one exception: the raw bodies (`LenzError.body`, a webhook event's
+`raw`) show the API's newer response shape as sent. Code that reads
+`err.body.detail` as a list, `err.body.doc_url`, `err.body.error` or
+`err.body.reset_in_seconds` must read the error's own fields instead
+(`errors`, `code`, `resetInSeconds`, `retryAfter`). See "Migrating" below.
+
 ### Changed (breaking at the wire, not in your code)
 
 - **Asks for API version `2026-10-11`.** Every request sends
   `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`), so the API answers in its
   newer response shape: one name for each field, status and error code across
   every endpoint. 2.x sent `2026-05-13`.
-- **Code written against 2.x keeps working unchanged, and keeps compiling,
-  with one exception: the raw bodies.** `LenzError.body` and a webhook
-  event's `raw` show the response as sent, in the newer shape: code that
-  reads `err.body.detail` as a list, `err.body.doc_url`, `err.body.error` or
-  `err.body.reset_in_seconds` must read the error's own fields instead
-  (`errors`, `docUrl`, `code`, `resetInSeconds`), which keep their 2.x
-  values. No exported type was narrowed, removed or made required
-  (`API_VERSION` is typed `string`, no longer the literal of its value).
-  Every 2.x field is still filled, computed from the newer response with its
-  2.x value and meaning (deprecated, as in the release before):
+- **Code written against 2.x keeps working unchanged, and keeps compiling.**
+  No exported type was narrowed, removed or made required (`API_VERSION` is
+  typed `string`, no longer the literal of its value). Every field reads the
+  value it had in 2.x, computed from the newer response with its 2.x meaning
+  (deprecated, as in the release before):
   - `assess` rows: a row without a verdict still reads `verdict: "Error"`,
     `confidence: "low"`, `error_code` (`no_claim` where the API now says
     `no_checkable_claim`) and `hint`; `identified_claims`,
@@ -62,15 +64,14 @@ All notable changes to this SDK are documented here. Format follows
 - **What the API now words or sends differently**, which no client can
   rebuild:
   - a failed check's `error` (and the `LenzPipelineError` message built from
-    it) reads its 2.x sentence where the code decides it ("Cancelled.",
-    "Not a verifiable claim.", "We hit a snag finalizing your result. Please
-    try submitting again." for a retryable `task_error`), else "Pipeline
-    stopped at: <code>"; where 2.x had several sentences for one code, the
-    SDK gives one: a failure read back from storage said "Pipeline stopped:
-    <code>.", `task_error` also said "Unexpected result." or "Unexpected
-    pipeline step: <step>" (the SDK says "Pipeline failed."), and
-    `task_stuck` also said "The task was never picked up and has been marked
-    failed." (the SDK says "...never completed...");
+    it) reads "Pipeline stopped at: <code>" or its fixed sentence, as a
+    running check's failure did; a failure read back from storage said
+    "Pipeline stopped: <code>." in 2.x. A `task_error` reads "Pipeline
+    failed." and a `task_stuck` "The task was never completed and has been
+    marked failed.", where 2.x said one of several sentences for each (e.g.
+    "Unexpected result.", "Unexpected pipeline step: <step>", "We hit a snag
+    finalizing your result. Please try submitting again.", "The task was
+    never picked up and has been marked failed.");
   - the 409 `verification_failed` from `verifications.get` carries the run's
     own `hint` (and so `fix`), where 2.x sometimes carried a generic one; a
     failed poll read back from storage can carry a `hint` 2.x left out;

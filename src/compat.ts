@@ -410,12 +410,7 @@ const LEGACY_STATUS_ERROR: Record<string, string> = {
  * took; a failure read back from storage said "Pipeline stopped: <code>.").
  * The newer shape's sentence when there is no code.
  */
-function legacyStatusError(code: unknown, detail: unknown, failureClass?: unknown): string | null {
-  // The one task_error the original poll called retryable: its own result
-  // could not be stored.
-  if (code === "task_error" && failureClass === "upstream_unavailable") {
-    return "We hit a snag finalizing your result. Please try submitting again.";
-  }
+function legacyStatusError(code: unknown, detail: unknown): string | null {
   if (typeof code === "string" && code) {
     return has(LEGACY_STATUS_ERROR, code)
       ? LEGACY_STATUS_ERROR[code]!
@@ -439,11 +434,7 @@ export function normalizeTaskStatus(body: unknown): unknown {
   if (isNewFailedStatus(body)) {
     const failure = normalizeFailureBlock(body["failure"], "not_a_claim") as Obj;
     out["failure"] = failure;
-    const sentence = legacyStatusError(
-      failure["failure_reason"],
-      failure["detail"],
-      failure["failure_class"],
-    );
+    const sentence = legacyStatusError(failure["failure_reason"], failure["detail"]);
     if (sentence !== null) fill(out, "error", sentence);
     if (typeof failure["failure_reason"] === "string") {
       fill(out, "failure_reason", failure["failure_reason"]);

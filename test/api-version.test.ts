@@ -151,7 +151,7 @@ describe("a review's failed deep check", () => {
 });
 
 describe("2.x values outside the recordings", () => {
-  it("a failed poll whose result could not be stored reads its 2.x sentence", async () => {
+  it("a failed poll reads one fixed 2.x sentence per code", async () => {
     const status = await client(200, {
       status: "failed",
       task_id: "t",
@@ -164,7 +164,7 @@ describe("2.x values outside the recordings", () => {
         docs_url: "https://lenz.io/docs/errors",
       },
     }).getStatus("t");
-    expect(status.error).toBe("We hit a snag finalizing your result. Please try submitting again.");
+    expect(status.error).toBe("Pipeline failed.");
     expect(status.failure_reason).toBe("task_error");
   });
 
