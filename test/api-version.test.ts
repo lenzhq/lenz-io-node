@@ -3,11 +3,15 @@
  * (`read-both-shapes.test.ts`) do not reach.
  */
 
+import { createHmac } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  API_VERSION,
   Lenz,
   LenzError,
+  LenzWebhooks,
   LenzRateLimitError,
   LenzValidationError,
   mapResponseToError,
@@ -59,6 +63,33 @@ describe("errors keep their 2.x fields", () => {
     expect((err as LenzValidationError).errors).toEqual([
       { type: "missing", loc: ["body", "payload", "text"], msg: "Field required" },
     ]);
+  });
+
+  it.each([
+    [500, "internal_error"],
+    [400, "invalid_request"],
+  ])("a %s with the fallback code %s reads code '' (2.x had none)", async (status, code) => {
+    const body = { detail: "Something went wrong.", code };
+    const err = await thrown(() => client(status, body).verify({ claim: "x" }));
+    expect(err.code).toBe("");
+    expect(err.body).toEqual(body);
+  });
+
+  it("a batch item's unsupported language names its item, as 2.x did", async () => {
+    const msg = "Unsupported language 'xx'. Supported: en, es.";
+    const err = await thrown(() =>
+      client(422, {
+        detail: msg,
+        code: "unsupported_language",
+        errors: [{ loc: ["body", "claims", 1, "language"], msg, type: "unsupported_language" }],
+      }).verifyBatch({ claims: [{ claim: "a" }, { claim: "b", language: "xx" }] }),
+    );
+    expect(err.message).toBe(`claims[1].${msg}`);
+    expect(err.code).toBe("");
+    expect((err as LenzValidationError).errors).toEqual([]);
+    // An original-shape body is left as it is.
+    const legacy = { detail: `claims[1].${msg}` };
+    expect(legacyErrorBody(422, legacy, { method: "POST", path: "/verify/batch" })).toEqual(legacy);
   });
 
   it("the daily /extract limit's wait reads as resetInSeconds", async () => {
@@ -116,5 +147,42 @@ describe("a review's failed deep check", () => {
     expect(out["issues"][0].failure.failure_reason).toBe("not_a_claim");
     expect(out["failures"][0].failure.failure_reason).toBe("not_a_claim");
     expect(out["failures"][1].failure.failure_reason).toBe("no_claim");
+  });
+});
+
+describe("2.x values outside the recordings", () => {
+  it("a failed poll whose result could not be stored reads its 2.x sentence", async () => {
+    const status = await client(200, {
+      status: "failed",
+      task_id: "t",
+      failure: {
+        code: "task_error",
+        detail: "The check stopped on an error on our side.",
+        hint: null,
+        failure_class: "upstream_unavailable",
+        retryable: true,
+        docs_url: "https://lenz.io/docs/errors",
+      },
+    }).getStatus("t");
+    expect(status.error).toBe("We hit a snag finalizing your result. Please try submitting again.");
+    expect(status.failure_reason).toBe("task_error");
+  });
+
+  it("API_VERSION is typed string", () => {
+    const v: string = API_VERSION;
+    expect(v).toBe("2026-10-11");
+  });
+
+  it("verification.completed with result: null gives {}, as 2.20 did", () => {
+    const raw = JSON.stringify({
+      event: "verification.completed",
+      task_id: "t",
+      status: "completed",
+      result: null,
+      attempt: 1,
+    });
+    const sig = "sha256=" + createHmac("sha256", "s").update(raw).digest("hex");
+    const ev = new LenzWebhooks({ secret: "s" }).parse(raw, { "X-Lenz-Signature": sig });
+    expect((ev as { result?: unknown }).result).toEqual({});
   });
 });

@@ -12,10 +12,16 @@ All notable changes to this SDK are documented here. Format follows
   `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`), so the API answers in its
   newer response shape: one name for each field, status and error code across
   every endpoint. 2.x sent `2026-05-13`.
-- **Code written against 2.x keeps working unchanged, and keeps compiling.**
-  No exported type was narrowed, removed or made required. Every 2.x field is
-  still filled, computed from the newer response with its 2.x value and
-  meaning (deprecated, as in the release before):
+- **Code written against 2.x keeps working unchanged, and keeps compiling,
+  with one exception: the raw bodies.** `LenzError.body` and a webhook
+  event's `raw` show the response as sent, in the newer shape: code that
+  reads `err.body.detail` as a list, `err.body.doc_url`, `err.body.error` or
+  `err.body.reset_in_seconds` must read the error's own fields instead
+  (`errors`, `docUrl`, `code`, `resetInSeconds`), which keep their 2.x
+  values. No exported type was narrowed, removed or made required
+  (`API_VERSION` is typed `string`, no longer the literal of its value).
+  Every 2.x field is still filled, computed from the newer response with its
+  2.x value and meaning (deprecated, as in the release before):
   - `assess` rows: a row without a verdict still reads `verdict: "Error"`,
     `confidence: "low"`, `error_code` (`no_claim` where the API now says
     `no_checkable_claim`) and `hint`; `identified_claims`,
@@ -56,15 +62,23 @@ All notable changes to this SDK are documented here. Format follows
 - **What the API now words or sends differently**, which no client can
   rebuild:
   - a failed check's `error` (and the `LenzPipelineError` message built from
-    it) reads "Pipeline stopped at: <code>" or its fixed sentence, as a
-    running check's failure did; a failure read back from storage said
-    "Pipeline stopped: <code>." in 2.x;
+    it) reads its 2.x sentence where the code decides it ("Cancelled.",
+    "Not a verifiable claim.", "We hit a snag finalizing your result. Please
+    try submitting again." for a retryable `task_error`), else "Pipeline
+    stopped at: <code>"; where 2.x had several sentences for one code, the
+    SDK gives one: a failure read back from storage said "Pipeline stopped:
+    <code>.", `task_error` also said "Unexpected result." or "Unexpected
+    pipeline step: <step>" (the SDK says "Pipeline failed."), and
+    `task_stuck` also said "The task was never picked up and has been marked
+    failed." (the SDK says "...never completed...");
   - the 409 `verification_failed` from `verifications.get` carries the run's
     own `hint` (and so `fix`), where 2.x sometimes carried a generic one; a
     failed poll read back from storage can carry a `hint` 2.x left out;
   - some other hints and 4xx messages are worded anew (`err.message` /
     `cause_` of a blank input or an unparseable body, a failed review's
     hint);
+  - a review row's `hint` is the fixed compound-claim sentence (or `null`),
+    not the hint stored with the review;
   - a review row stored without a failure block reads one, where 2.x read
     `failure: null`; a review's deep check's `modified_at` is computed from
     `completed_at` by the 2.x rule instead of read as stored;
@@ -75,8 +89,8 @@ All notable changes to this SDK are documented here. Format follows
     `eventId`); a repeated `verify` answered from the first one is a 202
     (the SDK returns the same receipt either way).
 - Error `code`s the API now sends where 2.x had none (`not_authenticated`,
-  `not_found`, `validation_error`, `malformed_body`, `verification_not_ready`
-  on `/ask`, ...) read as `""` on the error, per endpoint; a 422 keeps its 2.x
+  `not_found`, `validation_error`, `malformed_body`, `internal_error`,
+  `invalid_request`, `verification_not_ready` on `/ask`, ...) read as `""` on the error, per endpoint; a 422 keeps its 2.x
   `code`, message and `errors` (a schema error's field items, `/review` and
   `/citecheck`'s own envelope, `blank_item` on an `assess` list). The raw
   `body` carries the codes as sent.

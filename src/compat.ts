@@ -410,7 +410,12 @@ const LEGACY_STATUS_ERROR: Record<string, string> = {
  * took; a failure read back from storage said "Pipeline stopped: <code>.").
  * The newer shape's sentence when there is no code.
  */
-function legacyStatusError(code: unknown, detail: unknown): string | null {
+function legacyStatusError(code: unknown, detail: unknown, failureClass?: unknown): string | null {
+  // The one task_error the original poll called retryable: its own result
+  // could not be stored.
+  if (code === "task_error" && failureClass === "upstream_unavailable") {
+    return "We hit a snag finalizing your result. Please try submitting again.";
+  }
   if (typeof code === "string" && code) {
     return has(LEGACY_STATUS_ERROR, code)
       ? LEGACY_STATUS_ERROR[code]!
@@ -434,7 +439,11 @@ export function normalizeTaskStatus(body: unknown): unknown {
   if (isNewFailedStatus(body)) {
     const failure = normalizeFailureBlock(body["failure"], "not_a_claim") as Obj;
     out["failure"] = failure;
-    const sentence = legacyStatusError(failure["failure_reason"], failure["detail"]);
+    const sentence = legacyStatusError(
+      failure["failure_reason"],
+      failure["detail"],
+      failure["failure_class"],
+    );
     if (sentence !== null) fill(out, "error", sentence);
     if (typeof failure["failure_reason"] === "string") {
       fill(out, "failure_reason", failure["failure_reason"]);
@@ -552,6 +561,10 @@ const CODELESS = new Set([
   "blank_input",
   "unsupported_language",
   "too_many_items",
+  // The fallbacks for an error raised without its own code: an unhandled
+  // server error, and any other 4xx.
+  "internal_error",
+  "invalid_request",
 ]);
 
 /** A field validation item in the original order: `type`, `loc`, `msg`, then the rest. */
@@ -655,6 +668,15 @@ export function legacyErrorBody(status: number, body: unknown, req: RequestConte
       out["code"] = "blank_item";
       delete out["errors"];
       return out;
+    }
+  }
+  // A batch item's unsupported language named its item in `detail`.
+  if (status === 422 && code === "unsupported_language" && path === "/verify/batch") {
+    const loc = isObj(errors?.[0]) ? (errors[0] as Obj)["loc"] : null;
+    const detail = out["detail"];
+    if (Array.isArray(loc) && loc[1] === "claims" && typeof loc[2] === "number") {
+      const prefix = `claims[${loc[2]}].`;
+      if (typeof detail === "string" && !detail.startsWith(prefix)) out["detail"] = prefix + detail;
     }
   }
   const schemaItems =

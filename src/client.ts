@@ -121,7 +121,8 @@ import type {
  * Every method still returns the 2.x names beside the newer ones, with their
  * 2.x values (see `compat.ts`). Releases before 3.0 sent `2026-05-13`.
  */
-export const API_VERSION = "2026-10-11";
+// Typed `string`, not the literal, so a later version is not a type change.
+export const API_VERSION: string = "2026-10-11";
 export const DEFAULT_BASE_URL = "https://lenz.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 /**
