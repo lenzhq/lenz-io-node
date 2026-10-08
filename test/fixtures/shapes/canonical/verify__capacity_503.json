@@ -1,0 +1,12 @@
+{
+  "status": 503,
+  "headers": {
+    "Retry-After": "<retry_after>"
+  },
+  "body": {
+    "detail": "Lenz is at capacity right now — please resubmit after the stated wait. Nothing was charged.",
+    "code": "capacity",
+    "retry_after": "<retry_after>",
+    "docs_url": "https://lenz.io/docs/errors#unavailable"
+  }
+}

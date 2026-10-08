@@ -1,0 +1,100 @@
+{
+  "payload": {
+    "event": "verification.completed",
+    "event_id": "evt_97a75ed43661d5bab799de1a",
+    "task_id": "6e4ae0e3bfe61d91d32bddcd318af739",
+    "verification_id": "ed34dc1d",
+    "status": "completed",
+    "verification": {
+      "status": "completed",
+      "task_id": "6e4ae0e3bfe61d91d32bddcd318af739",
+      "result": {
+        "verification_id": "ed34dc1d",
+        "claim": "The Eiffel Tower is in Berlin.",
+        "visibility": "private",
+        "depth": "standard",
+        "domain": "Geography",
+        "entities": [
+          {
+            "name": "Eiffel Tower",
+            "qid": null
+          },
+          {
+            "name": "Berlin",
+            "qid": null
+          }
+        ],
+        "presumed_intent": "Check where a landmark is.",
+        "verdict": "False",
+        "confidence": "high",
+        "lenz_score": 1,
+        "key_finding": "The Eiffel Tower is in Paris.",
+        "executive_summary": "The Eiffel Tower stands in Paris, France, not in Berlin.",
+        "warnings": ["Only two sources were found."],
+        "suggested_rewrite": "The Eiffel Tower is in Paris.",
+        "created_at": "2026-03-14T09:03:03.000456+00:00",
+        "completed_at": "2026-03-14T10:02:02.000456+00:00",
+        "sources": [
+          {
+            "source_name": "Example Encyclopedia",
+            "title": "Eiffel Tower",
+            "url": "https://example.org/eiffel-tower",
+            "snippet": "The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France.",
+            "date": "2025-01-15"
+          },
+          {
+            "source_name": "Example Travel",
+            "title": "Visiting Paris",
+            "url": "https://example.com/visit-paris",
+            "snippet": "Most visitors climb the tower on their first day in Paris.",
+            "date": ""
+          }
+        ],
+        "audit": {
+          "adjudication_summary": "Both reviewers found it false.",
+          "assessments": [
+            {
+              "panelist_name": "Reviewer A",
+              "focus_area": "Evidence",
+              "score": 1,
+              "reasoning": "Both sources place the tower in Paris.",
+              "warnings": ["Example Travel is a travel blog."]
+            },
+            {
+              "panelist_name": "Reviewer B",
+              "focus_area": "Evidence",
+              "score": 2,
+              "reasoning": "The encyclopedia entry is unambiguous.",
+              "warnings": []
+            }
+          ],
+          "debate_pro": {
+            "role": "pro",
+            "argument": "Some guides place it in Berlin.",
+            "rebuttal": "None of them are reliable."
+          },
+          "debate_con": {
+            "role": "con",
+            "argument": "Every source places it in Paris.",
+            "rebuttal": "The pro case cites no source."
+          },
+          "panel_agreement": "unanimous"
+        },
+        "language": "en",
+        "coverage": {
+          "status": "uncovered",
+          "reasons": ["plan"],
+          "certificate_id": null,
+          "certificate_url": null,
+          "as_of": null,
+          "currency": "EUR",
+          "cap": 10000,
+          "aggregate": 500000,
+          "terms_version": "v1"
+        }
+      }
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-14T09:04:04.000456+00:00"
+  }
+}

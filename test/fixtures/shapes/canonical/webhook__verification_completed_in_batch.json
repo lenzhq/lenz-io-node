@@ -1,16 +1,16 @@
 {
   "payload": {
     "event": "verification.completed",
-    "event_id": "evt_fd2254e805fd382669126c88",
-    "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
-    "verification_id": "c4ee0497",
-    "batch_id": "3f0a3b05d2f4ae94",
+    "event_id": "evt_fc58f68232306fe56a7dda9d",
+    "task_id": "9f389d55a2cffcb7673321dad37fdcac",
+    "verification_id": "0c4c14a2",
+    "batch_id": "9d5ac57edfede5a1",
     "status": "completed",
     "verification": {
       "status": "completed",
-      "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
+      "task_id": "9f389d55a2cffcb7673321dad37fdcac",
       "result": {
-        "verification_id": "c4ee0497",
+        "verification_id": "0c4c14a2",
         "claim": "The Eiffel Tower is in Berlin.",
         "visibility": "private",
         "depth": "standard",
@@ -33,8 +33,8 @@
         "executive_summary": "The Eiffel Tower stands in Paris, France, not in Berlin.",
         "warnings": ["Only two sources were found."],
         "suggested_rewrite": "The Eiffel Tower is in Paris.",
-        "created_at": "2026-03-10T12:04:04.004444+00:00",
-        "completed_at": "2026-03-10T12:06:46.117666+00:00",
+        "created_at": "2026-03-14T09:04:04.000456+00:00",
+        "completed_at": "2026-03-14T10:02:02.000456+00:00",
         "sources": [
           {
             "source_name": "Example Encyclopedia",
@@ -57,14 +57,14 @@
             {
               "panelist_name": "Reviewer A",
               "focus_area": "Evidence",
-              "score": 1.0,
+              "score": 1,
               "reasoning": "Both sources place the tower in Paris.",
               "warnings": ["Example Travel is a travel blog."]
             },
             {
               "panelist_name": "Reviewer B",
               "focus_area": "Evidence",
-              "score": 2.0,
+              "score": 2,
               "reasoning": "The encyclopedia entry is unambiguous.",
               "warnings": []
             }
@@ -96,6 +96,6 @@
       }
     },
     "attempt": 1,
-    "delivered_at": "2026-03-10T12:05:05.005555+00:00"
+    "delivered_at": "2026-03-14T09:05:05.000456+00:00"
   }
 }

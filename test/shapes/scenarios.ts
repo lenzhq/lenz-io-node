@@ -23,8 +23,27 @@ export interface SdkUnderTest {
 
 export interface Recorded {
   status?: number;
+  headers?: Record<string, string>;
   body?: unknown;
   payload?: Record<string, unknown>;
+}
+
+/**
+ * Recordings no SDK method reads (OAuth, the web app's own routes, the API's
+ * index, the webhook-secret read): no scenario, so no oracle.
+ */
+export function hasScenario(name: string): boolean {
+  return !(
+    name.startsWith("account__oauth_") ||
+    name.startsWith("errors__oauth_") ||
+    name.startsWith("errors__web_") ||
+    name === "account__api_root" ||
+    name === "account__webhook_secret_oauth" ||
+    // Routes no method calls, answered in HTML by the original shape.
+    name === "review__delete_not_a_route" ||
+    name === "errors__not_found_route" ||
+    name.startsWith("errors__method_not_allowed_")
+  );
 }
 
 const SECRET = "whsec_test_shapes";
@@ -63,11 +82,19 @@ function bodyOf(r: Recorded): Record<string, unknown> {
   return (r.body ?? {}) as Record<string, unknown>;
 }
 
-/** A fetch that answers every call with the recording (submits get their receipt). */
+/**
+ * A fetch that answers every call with the recording. When the recording is a
+ * review or citation check read, the submit before it gets a receipt.
+ */
 function fetchFor(r: Recorded): typeof fetch {
   const body = bodyOf(r);
+  const isRead = "view" in body || "outcome" in body;
+  const headers = r.headers ?? {};
   return (async (url: string | URL, init?: RequestInit) => {
     const path = new URL(String(url)).pathname;
+    if (!isRead) {
+      return new Response(JSON.stringify(r.body), { status: r.status ?? 200, headers });
+    }
     if (init?.method === "POST" && path.endsWith("/review")) {
       return new Response(JSON.stringify({ review_id: body["review_id"], status: "queued" }), {
         status: 202,
@@ -81,7 +108,7 @@ function fetchFor(r: Recorded): typeof fetch {
         },
       );
     }
-    return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
+    return new Response(JSON.stringify(r.body), { status: r.status ?? 200, headers });
   }) as typeof fetch;
 }
 
@@ -108,12 +135,24 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
   if (name.startsWith("extract__")) {
     return outcome(() => client.extract({ text: "x", locate: name.includes("locate") }));
   }
-  if (name === "verify__batch_202") {
+  if (name === "verify__batch_202" || name === "verify__batch_partial_202") {
     return outcome(() => client.verifyBatch({ claims: [{ claim: "a" }, { claim: "b" }] }));
   }
   if (name === "verify__select_202") return outcome(() => client.select("t", { claims: ["a"] }));
-  if (name === "verify__submit_202") return outcome(() => client.verify({ claim: "a" }));
-  if (name.startsWith("verify__status_")) {
+  if (
+    name.startsWith("verify__submit_202") ||
+    name === "verify__stored_replay_202" ||
+    name === "verify__idempotency_key_replay" ||
+    name.startsWith("verify__implicit_")
+  ) {
+    return outcome(() => client.verify({ claim: "a" }));
+  }
+  if (name === "verify__delete_200") return outcome(() => client.verifications.delete("v"));
+  if (
+    name.startsWith("verify__status_") ||
+    name.startsWith("verify__stored_progress_") ||
+    /__poll(_|$)/.test(name)
+  ) {
     return {
       getStatus: await outcome(() => client.getStatus("t")),
       wait: await outcome(() => client.wait("t", { timeoutMs: 50 })),
@@ -121,7 +160,25 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
   }
   if (name.startsWith("verify__verification_")) return outcome(() => client.verifications.get("v"));
   if (name.startsWith("verify__list_")) return outcome(() => client.verifications.list());
-  if (name.startsWith("account__me_usage_")) return outcome(() => client.usage());
+  if (name.startsWith("account__me_usage_") || name.startsWith("account__api_version_header_")) {
+    return outcome(() => client.usage());
+  }
+  if (name.startsWith("account__library_")) return outcome(() => client.library.list());
+  if (name.startsWith("account__ask_history_")) return outcome(() => client.ask.history("v"));
+  if (name.startsWith("account__ask_send")) {
+    return outcome(() => client.ask.send("v", { message: "x" }));
+  }
+  if (name === "account__ask_reset") return outcome(() => client.ask.reset("v"));
+  if (
+    name.startsWith("review__receipt_") ||
+    name === "review__idempotent_replay_202" ||
+    name === "review__stored_replay_202"
+  ) {
+    return outcome(() => client.review({ text: "x" }));
+  }
+  if (name.startsWith("citecheck__receipt_") || name === "citecheck__idempotent_replay_202") {
+    return outcome(() => client.citecheck({ text: "x" }));
+  }
   if (name.startsWith("review__get_")) {
     return {
       getReview: await outcome(() => client.getReview("r")),
@@ -141,8 +198,39 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
           : null,
     };
   }
-  // Error responses: what the client throws.
-  return outcome(() => client.extract({ text: "x" }));
+  // Error responses: what the method that calls that endpoint throws.
+  return outcome(() => errorCall(client, name));
+}
+
+/** The call whose endpoint answered an error recording. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function errorCall(client: any, name: string): Promise<unknown> {
+  const ask =
+    /^errors__(ask_|auth_private_claim_ask_|payment_required_ask|service_unavailable_ask|not_found_ask)/;
+  if (ask.test(name)) {
+    if (name.includes("reset")) return client.ask.reset("v");
+    if (name.includes("history") || name === "errors__not_found_ask")
+      return client.ask.history("v");
+    return client.ask.send("v", { message: "x" });
+  }
+  if (name.startsWith("errors__payment_required_assess")) return client.assess({ claim: "x" });
+  if (name === "errors__payment_required_verify_batch_short" || name.startsWith("verify__batch_")) {
+    return client.verifyBatch({ claims: [{ claim: "a" }, { claim: "b" }] });
+  }
+  if (name.startsWith("verify__select_")) return client.select("t", { claims: ["a"] });
+  if (name.startsWith("verify__delete_")) return client.verifications.delete("v");
+  if (name === "errors__not_found_verification") return client.verifications.get("v");
+  if (name === "errors__not_found_verify_status") return client.getStatus("t");
+  if (name.startsWith("errors__http_error_library_")) return client.library.list();
+  if (name.startsWith("review__") || /^errors__older_(review|invalid_verdict)/.test(name)) {
+    return client.review({ text: "x" });
+  }
+  if (name.startsWith("citecheck__")) return client.citecheck({ text: "x" });
+  if (name.startsWith("extract__") || name === "errors__rate_limited_extract") {
+    return client.extract({ text: "x" });
+  }
+  if (name.startsWith("errors__auth_")) return client.usage();
+  return client.verify({ claim: "a" });
 }
 
 /** The `review` and `citecheck` inputs whose request bodies are pinned. */

@@ -1,0 +1,12 @@
+{
+  "status": 422,
+  "body": {
+    "detail": [
+      {
+        "type": "missing",
+        "loc": ["body", "payload", "claims", 1, "text"],
+        "msg": "Field required"
+      }
+    ]
+  }
+}

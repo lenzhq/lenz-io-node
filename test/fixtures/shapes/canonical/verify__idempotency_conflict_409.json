@@ -1,0 +1,8 @@
+{
+  "status": 409,
+  "body": {
+    "detail": "A request with this Idempotency-Key is already in progress.",
+    "code": "idempotency_conflict",
+    "task_id": "0fa83dae5c655ae549cb9ae405845c6e"
+  }
+}

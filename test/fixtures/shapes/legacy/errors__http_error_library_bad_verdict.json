@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "Invalid verdict label(s). Allowed: False, Mostly False, Mixed, Mostly True, True"
+  }
+}

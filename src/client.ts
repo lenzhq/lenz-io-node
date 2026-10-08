@@ -115,9 +115,13 @@ import type {
   WaitOptions,
 } from "./types.js";
 
-// Pin the API version the SDK was built against. The server logs it on
-// every request; when v2 ships, old SDKs keep getting v1 behavior.
-export const API_VERSION = "2026-05-13";
+/**
+ * The API version this release asks for, sent on every request as
+ * `X-Lenz-API-Version`: the response shape with one name for each field.
+ * Every method still returns the 2.x names beside the newer ones, with their
+ * 2.x values (see `compat.ts`). Releases before 3.0 sent `2026-05-13`.
+ */
+export const API_VERSION = "2026-10-11";
 export const DEFAULT_BASE_URL = "https://lenz.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 /**
@@ -1622,7 +1626,10 @@ export class Lenz {
       response.headers.forEach((v, k) => {
         respHeaders[k] = v;
       });
-      throw mapResponseToError(response.status, rawBody, respHeaders);
+      throw mapResponseToError(response.status, rawBody, respHeaders, {
+        method: opts.method,
+        path: opts.path,
+      });
     }
 
     if (lastErr) {

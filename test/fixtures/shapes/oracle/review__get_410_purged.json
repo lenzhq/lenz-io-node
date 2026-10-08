@@ -1,0 +1,31 @@
+{
+  "getReview": {
+    "error": {
+      "class": "LenzGoneError",
+      "message": "This review is no longer available: its account removes content after a set period.",
+      "cause_": "This review is no longer available: its account removes content after a set period.",
+      "fix": "Its account's retention period removed it. A certificate issued for it is still available.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 410,
+      "code": "purged",
+      "name": "LenzGoneError",
+      "purgedAt": "2026-03-14T09:01:01.000456Z"
+    }
+  },
+  "getReviewIssues": {
+    "error": {
+      "class": "LenzGoneError",
+      "message": "This review is no longer available: its account removes content after a set period.",
+      "cause_": "This review is no longer available: its account removes content after a set period.",
+      "fix": "Its account's retention period removed it. A certificate issued for it is still available.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 410,
+      "code": "purged",
+      "name": "LenzGoneError",
+      "purgedAt": "2026-03-14T09:01:01.000456Z"
+    }
+  },
+  "reviewAndWait": null
+}

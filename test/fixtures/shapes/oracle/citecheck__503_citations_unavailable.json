@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzAPIError",
+    "message": "Citation checking is switched off right now. Retry later; nothing was charged.",
+    "cause_": "Citation checking is switched off right now. Retry later; nothing was charged.",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors",
+    "requestId": "",
+    "statusCode": 503,
+    "code": "citations_unavailable",
+    "name": "LenzAPIError",
+    "retryAfter": 300
+  }
+}

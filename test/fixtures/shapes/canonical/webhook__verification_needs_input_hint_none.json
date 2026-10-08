@@ -1,0 +1,22 @@
+{
+  "payload": {
+    "event": "verification.needs_input",
+    "event_id": "evt_376a38812ed853345819e005",
+    "task_id": "425adff0c4b5391aab3d85e84c1deae6",
+    "status": "needs_input",
+    "verification": {
+      "status": "needs_input",
+      "task_id": "425adff0c4b5391aab3d85e84c1deae6",
+      "reason": "multi_claim",
+      "claims": [
+        {
+          "claim": "The Eiffel Tower is in Berlin.",
+          "domain": ""
+        }
+      ],
+      "hint": null
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
+  }
+}

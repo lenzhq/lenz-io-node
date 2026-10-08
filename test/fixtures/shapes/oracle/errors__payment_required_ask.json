@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzQuotaExceededError",
+    "message": "No remaining ask credits.",
+    "cause_": "No remaining ask credits.",
+    "fix": "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
+    "docUrl": "https://lenz.io/docs/billing",
+    "requestId": "",
+    "statusCode": 402,
+    "code": "no_credits",
+    "name": "LenzQuotaExceededError",
+    "upgradeUrl": "https://lenz.io/plans?wall=ff77a3b4-1ab9-4817-85dc-01012e9e1b69",
+    "remaining": 0,
+    "resetsAt": "2026-03-14T09:02:02+00:00",
+    "requested": null,
+    "creditBalance": 0,
+    "cost": 1
+  }
+}

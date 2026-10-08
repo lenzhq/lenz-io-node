@@ -66,6 +66,14 @@ shapes across languages.
 The `X-Lenz-API-Version` header is pinned per SDK release so old SDK
 clients keep working against the API version they shipped against.
 
+A release that asks for a newer API version keeps every field, type and
+error of the release before it: each old name stays, computed from the newer
+response with its old meaning (`src/compat.ts`). `test/read-both-shapes.test.ts`
+checks this against what the previous release returned for every recorded
+response (`test/fixtures/shapes/`, refreshed with `scripts/import-shapes.mjs`
+and `test/shapes/make-oracles.test.ts`), and `test/type-compat.test.ts`
+checks that code typed against the previous release still compiles.
+
 ## License
 
 MIT. By contributing you agree your contribution will be licensed under

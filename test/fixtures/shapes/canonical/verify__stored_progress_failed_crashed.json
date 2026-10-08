@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "febecbb7d596c6c1f0b0bd9c8694d512",
+    "failure": {
+      "code": "task_error",
+      "detail": "The check stopped on an error on our side.",
+      "hint": null,
+      "failure_class": "internal",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#internal"
+    }
+  }
+}

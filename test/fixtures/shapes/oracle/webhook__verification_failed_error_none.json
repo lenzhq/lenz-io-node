@@ -1,0 +1,14 @@
+{
+  "value": {
+    "event": "verification.failed",
+    "taskId": "237ee3d0d66932ed162e0fc9cb3decf3",
+    "attempt": 1,
+    "deliveredAt": "2026-03-14T09:02:02.000456+00:00",
+    "verificationId": null,
+    "batchId": null,
+    "status": "failed",
+    "error": "",
+    "failureClass": "internal",
+    "retryable": false
+  }
+}

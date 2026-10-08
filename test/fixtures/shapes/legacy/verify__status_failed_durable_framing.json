@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "df629f5d067378e519d9372345592999",
+    "error": "Pipeline stopped: framing_failed.",
+    "failure_reason": "framing_failed",
+    "failure_class": "upstream_unavailable",
+    "retryable": true,
+    "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
+  }
+}

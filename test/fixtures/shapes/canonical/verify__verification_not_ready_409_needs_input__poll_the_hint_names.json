@@ -1,0 +1,23 @@
+{
+  "status": 200,
+  "body": {
+    "status": "needs_input",
+    "task_id": "5571bcb8b1a2615c7a5b3838d18fc486",
+    "reason": "multi_claim",
+    "claims": [
+      {
+        "claim": "A.",
+        "domain": ""
+      },
+      {
+        "claim": "A happened.",
+        "domain": ""
+      },
+      {
+        "claim": "B happened.",
+        "domain": ""
+      }
+    ],
+    "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+  }
+}

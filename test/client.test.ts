@@ -144,6 +144,8 @@ describe("Construction", () => {
     await client.usage();
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("X-Lenz-API-Version")).toBe(API_VERSION);
+    // 3.0 asks for the response shape with one name for each field.
+    expect(API_VERSION).toBe("2026-10-11");
   });
 
   it("LENZ_API_KEY env var picked up", async () => {

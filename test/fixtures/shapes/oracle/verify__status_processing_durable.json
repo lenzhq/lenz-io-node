@@ -1,0 +1,29 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "processing",
+      "task_id": "390e13476cc0897af71d671f1d33145b",
+      "progress": {
+        "step": "adjudication",
+        "index": 4,
+        "total": 5,
+        "elapsed_seconds": 100,
+        "poll_after_seconds": 5
+      }
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzTimeoutError",
+      "message": "wait timed out after 50ms",
+      "cause_": "Pipeline still running server-side.",
+      "fix": "Resume via client.getStatus('t') later.",
+      "docUrl": "https://lenz.io/docs/verify#timeout",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzTimeoutError",
+      "taskId": "t"
+    }
+  }
+}

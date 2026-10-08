@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "payload.max_verifications: Extra inputs are not permitted",
+    "cause_": "payload.max_verifications: Extra inputs are not permitted",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "validation_error",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "payload", "max_verifications"],
+        "msg": "Extra inputs are not permitted"
+      }
+    ]
+  }
+}

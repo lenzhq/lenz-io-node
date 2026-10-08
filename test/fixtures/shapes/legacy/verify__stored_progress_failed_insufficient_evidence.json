@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "ca9a1e5419b6a0fdbce216a110d18bda",
+    "error": "Pipeline stopped at: research_empty",
+    "failure_reason": "research_empty",
+    "failure_class": "insufficient_evidence",
+    "retryable": false,
+    "docs_url": "https://lenz.io/docs/errors#insufficient-evidence"
+  }
+}

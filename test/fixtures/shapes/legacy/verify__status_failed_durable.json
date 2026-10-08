@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "7f19a337f65a0522a7c602baac5a780d",
+    "error": "Pipeline stopped: conclusion_failed.",
+    "failure_reason": "conclusion_failed",
+    "failure_class": "internal",
+    "retryable": false,
+    "docs_url": "https://lenz.io/docs/errors#internal"
+  }
+}

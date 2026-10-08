@@ -3,14 +3,14 @@
   "body": {
     "plan": "pro",
     "plan_label": "Pro",
-    "quota_resets_at": "2026-03-10T12:01:01.001111+00:00",
+    "quota_resets_at": "2026-03-14T09:01:01.000456+00:00",
     "credits": {
       "total": 6000,
       "used": 0,
       "remaining": 6000,
       "extra": 1000,
       "bonus": 1000,
-      "resets_at": "2026-03-10T12:01:01.001111+00:00"
+      "resets_at": "2026-03-14T09:01:01.000456+00:00"
     },
     "costs": {
       "verify": 10,

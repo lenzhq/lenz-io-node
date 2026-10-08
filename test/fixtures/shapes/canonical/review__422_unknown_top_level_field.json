@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "max_verifications: Extra inputs are not permitted",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "max_verifications"],
+        "msg": "Extra inputs are not permitted",
+        "type": "extra_forbidden"
+      }
+    ]
+  }
+}

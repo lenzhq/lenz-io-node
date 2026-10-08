@@ -1,0 +1,10 @@
+{
+  "status": 409,
+  "body": {
+    "detail": "This check is still running.",
+    "code": "verification_not_ready",
+    "status": "processing",
+    "task_id": "cb20e602fdca4c2041519968c28c06fc",
+    "hint": "Poll GET /verify/status/cb20e602fdca4c2041519968c28c06fc until it completes, then read its result."
+  }
+}

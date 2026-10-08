@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzAPIError",
+    "message": "Extraction failed",
+    "cause_": "Extraction failed",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors",
+    "requestId": "",
+    "statusCode": 502,
+    "code": "extraction_failed",
+    "name": "LenzAPIError",
+    "retryAfter": null
+  }
+}

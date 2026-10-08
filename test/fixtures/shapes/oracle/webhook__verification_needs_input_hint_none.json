@@ -1,0 +1,22 @@
+{
+  "value": {
+    "event": "verification.needs_input",
+    "taskId": "425adff0c4b5391aab3d85e84c1deae6",
+    "attempt": 1,
+    "deliveredAt": "2026-03-14T09:02:02.000456+00:00",
+    "verificationId": null,
+    "batchId": null,
+    "status": "needs_input",
+    "needsInput": {
+      "reason": "multi_claim",
+      "claims": [
+        {
+          "text": "The Eiffel Tower is in Berlin.",
+          "domain": ""
+        }
+      ],
+      "hint": null
+    },
+    "hint": ""
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "getReview": {
+    "error": {
+      "class": "LenzValidationError",
+      "message": "view: use full or issues.",
+      "cause_": "view: use full or issues.",
+      "fix": "Check the request body against the OpenAPI spec.",
+      "docUrl": "https://lenz.io/docs/errors/validation",
+      "requestId": "",
+      "statusCode": 422,
+      "code": "validation_error",
+      "name": "LenzValidationError",
+      "errors": [
+        {
+          "loc": ["query", "view"],
+          "msg": "view: use full or issues."
+        }
+      ]
+    }
+  },
+  "getReviewIssues": {
+    "error": {
+      "class": "LenzValidationError",
+      "message": "view: use full or issues.",
+      "cause_": "view: use full or issues.",
+      "fix": "Check the request body against the OpenAPI spec.",
+      "docUrl": "https://lenz.io/docs/errors/validation",
+      "requestId": "",
+      "statusCode": 422,
+      "code": "validation_error",
+      "name": "LenzValidationError",
+      "errors": [
+        {
+          "loc": ["query", "view"],
+          "msg": "view: use full or issues."
+        }
+      ]
+    }
+  },
+  "reviewAndWait": null
+}

@@ -1,0 +1,31 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "failed",
+      "task_id": "7f19a337f65a0522a7c602baac5a780d",
+      "error": "Pipeline stopped: conclusion_failed.",
+      "failure_reason": "conclusion_failed",
+      "failure_class": "internal",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#internal"
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzPipelineError",
+      "message": "Pipeline failed: Pipeline stopped: conclusion_failed.",
+      "cause_": "Pipeline stopped: conclusion_failed.",
+      "fix": "Retry with a different claim, or check status.error for the diagnostic.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzPipelineError",
+      "taskId": "t",
+      "failureReason": "conclusion_failed",
+      "failureClass": "internal",
+      "retryable": false,
+      "hint": ""
+    }
+  }
+}

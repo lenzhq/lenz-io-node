@@ -17,6 +17,7 @@
  *     Request ID: {id}
  */
 
+import { legacyErrorBody, type RequestContext } from "./compat.js";
 import type { Citecheck, ReviewFull } from "./types.js";
 
 export interface LenzErrorContext {
@@ -558,12 +559,26 @@ function getHeader(headers: Record<string, string>, name: string): string {
   return headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()] ?? "";
 }
 
+/**
+ * The typed error for an HTTP error response.
+ *
+ * `request` names the call it answered. With it, a body in the API's newer
+ * shape is read as the original one first ({@link legacyErrorBody}), so every
+ * field of the error keeps its original value: `code` is `""` where the
+ * original error had none, a schema error's `errors` are its field items,
+ * `resetInSeconds` reads the daily limit's wait. `body` is always the body as
+ * sent.
+ */
 export function mapResponseToError(
   statusCode: number,
   body: string | null | undefined,
   headers: Record<string, string> = {},
+  request?: RequestContext,
 ): LenzError {
-  const parsed = parseBody(body);
+  const raw = parseBody(body);
+  const parsed = request
+    ? (legacyErrorBody(statusCode, raw, request) as Record<string, unknown>)
+    : raw;
   const requestId = getHeader(headers, "X-Request-ID");
 
   const codeForClass = typeof parsed["code"] === "string" ? (parsed["code"] as string) : "";
@@ -610,7 +625,7 @@ export function mapResponseToError(
     requestId,
     statusCode,
     code,
-    body: parsed,
+    body: raw,
   });
 
   // Per-class enrichment

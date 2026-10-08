@@ -1,0 +1,15 @@
+{
+  "status": 422,
+  "body": {
+    "detail": [
+      {
+        "type": "literal_error",
+        "loc": ["body", "payload", "depth"],
+        "msg": "Input should be 'standard' or 'low'",
+        "ctx": {
+          "expected": "'standard' or 'low'"
+        }
+      }
+    ]
+  }
+}

@@ -1,20 +1,20 @@
 {
   "value": {
     "event": "citecheck.completed",
-    "taskId": "3f0a3b05d2f4ae94b617c3759c31238e",
+    "taskId": "701cc0e2d693c183ef18e80942bde802",
     "attempt": 1,
-    "deliveredAt": "2026-03-10T12:06:06.006666+00:00",
+    "deliveredAt": "2026-03-14T09:06:06.000456+00:00",
     "verificationId": null,
     "batchId": null,
     "status": "completed",
-    "eventId": "evt_c4ee0497cadc2f23b3fe8047",
-    "citecheckId": "0508bbf8",
+    "eventId": "evt_8132572d69cf25b2c49ba757",
+    "citecheckId": "28fbbd54",
     "citecheck": {
-      "citecheck_id": "0508bbf8",
+      "citecheck_id": "28fbbd54",
       "status": "completed",
       "outcome": "issues_found",
-      "created_at": "2026-03-10T12:04:04.004444Z",
-      "completed_at": "2026-03-10T12:05:05.005555Z",
+      "created_at": "2026-03-14T09:04:04.000456Z",
+      "completed_at": "2026-03-14T09:05:05.000456Z",
       "language": "en",
       "poll_after_seconds": null,
       "policy": {

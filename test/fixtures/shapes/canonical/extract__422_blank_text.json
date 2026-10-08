@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "Text is required.",
+    "code": "blank_input",
+    "errors": [
+      {
+        "loc": ["body", "text"],
+        "msg": "Text is required.",
+        "type": "blank_input"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "status": 402,
+  "body": {
+    "detail": "No remaining /assess units.",
+    "code": "no_credits",
+    "doc_url": "https://lenz.io/docs/errors#quota",
+    "upgrade_url": "https://lenz.io/plans?wall=4180cc73-ca15-479c-8d3e-169776a111a2",
+    "wall_id": "4180cc73-ca15-479c-8d3e-169776a111a2",
+    "remaining": 0,
+    "resets_at": "2026-03-14T09:02:02+00:00",
+    "credits_remaining": 0,
+    "cost": 1
+  }
+}

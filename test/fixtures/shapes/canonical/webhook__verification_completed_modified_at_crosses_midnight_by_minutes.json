@@ -1,15 +1,15 @@
 {
   "payload": {
     "event": "verification.completed",
-    "event_id": "evt_fd2254e805fd382669126c88",
-    "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
-    "verification_id": "c4ee0497",
+    "event_id": "evt_0d4d6dee2b7a1d8bb7d08ae7",
+    "task_id": "f11e6cb82a0f604507ed9fcc6bfef21e",
+    "verification_id": "1300ea8c",
     "status": "completed",
     "verification": {
       "status": "completed",
-      "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
+      "task_id": "f11e6cb82a0f604507ed9fcc6bfef21e",
       "result": {
-        "verification_id": "c4ee0497",
+        "verification_id": "1300ea8c",
         "claim": "The Eiffel Tower is in Berlin.",
         "visibility": "private",
         "depth": "standard",
@@ -56,14 +56,14 @@
             {
               "panelist_name": "Reviewer A",
               "focus_area": "Evidence",
-              "score": 1.0,
+              "score": 1,
               "reasoning": "Both sources place the tower in Paris.",
               "warnings": ["Example Travel is a travel blog."]
             },
             {
               "panelist_name": "Reviewer B",
               "focus_area": "Evidence",
-              "score": 2.0,
+              "score": 2,
               "reasoning": "The encyclopedia entry is unambiguous.",
               "warnings": []
             }
@@ -95,6 +95,6 @@
       }
     },
     "attempt": 1,
-    "delivered_at": "2026-03-10T12:05:05.005555+00:00"
+    "delivered_at": "2026-03-14T09:05:05.000456+00:00"
   }
 }

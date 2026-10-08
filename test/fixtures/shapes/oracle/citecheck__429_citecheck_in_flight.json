@@ -1,0 +1,17 @@
+{
+  "error": {
+    "class": "LenzRateLimitError",
+    "message": "This account already has 3 citation checks running. Wait for one to finish.",
+    "cause_": "This account already has 3 citation checks running. Wait for one to finish.",
+    "fix": "Wait Retry-After seconds and retry.",
+    "docUrl": "https://lenz.io/docs/rate-limits",
+    "requestId": "",
+    "statusCode": 429,
+    "code": "citecheck_in_flight",
+    "name": "LenzRateLimitError",
+    "retryAfter": 60,
+    "limit": null,
+    "resetInSeconds": null,
+    "upgradeUrl": ""
+  }
+}

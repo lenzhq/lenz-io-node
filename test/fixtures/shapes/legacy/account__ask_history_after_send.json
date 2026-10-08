@@ -1,0 +1,20 @@
+{
+  "status": 200,
+  "body": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Why?",
+        "created_at": "2026-03-14T09:01:01.000456+00:00"
+      },
+      {
+        "role": "expert",
+        "content": "Because **evidence**.",
+        "created_at": "2026-03-14T09:02:02.000456+00:00"
+      }
+    ],
+    "exchanges_used": 1,
+    "exchange_limit": 100,
+    "can_send": true
+  }
+}

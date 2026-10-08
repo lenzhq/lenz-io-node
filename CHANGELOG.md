@@ -4,6 +4,66 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
+## [3.0.0] - unreleased
+
+### Changed (breaking at the wire, not in your code)
+
+- **Asks for API version `2026-10-11`.** Every request sends
+  `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`), so the API answers in its
+  newer response shape: one name for each field, status and error code across
+  every endpoint. 2.x sent `2026-05-13`.
+- **Code written against 2.x keeps working unchanged, and keeps compiling.**
+  No exported type was narrowed, removed or made required. Every 2.x field is
+  still filled, computed from the newer response with its 2.x value and
+  meaning (deprecated, as in the release before):
+  - `assess` rows: a row without a verdict still reads `verdict: "Error"`,
+    `confidence: "low"`, `error_code` (`no_claim` where the API now says
+    `no_checkable_claim`) and `hint`; `identified_claims`,
+    `candidate_claims: []`; the body's `error` / `error_code`.
+  - `extract`: `status: "not_a_claim"`, `claim`, `identified_claims`,
+    `candidate_claims` and `locations`.
+  - `claim_text` on `verifyBatch` / `select` receipt items and batch results,
+    `text` on `needs_input` options.
+  - Verifications: `modified_at`, set only when the run finished on a later
+    UTC calendar day than it started (`completed_at` is the newer name).
+  - A failed `getStatus` / `wait`: `error`, `failure_reason` (`not_a_claim`),
+    `failure_class`, `retryable`, `docs_url`, `hint`, and the
+    `LenzPipelineError` built from them.
+  - `usage()`: the `verify` / `ask` / `assess` blocks, `credits.bonus` and
+    `quota_resets_at`, recomputed from `credits` and `costs`.
+  - Reviews and citation checks: `failure.failure_reason`, row `error_code` /
+    `identified_claims`, `claim_limit_reached` / `citation_limit_reached`.
+  - Webhooks: `verification.failed`'s `error` (the failure code),
+    `failureClass`, `retryable`; `verification.completed`'s `result` with
+    every field the 2.x event carried.
+  - Errors: every class and field as 2.x set it. `code` is `""` where the 2.x
+    error carried none (the API now sends one on every error), a schema
+    error's `errors` are its field items and its message "Validation failed",
+    `LenzRateLimitError.resetInSeconds` reads the daily limit's wait,
+    `LenzQuotaExceededError.creditBalance` is filled for a citation check.
+- **What shows the newer shape as sent:** `LenzError.body` and a webhook
+  event's `raw`. Code that reads those raw bodies reads the newer names
+  (`docs_url`, `retry_after`, `failure`, `claims`, ...).
+- **What the API now words or sends differently**, which no client can
+  rebuild: a failed verification's sentence (`error`, and the
+  `LenzPipelineError` message built from it) and some hints and 4xx messages
+  are worded anew; `verify`'s receipt has no `chain_id`; the `taskId` of a
+  `review.*` / `citecheck.*` webhook event is the review / citation-check id
+  (dedupe on `eventId`); a repeated `verify` answered from the first one is a
+  202 (the SDK returns the same receipt either way).
+- `webhookUrl` keeps its meaning on every method: on `verify` and
+  `verifyBatch` an unset or empty one is left out of the request (your
+  credential's default URL); on `review` and `citecheck` `""` still means no
+  webhook for this call.
+
+### Migrating
+
+Nothing is required. To move off the deprecated names, read the newer ones
+listed under "Newer field names" in the README; they are filled whichever
+shape the API sends. A response the API replays from before this version (an
+idempotent retry of an earlier call) can arrive in the original shape; the
+SDK reads both.
+
 ## [Unreleased]
 
 ### Added

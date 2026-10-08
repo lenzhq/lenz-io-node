@@ -1,0 +1,13 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "payload.pairs.0: Value error, send exactly one of url and doi",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "pairs", 0],
+        "msg": "Value error, send exactly one of url and doi"
+      }
+    ]
+  }
+}

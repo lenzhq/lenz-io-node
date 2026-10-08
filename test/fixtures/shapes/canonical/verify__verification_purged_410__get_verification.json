@@ -1,0 +1,8 @@
+{
+  "status": 410,
+  "body": {
+    "detail": "This verification is no longer available: its account removes verifications after a set period.",
+    "code": "purged",
+    "purged_at": "2026-03-14T09:01:01.000456+00:00"
+  }
+}

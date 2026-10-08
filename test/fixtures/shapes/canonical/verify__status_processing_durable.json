@@ -1,0 +1,14 @@
+{
+  "status": 200,
+  "body": {
+    "status": "processing",
+    "task_id": "390e13476cc0897af71d671f1d33145b",
+    "progress": {
+      "step": "adjudication",
+      "index": 4,
+      "total": 5,
+      "elapsed_seconds": 100,
+      "poll_after_seconds": 5
+    }
+  }
+}

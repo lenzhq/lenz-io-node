@@ -1,12 +1,12 @@
 {
   "payload": {
     "event": "verification.failed",
-    "event_id": "evt_fd2254e805fd382669126c88",
-    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "event_id": "evt_a395fa19f4a0d9c0547ee72e",
+    "task_id": "abbf9ef7492b675f71569a2da93dd5cf",
     "status": "failed",
     "verification": {
       "status": "failed",
-      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "task_id": "abbf9ef7492b675f71569a2da93dd5cf",
       "failure": {
         "code": "framing_failed",
         "detail": "The input could not be read as a claim.",
@@ -17,6 +17,6 @@
       }
     },
     "attempt": 1,
-    "delivered_at": "2026-03-10T12:02:02.002222+00:00"
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
   }
 }

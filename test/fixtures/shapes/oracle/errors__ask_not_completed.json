@@ -1,0 +1,13 @@
+{
+  "error": {
+    "class": "LenzError",
+    "message": "Ask is only available for completed verifications.",
+    "cause_": "Ask is only available for completed verifications.",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors",
+    "requestId": "",
+    "statusCode": 400,
+    "code": "",
+    "name": "LenzError"
+  }
+}

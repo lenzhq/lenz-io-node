@@ -1,0 +1,7 @@
+{
+  "status": 401,
+  "body": {
+    "detail": "The access token is invalid, expired or revoked.",
+    "code": "invalid_token"
+  }
+}

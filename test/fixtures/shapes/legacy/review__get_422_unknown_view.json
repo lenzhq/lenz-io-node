@@ -1,0 +1,13 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "view: use full or issues.",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["query", "view"],
+        "msg": "view: use full or issues."
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "payload.text: Input should be a valid string",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "text"],
+        "msg": "Input should be a valid string"
+      }
+    ]
+  }
+}

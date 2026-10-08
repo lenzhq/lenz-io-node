@@ -4,10 +4,10 @@
     "detail": "No remaining credits for citation checks.",
     "code": "no_credits",
     "doc_url": "https://lenz.io/docs/errors#quota",
-    "upgrade_url": "https://lenz.io/plans?wall=bc5bd140-b822-0842-6d24-9a938053610f",
-    "wall_id": "bc5bd140-b822-0842-6d24-9a938053610f",
+    "upgrade_url": "https://lenz.io/plans?wall=26cae252-0355-4cfd-80ae-0e5377f594d8",
+    "wall_id": "26cae252-0355-4cfd-80ae-0e5377f594d8",
     "remaining": 100,
-    "resets_at": "2026-03-10T12:02:02+00:00",
+    "resets_at": "2026-03-14T09:02:02+00:00",
     "credits_remaining": 100,
     "cost": 1
   }

@@ -1,0 +1,17 @@
+{
+  "error": {
+    "class": "LenzRateLimitError",
+    "message": "Daily /extract limit of 1000 reached for this account. A review of a URL reads the page like /extract and counts as one /extract call.",
+    "cause_": "Daily /extract limit of 1000 reached for this account. A review of a URL reads the page like /extract and counts as one /extract call.",
+    "fix": "Wait Retry-After seconds and retry.",
+    "docUrl": "https://lenz.io/docs/rate-limits",
+    "requestId": "",
+    "statusCode": 429,
+    "code": "extract_daily_limit",
+    "name": "LenzRateLimitError",
+    "retryAfter": 60,
+    "limit": 1000,
+    "resetInSeconds": 60,
+    "upgradeUrl": "https://lenz.io/plans"
+  }
+}

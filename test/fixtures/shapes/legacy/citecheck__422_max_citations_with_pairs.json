@@ -1,0 +1,13 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "payload: Value error, max_citations goes with text: every pair is checked",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload"],
+        "msg": "Value error, max_citations goes with text: every pair is checked"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "Invalid verdict label(s). Allowed: False, Mostly False, Mixed, Mostly True, True",
+    "cause_": "Invalid verdict label(s). Allowed: False, Mostly False, Mixed, Mostly True, True",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "",
+    "name": "LenzValidationError",
+    "errors": []
+  }
+}

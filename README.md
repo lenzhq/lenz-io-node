@@ -403,10 +403,14 @@ Every claim-shaped response shares these fields at top level:
 
 ### Newer field names
 
-Responses carry newer names beside the original ones. Both are filled
-whichever form of the response the API sends (except `completed_at`, which
-only the newer form carries), so code written against either keeps working; the original names are deprecated (struck through in editors)
-and kept for existing code.
+Since 3.0 the SDK asks for API version `2026-10-11` (`X-Lenz-API-Version`),
+the response shape with one name for each field. Responses carry the newer
+names beside the original ones. Both are filled whichever form of the
+response the API sends (except `completed_at`, which only the newer form
+carries), and the original names keep their 2.x values, so code written
+against 2.x keeps working unchanged; the original names are deprecated
+(struck through in editors) and kept for existing code. Only the raw bodies
+(`LenzError.body`, a webhook event's `raw`) show the response as sent.
 
 | Read this                                          | Instead of (deprecated)                             |
 | -------------------------------------------------- | --------------------------------------------------- |

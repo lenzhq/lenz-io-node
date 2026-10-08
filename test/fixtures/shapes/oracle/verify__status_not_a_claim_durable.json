@@ -1,0 +1,31 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "failed",
+      "task_id": "c2bc3a465643e76df7ebeb4a8de9f9c1",
+      "error": "Pipeline stopped: not_a_claim.",
+      "failure_reason": "not_a_claim",
+      "failure_class": "invalid_input",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#invalid-input"
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzPipelineError",
+      "message": "Pipeline failed: Pipeline stopped: not_a_claim.",
+      "cause_": "Pipeline stopped: not_a_claim.",
+      "fix": "Retry with a different claim, or check status.error for the diagnostic.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzPipelineError",
+      "taskId": "t",
+      "failureReason": "not_a_claim",
+      "failureClass": "invalid_input",
+      "retryable": false,
+      "hint": ""
+    }
+  }
+}

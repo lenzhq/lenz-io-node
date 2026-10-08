@@ -1,0 +1,22 @@
+{
+  "payload": {
+    "event": "verification.failed",
+    "event_id": "evt_02bbe75275adfedae85498bd",
+    "task_id": "237ee3d0d66932ed162e0fc9cb3decf3",
+    "status": "failed",
+    "verification": {
+      "status": "failed",
+      "task_id": "237ee3d0d66932ed162e0fc9cb3decf3",
+      "failure": {
+        "code": "",
+        "detail": "The check stopped before it finished.",
+        "hint": null,
+        "failure_class": "internal",
+        "retryable": false,
+        "docs_url": "https://lenz.io/docs/errors#internal"
+      }
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
+  }
+}

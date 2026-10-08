@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "payload: Value error, send exactly one of text and pairs",
+    "cause_": "payload: Value error, send exactly one of text and pairs",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "validation_error",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "payload"],
+        "msg": "Value error, send exactly one of text and pairs"
+      }
+    ]
+  }
+}

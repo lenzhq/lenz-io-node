@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "2688e53440f1d63c3d50dc1c788aea8f",
+    "failure": {
+      "code": "cancelled",
+      "detail": "The check was cancelled.",
+      "hint": null,
+      "failure_class": "cancelled",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#cancelled"
+    }
+  }
+}

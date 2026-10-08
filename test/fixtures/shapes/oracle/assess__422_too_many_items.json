@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "At most 20 claims per call; got 21. Split the list.",
+    "cause_": "At most 20 claims per call; got 21. Split the list.",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "too_many_items",
+    "name": "LenzValidationError",
+    "errors": []
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzQuotaExceededError",
+    "message": "Insufficient credits for batch.",
+    "cause_": "Insufficient credits for batch.",
+    "fix": "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
+    "docUrl": "https://lenz.io/docs/billing",
+    "requestId": "",
+    "statusCode": 402,
+    "code": "no_credits",
+    "name": "LenzQuotaExceededError",
+    "upgradeUrl": "https://lenz.io/plans?wall=a18389ed-6fe6-462e-806a-87aab5c6b240",
+    "remaining": 0,
+    "resetsAt": "2026-03-14T09:02:02+00:00",
+    "requested": 1,
+    "creditBalance": 0,
+    "cost": 10
+  }
+}

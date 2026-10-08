@@ -1,0 +1,17 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "depth: Input should be 'standard' or 'low'",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "depth"],
+        "msg": "Input should be 'standard' or 'low'",
+        "type": "literal_error",
+        "ctx": {
+          "expected": "'standard' or 'low'"
+        }
+      }
+    ]
+  }
+}

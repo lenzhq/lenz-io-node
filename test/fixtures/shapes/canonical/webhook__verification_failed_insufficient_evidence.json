@@ -1,0 +1,22 @@
+{
+  "payload": {
+    "event": "verification.failed",
+    "event_id": "evt_fa33371b1f8661352a4fada5",
+    "task_id": "aa473108b68ad3157a807f2c90f52c10",
+    "status": "failed",
+    "verification": {
+      "status": "failed",
+      "task_id": "aa473108b68ad3157a807f2c90f52c10",
+      "failure": {
+        "code": "research_insufficient",
+        "detail": "Too few sources about the claim were found to judge it.",
+        "hint": null,
+        "failure_class": "insufficient_evidence",
+        "retryable": false,
+        "docs_url": "https://lenz.io/docs/errors#insufficient-evidence"
+      }
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
+  }
+}

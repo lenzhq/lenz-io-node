@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "escalate.nope: Extra inputs are not permitted",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "escalate", "nope"],
+        "msg": "Extra inputs are not permitted",
+        "type": "extra_forbidden"
+      }
+    ]
+  }
+}

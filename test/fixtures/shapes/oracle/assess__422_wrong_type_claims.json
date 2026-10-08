@@ -1,0 +1,20 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "Validation failed",
+    "cause_": "Validation failed",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "type": "list_type",
+        "loc": ["body", "payload", "claims"],
+        "msg": "Input should be a valid list"
+      }
+    ]
+  }
+}

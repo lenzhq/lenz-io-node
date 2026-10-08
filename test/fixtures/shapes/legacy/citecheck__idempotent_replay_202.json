@@ -1,0 +1,10 @@
+{
+  "status": 202,
+  "headers": {
+    "Retry-After": "20"
+  },
+  "body": {
+    "citecheck_id": "c54646aa",
+    "status": "queued"
+  }
+}

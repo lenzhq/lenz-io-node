@@ -1,25 +1,26 @@
 /**
  * Both response shapes read the same.
  *
- * The API answers each request in one of two shapes (the original one, which
- * this SDK asks for, and a newer one with one name for each field). Each
- * recording in `fixtures/shapes/legacy/` has its counterpart in
- * `fixtures/shapes/canonical/`, the same response in the newer shape.
+ * The API answers each request in one of two shapes: the original one
+ * (`2026-05-13`) and a newer one with one name for each field (the version
+ * this release asks for). Each recording in `fixtures/shapes/legacy/` has its
+ * counterpart in `fixtures/shapes/canonical/`, the same response in the newer
+ * shape, both taken from the API's own contract recordings
+ * (`scripts/import-shapes.mjs`).
  *
- * `fixtures/shapes/oracle/` is what the PREVIOUS release of this SDK handed a
+ * `fixtures/shapes/oracle/` is what the last 2.x release (2.20.0) handed a
  * caller for each `legacy/` recording (`scenarios.ts`, run once against that
- * release and frozen). This release must hand over exactly the same, from
- * either shape:
+ * release and frozen: `shapes/make-oracles.test.ts`). This release must hand
+ * over exactly the same, from either shape:
  *
- * - every field the previous release returned, with the same value (deep,
- *   strict equality: `[]` is not `null`, `0` is not absent);
- * - plus only the newer names (`NEW_NAMES`), which the previous release did
- *   not have.
+ * - every field the 2.x release returned, with the same value (deep, strict
+ *   equality: `[]` is not `null`, absent is not `undefined`), in every method
+ *   result, error and webhook event;
+ * - plus only the newer names (`NEW_NAMES`), which 2.x did not have.
  *
  * The one allowance is what the SERVER sends differently in the newer shape
- * and the SDK cannot rebuild (`SERVER_DIFFERS`, newer shape only, each with
- * its reason): its own wording, a code it renamed, an internal id it no
- * longer sends.
+ * and no client can rebuild (`SERVER_DIFFERS`, newer shape only, each with
+ * its reason): its own wording, a value it no longer sends.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -55,44 +56,81 @@ const NEW_NAMES = new Set([
 
 /**
  * Per recording, the paths (dotted, `*` for an index) the server sends
- * differently in the newer shape, which no client could rebuild. Skipped for
- * the newer shape only; the original shape is compared in full.
+ * differently in the newer shape, which no client could rebuild from it.
+ * Skipped for the newer shape only; the original shape is compared in full.
+ * Every entry must still be needed (checked below), so the list cannot hide
+ * a difference the SDK could close.
  */
+const STATUS_SENTENCE = ["getStatus.value.error", "wait.error.message", "wait.error.cause_"];
+const CHAIN_ID = ["value.chain_id"];
+const TASK_ID = ["value.taskId"];
+const MESSAGE = ["error.message", "error.cause_"];
 const SERVER_DIFFERS: Record<string, string[]> = {
-  // The server's sentence for "nothing checkable" (was a short label).
-  assess__single_no_claim: ["value.error"],
-  // The failure sentence (was "Pipeline stopped at: <code>").
-  verify__status_failed_live: ["getStatus.value.error", "wait.error.message", "wait.error.cause_"],
-  verify__status_not_a_claim: ["getStatus.value.error", "wait.error.message", "wait.error.cause_"],
+  // A failed check's sentence: the original said "Pipeline stopped at:
+  // <step>" (and other fixed texts); the newer one says what happened.
+  verify__status_failed_live: STATUS_SENTENCE,
+  verify__status_failed_live_retryable: STATUS_SENTENCE,
+  verify__status_failed_durable: STATUS_SENTENCE,
+  verify__status_failed_durable_framing: STATUS_SENTENCE,
+  verify__status_cancelled_durable: STATUS_SENTENCE,
+  verify__status_task_stuck: STATUS_SENTENCE,
+  verify__status_not_a_claim: STATUS_SENTENCE,
+  verify__stored_progress_failed_crashed: STATUS_SENTENCE,
+  verify__stored_progress_failed_insufficient_evidence: STATUS_SENTENCE,
+  // ... and a stored not-a-claim failure carries its hint, which the
+  // original left out.
+  verify__status_not_a_claim_durable: [
+    ...STATUS_SENTENCE,
+    "getStatus.value.hint",
+    "wait.error.hint",
+  ],
   // The server words the durable not-a-claim hint anew.
   verify__verification_failed_409_not_a_claim_durable: ["error.hint", "error.fix"],
-  // A 422 is `{detail: string, code, errors[]}`: the message is the server's
-  // sentence (a list `detail` read as "Validation failed"), and `code` /
-  // `errors` are what the server now sends.
-  errors__validation_missing_field_hint: ["error.message", "error.cause_", "error.code"],
-  assess__422_blank_item: ["error.code", "error.errors"],
+  // A 4xx sentence the server words anew.
+  assess__422_blank_text: MESSAGE,
+  verify__blank_claim_422: MESSAGE,
+  verify__select_empty_422: MESSAGE,
+  errors__validation_malformed_json: MESSAGE,
+  // A failed review's hint the server words anew.
+  review__get_failed_every_assessment_failed: [
+    "getReview.value.failure.hint",
+    "getReviewIssues.value.failure.hint",
+    "reviewAndWait.error.fix",
+    "reviewAndWait.error.hint",
+    "reviewAndWait.error.review.failure.hint",
+  ],
   // A row hint the server stored with the review; the newer shape has none.
   review__get_assessment_rows_full_fields: [
     "getReview.value.claims.*.assessment.hint",
     "getReviewIssues.value.claims.*.assessment.hint",
     "reviewAndWait.value.claims.*.assessment.hint",
   ],
+  // An extraction the server first read as not a claim, then found one in:
+  // the original kept `not_a_claim`, the newer shape says `ready`.
+  extract__not_a_claim_beside_claims: ["value.status"],
   // An internal id the newer shape no longer sends (never accepted anywhere).
-  verify__submit_202: ["value.chain_id"],
+  verify__submit_202: CHAIN_ID,
+  verify__submit_202_options: CHAIN_ID,
+  verify__submit_202_text_alias: CHAIN_ID,
+  verify__idempotency_key_replay: CHAIN_ID,
+  verify__implicit_repeat_replay: CHAIN_ID,
   // The delivery id the newer review / citation-check events no longer carry
   // (never pollable; dedupe on `eventId`): `taskId` reads the review /
   // citation-check id instead.
-  webhook__review_failed: ["value.taskId"],
-  webhook__review_completed: ["value.taskId"],
-  webhook__citecheck_failed: ["value.taskId"],
-  webhook__citecheck_completed: ["value.taskId"],
+  webhook__review_failed: TASK_ID,
+  webhook__review_completed: TASK_ID,
+  webhook__review_completed_key_default_url: TASK_ID,
+  webhook__review_completed_oversized_rebuilt: TASK_ID,
+  webhook__citecheck_failed: TASK_ID,
+  webhook__citecheck_completed: TASK_ID,
 };
 
+function pattern(p: string): RegExp {
+  return new RegExp("^" + p.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
+}
+
 function differs(name: string, path: string): boolean {
-  return (SERVER_DIFFERS[name] ?? []).some((p) => {
-    const re = new RegExp("^" + p.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
-    return re.test(path);
-  });
+  return (SERVER_DIFFERS[name] ?? []).some((p) => pattern(p).test(path));
 }
 
 /** Every difference from the oracle, as `path: what` lines. */
@@ -125,7 +163,9 @@ function differences(
       else if (key in a) out.push(...differences(a[key], o[key], name, canonical, here(key)));
     }
     for (const key of Object.keys(a)) {
-      if (!(key in o) && !NEW_NAMES.has(key)) out.push(`${here(key)}: unexpected new field`);
+      if (!(key in o) && !NEW_NAMES.has(key) && !(canonical && differs(name, here(key)))) {
+        out.push(`${here(key)}: unexpected new field`);
+      }
     }
     return out;
   }
@@ -160,4 +200,14 @@ describe("both response shapes give what the previous release gave", () => {
       expect(differences(actual, oracle, name, shape === "canonical").join("\n")).toBe("");
     });
   }
+
+  it.each(Object.keys(SERVER_DIFFERS))("every allowance for %s is still needed", async (name) => {
+    const recorded = load("canonical", `${name}.json`) as Recorded;
+    const actual = await runScenario(sdk as unknown as SdkUnderTest, name, recorded);
+    const paths = differences(actual, load("oracle", `${name}.json`), name, false).map((line) =>
+      line.slice(0, line.indexOf(": ")),
+    );
+    const unused = SERVER_DIFFERS[name]!.filter((p) => !paths.some((at) => pattern(p).test(at)));
+    expect(unused).toEqual([]);
+  });
 });

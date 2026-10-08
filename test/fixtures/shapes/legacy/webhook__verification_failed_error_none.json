@@ -1,0 +1,17 @@
+{
+  "payload": {
+    "event": "verification.failed",
+    "verification_id": null,
+    "task_id": "237ee3d0d66932ed162e0fc9cb3decf3",
+    "batch_id": null,
+    "status": "failed",
+    "result": null,
+    "needs_input": null,
+    "coverage": null,
+    "error": null,
+    "failure_class": "internal",
+    "retryable": false,
+    "attempt": 1,
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
+  }
+}

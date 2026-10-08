@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "7f19a337f65a0522a7c602baac5a780d",
+    "failure": {
+      "code": "conclusion_failed",
+      "detail": "The check stopped while writing the conclusion.",
+      "hint": null,
+      "failure_class": "internal",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#internal"
+    }
+  }
+}

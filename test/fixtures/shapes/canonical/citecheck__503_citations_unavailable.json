@@ -1,0 +1,12 @@
+{
+  "status": 503,
+  "headers": {
+    "Retry-After": "300"
+  },
+  "body": {
+    "detail": "Citation checking is switched off right now. Retry later; nothing was charged.",
+    "code": "citations_unavailable",
+    "retry_after": 300,
+    "docs_url": "https://lenz.io/docs/errors#unavailable"
+  }
+}

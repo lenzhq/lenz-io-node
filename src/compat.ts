@@ -2,9 +2,10 @@
  * Reads both shapes of the API's responses.
  *
  * The API serves each response in one of two shapes, chosen per request by
- * the `X-Lenz-API-Version` header: the original one (`2026-05-13`, the
- * version this SDK sends) and a newer one with one name for each field across
- * every endpoint.
+ * the `X-Lenz-API-Version` header: the newer one with one name for each field
+ * across every endpoint (the version this SDK sends) and the original one
+ * (`2026-05-13`, which 2.x releases sent, and which a stored response replayed
+ * for an idempotent retry can still carry).
  *
  * Every function here recognises the newer shape only by what that shape
  * alone carries (per response type, below). Then:
@@ -26,6 +27,9 @@ type Obj = Record<string, unknown>;
 
 /** The newer shape's one code for "nothing in the input can be checked". */
 export const NO_CHECKABLE_CLAIM = "no_checkable_claim";
+
+/** The original `/assess` body's `error` when nothing in it could be checked. */
+const LEGACY_NO_CLAIM_ERROR = "No verifiable claim detected";
 
 /** The original `/assess` row's hint on a compound item, assessed on its main claim. */
 const COMPOUND_HINT =
@@ -163,7 +167,8 @@ export function normalizeAssess(body: unknown): unknown {
     const failure = normalizeFailureBlock(body["failure"], "no_claim");
     out["failure"] = failure;
     if (isObj(failure)) {
-      fill(out, "error", str(failure["detail"]));
+      // The original sentence, whatever the newer `detail` says.
+      fill(out, "error", LEGACY_NO_CLAIM_ERROR);
       fill(out, "error_code", legacyCode(failure["code"], "no_claim") ?? "");
       fill(out, "candidate_claims", []);
     } else {
@@ -216,7 +221,8 @@ export function normalizeExtract(body: unknown, locate?: boolean): unknown {
     fill(out, "claim", str(claims[0]?.["claim"]) ?? "");
     fill(out, "identified_claims", claims.length > 1 ? claims.map((c) => c["claim"]) : []);
     fill(out, "candidate_claims", []);
-    const located = claims.some((c) => c["positions"] !== null && c["positions"] !== undefined);
+    // A list only when every claim was located, as the original built it.
+    const located = claims.length > 0 && claims.every((c) => Array.isArray(c["positions"]));
     fill(
       out,
       "locations",
@@ -290,6 +296,95 @@ function isNewVerification(v: unknown): v is Obj {
 export function normalizeVerification(v: unknown): unknown {
   if (!isNewVerification(v)) return v;
   return { ...v, modified_at: legacyModifiedAt(v["created_at"], v["completed_at"]) };
+}
+
+/** `o` with every missing key of `defaults` (each a fresh copy). */
+function withDefaults(o: Obj, defaults: Obj): Obj {
+  const out: Obj = { ...o };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!has(out, key))
+      out[key] = value !== null && typeof value === "object" ? structuredClone(value) : value;
+  }
+  return out;
+}
+
+const DEBATE_SIDE = { role: "", argument: "", rebuttal: "" };
+const SOURCE = {
+  source_name: "",
+  title: "",
+  url: "",
+  snippet: "",
+  date: "",
+};
+const ASSESSMENT = {
+  panelist_name: "",
+  focus_area: "",
+  score: null,
+  reasoning: "",
+  warnings: [],
+};
+const COVERAGE = {
+  status: "uncovered",
+  reasons: [],
+  certificate_id: null,
+  certificate_url: null,
+  as_of: null,
+  currency: "",
+  cap: 0,
+  aggregate: 0,
+  terms_version: "",
+};
+const AUDIT = {
+  adjudication_summary: "",
+  assessments: [],
+  debate_pro: DEBATE_SIDE,
+  debate_con: DEBATE_SIDE,
+  panel_agreement: "",
+};
+const VERIFICATION = {
+  visibility: "private",
+  depth: "standard",
+  domain: "",
+  entities: [],
+  presumed_intent: "",
+  verdict: "",
+  confidence: "low",
+  lenz_score: null,
+  key_finding: "",
+  executive_summary: "",
+  warnings: [],
+  suggested_rewrite: null,
+  created_at: "",
+  sources: [],
+  audit: AUDIT,
+  coverage: null,
+};
+
+const eachObj = (v: unknown, fn: (o: Obj) => Obj): unknown =>
+  Array.isArray(v) ? v.map((item) => (isObj(item) ? fn(item) : item)) : v;
+
+/**
+ * A `verification.completed` webhook's result with every field the original
+ * event carried, filled with its default where the newer event leaves it out
+ * (the newer event sends the result as stored; the original one sent every
+ * field), and `modified_at` by its original rule.
+ */
+export function webhookResultDefaults(result: unknown): unknown {
+  const normalized = normalizeVerification(result);
+  if (!isObj(normalized)) return normalized;
+  const out = withDefaults(normalized, { ...VERIFICATION, modified_at: null });
+  out["entities"] = eachObj(out["entities"], (e) => withDefaults(e, { qid: null }));
+  out["sources"] = eachObj(out["sources"], (src) => withDefaults(src, SOURCE));
+  if (isObj(out["audit"])) {
+    const audit = withDefaults(out["audit"], AUDIT);
+    audit["assessments"] = eachObj(audit["assessments"], (a) => withDefaults(a, ASSESSMENT));
+    for (const side of ["debate_pro", "debate_con"]) {
+      if (isObj(audit[side])) audit[side] = withDefaults(audit[side] as Obj, DEBATE_SIDE);
+    }
+    out["audit"] = audit;
+  }
+  if (isObj(out["coverage"])) out["coverage"] = withDefaults(out["coverage"], COVERAGE);
+  return out;
 }
 
 /** A page of verifications (`verifications.list`, `library.list`). */
@@ -400,6 +495,171 @@ export function normalizeUsage(body: unknown): unknown {
   return out;
 }
 
+// ── Error bodies ──
+
+/** The call an error answered: its method and path (below the base URL). */
+export interface RequestContext {
+  method: string;
+  path: string;
+}
+
+/** `/review`, `/citecheck` and their reads keep their own error envelope. */
+function isReviewFamily(path: string): boolean {
+  return (
+    path === "/review" ||
+    path.startsWith("/reviews/") ||
+    path === "/citecheck" ||
+    path.startsWith("/citechecks/")
+  );
+}
+
+/**
+ * Codes the newer shape sends where the original error carried no `code`
+ * (outside `/review` and `/citecheck`, which always sent one).
+ */
+const CODELESS = new Set([
+  "not_authenticated",
+  "not_found",
+  "idempotency_body_mismatch",
+  "idempotency_conflict",
+  "malformed_body",
+  "method_not_allowed",
+  "validation_error",
+  "blank_input",
+  "unsupported_language",
+  "too_many_items",
+]);
+
+/** A field validation item in the original order: `type`, `loc`, `msg`, then the rest. */
+function validationItem(item: unknown): unknown {
+  if (!isObj(item)) return item;
+  const out: Obj = {};
+  for (const key of ["type", "loc", "msg"]) if (has(item, key)) out[key] = item[key];
+  for (const [key, value] of Object.entries(item)) if (!has(out, key)) out[key] = value;
+  return out;
+}
+
+/** `old` renamed to `new` when only the newer name is there. */
+function renameKey(o: Obj, from: string, to: string): void {
+  if (has(o, from) && !has(o, to)) {
+    o[to] = o[from];
+    delete o[from];
+  }
+}
+
+/** The original names of a wait and a docs link. */
+function legacyWaitAndLink(o: Obj, status: number): void {
+  const code = o["code"];
+  if (status === 429 && code === "extract_daily_limit")
+    renameKey(o, "retry_after", "reset_in_seconds");
+  if (status === 429 && (code === "review_in_flight" || code === "citecheck_in_flight")) {
+    renameKey(o, "retry_after", "retry_after_seconds");
+  }
+  if (status === 402 || status === 429 || status === 503) renameKey(o, "docs_url", "doc_url");
+}
+
+/**
+ * An error body read as the original shape: what the error classes are built
+ * from, so every field they carry keeps its original value and meaning. Each
+ * rule matches only what the newer shape alone sends (by endpoint), so an
+ * original-shape body comes back unchanged.
+ *
+ * - outside `/review` and `/citecheck`: no `errors` list; no `code` where the
+ *   original had none; a schema error's `detail` is the list of field items;
+ *   `/assess`'s blank list item is `blank_item`;
+ * - `/review` and `/citecheck`: field items `{loc, msg}`, the schema error's
+ *   `detail` spelled from the field's path, a blank text or an unsupported
+ *   language on `/review` is `validation_error`;
+ * - waits and links by their original names (`reset_in_seconds`,
+ *   `retry_after_seconds`, `doc_url`); a citation check's 402 states its
+ *   pool balance (`credits_remaining`, one credit per citation).
+ */
+export function legacyErrorBody(status: number, body: unknown, req: RequestContext): unknown {
+  if (!isObj(body)) return body;
+  const out: Obj = { ...body };
+  const code = typeof out["code"] === "string" ? (out["code"] as string) : "";
+  const errors = Array.isArray(out["errors"]) ? (out["errors"] as unknown[]) : null;
+  const path = req.path.split("?")[0] ?? "";
+  if (isReviewFamily(path)) {
+    // A missing or unknown credential is refused before the endpoint runs.
+    if (code === "not_authenticated") delete out["code"];
+    if (status === 422) {
+      const detail = out["detail"];
+      if (req.method === "POST" && path === "/review" && typeof detail === "string") {
+        if (code === "blank_input" || code === "unsupported_language") {
+          out["code"] = "validation_error";
+          if (code === "unsupported_language" && !detail.startsWith("language: ")) {
+            out["detail"] = `language: ${detail}`;
+          }
+        }
+      }
+      if (errors) {
+        const first = errors.find(isObj);
+        const loc = first?.["loc"];
+        if (Array.isArray(loc) && loc[1] === "payload" && typeof first?.["msg"] === "string") {
+          out["detail"] = `${loc.slice(1).join(".")}: ${first["msg"]}`;
+        }
+        out["errors"] = errors.map((item) => {
+          if (!isObj(item)) return item;
+          const o: Obj = {};
+          if (has(item, "loc")) o["loc"] = item["loc"];
+          if (has(item, "msg")) {
+            o["msg"] =
+              item["msg"] === detail && out["detail"] !== detail ? out["detail"] : item["msg"];
+          }
+          return o;
+        });
+      } else if (code === "idempotency_body_mismatch") {
+        out["errors"] = [{ loc: ["header"], msg: out["detail"] }];
+      }
+    }
+    if (
+      status === 402 &&
+      req.method === "POST" &&
+      path === "/citecheck" &&
+      !has(out, "credits_remaining") &&
+      typeof out["remaining"] === "number"
+    ) {
+      out["credits_remaining"] = out["remaining"];
+    }
+    legacyWaitAndLink(out, status);
+    return out;
+  }
+  if (status === 422 && code === "blank_input" && path === "/assess") {
+    const loc = isObj(errors?.[0]) ? (errors[0] as Obj)["loc"] : null;
+    if (Array.isArray(loc) && loc.includes("claims")) {
+      out["code"] = "blank_item";
+      delete out["errors"];
+      return out;
+    }
+  }
+  const schemaItems =
+    status === 422 &&
+    code === "validation_error" &&
+    errors !== null &&
+    errors.length > 0 &&
+    errors.every((e) => isObj(e) && typeof e["type"] === "string" && e["type"] !== code);
+  if (schemaItems) {
+    const legacy: Obj = { detail: errors.map(validationItem) };
+    for (const [key, value] of Object.entries(out)) {
+      if (key === "detail" || key === "code" || key === "errors") continue;
+      legacy[key === "docs_url" ? "doc_url" : key] = value;
+    }
+    return legacy;
+  }
+  // `/assess` sent `too_many_items`; `/ask` sent no code for an unfinished
+  // verification (GET /verifications/{id} still sends `verification_not_ready`).
+  const codeless =
+    (CODELESS.has(code) && !(code === "too_many_items" && path === "/assess")) ||
+    (code === "verification_not_ready" && path.startsWith("/ask/"));
+  if (codeless) {
+    delete out["code"];
+  }
+  delete out["errors"];
+  legacyWaitAndLink(out, status);
+  return out;
+}
+
 // ── Reviews and citation checks ──
 
 /** Replace `obj[key]` with `fn(obj[key])`, only when the key is there. */
@@ -408,13 +668,19 @@ function update(obj: Obj, key: string, fn: (v: unknown) => unknown): void {
 }
 
 function mapList(fn: (item: unknown) => unknown): (v: unknown) => unknown {
-  return (v) => (Array.isArray(v) ? v.map(fn) : v);
+  return (v) => (Array.isArray(v) ? v.map((item) => fn(item)) : v);
 }
 
-function withFailure(v: unknown): unknown {
+/**
+ * `v.failure` in both readings. `word`: the original word for "nothing
+ * checkable" (`not_a_claim` on a verification, `no_claim` elsewhere).
+ */
+function withFailure(v: unknown, word: "not_a_claim" | "no_claim" = "no_claim"): unknown {
   if (!isObj(v) || !has(v, "failure")) return v;
-  return { ...v, failure: normalizeFailureBlock(v["failure"]) };
+  return { ...v, failure: normalizeFailureBlock(v["failure"], word) };
 }
+
+const withVerificationFailure = (v: unknown): unknown => withFailure(v, "not_a_claim");
 
 /** `citation_limit_reached` and `citation_limit_exceeded`: one rule, two names. */
 function citationLimitBothNames(s: Obj): void {
@@ -511,8 +777,15 @@ export function normalizeReview(body: unknown): unknown {
   const b: Obj = { ...body };
   update(b, "summary", (s) => normalizeReviewSummary(s, b["more_claims"]));
   update(b, "failure", (f) => normalizeFailureBlock(f));
-  update(b, "failures", mapList(withFailure));
-  update(b, "issues", mapList(withFailure));
+  update(
+    b,
+    "failures",
+    mapList((f) =>
+      isObj(f) && f["stage"] === "verification" ? withVerificationFailure(f) : withFailure(f),
+    ),
+  );
+  // Issues are what the deep checks found.
+  update(b, "issues", mapList(withVerificationFailure));
   update(
     b,
     "claims",
@@ -521,7 +794,7 @@ export function normalizeReview(body: unknown): unknown {
       const r: Obj = { ...row };
       update(r, "assessment", normalizeReviewAssessment);
       if (isObj(r["verification"])) {
-        r["verification"] = withFailure(normalizeVerification(r["verification"]));
+        r["verification"] = withVerificationFailure(normalizeVerification(r["verification"]));
       }
       return r;
     }),

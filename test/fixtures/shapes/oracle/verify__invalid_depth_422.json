@@ -1,0 +1,23 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "Validation failed",
+    "cause_": "Validation failed",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "type": "literal_error",
+        "loc": ["body", "payload", "depth"],
+        "msg": "Input should be 'standard' or 'low'",
+        "ctx": {
+          "expected": "'standard' or 'low'"
+        }
+      }
+    ]
+  }
+}

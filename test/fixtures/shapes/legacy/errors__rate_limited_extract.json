@@ -1,5 +1,8 @@
 {
   "status": 429,
+  "headers": {
+    "Retry-After": "900"
+  },
   "body": {
     "detail": "Daily /extract limit of 1000 reached for this account. The allowance is shared by every key on the account and by extractions run from the Lenz website.",
     "code": "extract_daily_limit",

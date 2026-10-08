@@ -1,0 +1,31 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "failed",
+      "task_id": "2688e53440f1d63c3d50dc1c788aea8f",
+      "error": "Cancelled.",
+      "failure_reason": "cancelled",
+      "failure_class": "cancelled",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#cancelled"
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzPipelineError",
+      "message": "Pipeline failed: Cancelled.",
+      "cause_": "Cancelled.",
+      "fix": "Retry with a different claim, or check status.error for the diagnostic.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzPipelineError",
+      "taskId": "t",
+      "failureReason": "cancelled",
+      "failureClass": "cancelled",
+      "retryable": false,
+      "hint": ""
+    }
+  }
+}

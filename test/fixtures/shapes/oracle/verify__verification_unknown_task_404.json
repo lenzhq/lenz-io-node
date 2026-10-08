@@ -1,0 +1,13 @@
+{
+  "error": {
+    "class": "LenzError",
+    "message": "Not found.",
+    "cause_": "Not found.",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors",
+    "requestId": "",
+    "statusCode": 404,
+    "code": "",
+    "name": "LenzError"
+  }
+}

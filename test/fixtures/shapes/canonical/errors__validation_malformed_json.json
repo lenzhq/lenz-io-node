@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "body": {
+    "detail": "The request body is not valid JSON.",
+    "code": "malformed_body"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "Send the page's text, with its links, to check the sources it cites.",
+    "cause_": "Send the page's text, with its links, to check the sources it cites.",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "url_input",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "text"],
+        "msg": "Send the page's text, with its links, to check the sources it cites."
+      }
+    ]
+  }
+}

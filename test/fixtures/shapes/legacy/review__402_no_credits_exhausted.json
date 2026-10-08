@@ -1,0 +1,14 @@
+{
+  "status": 402,
+  "body": {
+    "detail": "No remaining credits to assess the draft.",
+    "code": "no_credits",
+    "doc_url": "https://lenz.io/docs/errors#quota",
+    "upgrade_url": "https://lenz.io/plans?wall=3dd47c98-7059-4731-8ac3-cda4d6079b34",
+    "wall_id": "3dd47c98-7059-4731-8ac3-cda4d6079b34",
+    "remaining": 0,
+    "resets_at": "2026-03-14T09:02:02+00:00",
+    "credits_remaining": 0,
+    "cost": 1
+  }
+}

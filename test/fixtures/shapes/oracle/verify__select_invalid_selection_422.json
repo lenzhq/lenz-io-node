@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "Selected text was not one of the offered claims: 'The Moon is made of cheese.'",
+    "cause_": "Selected text was not one of the offered claims: 'The Moon is made of cheese.'",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "invalid_selection",
+    "name": "LenzValidationError",
+    "errors": []
+  }
+}

@@ -21,7 +21,12 @@ import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
-import { normalizeOptions, normalizeTaskStatus, normalizeVerification } from "./compat.js";
+import {
+  normalizeOptions,
+  normalizeTaskStatus,
+  normalizeVerification,
+  webhookResultDefaults,
+} from "./compat.js";
 import type {
   Citecheck,
   Coverage,
@@ -241,6 +246,10 @@ export type WebhookEvent =
   | CertificateTimestamped
   | WebhookEventBase; // catch-all for forward compatibility
 
+function has(o: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(o, key);
+}
+
 function asObject(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
@@ -305,7 +314,11 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     raw: payload,
   };
   if (event === "verification.completed") {
-    const result = payload["result"] ?? verification?.result;
+    // The newer event's result has only the fields stored; the original
+    // event carried every field, with its default where none was stored.
+    const result = has(payload, "result")
+      ? payload["result"]
+      : webhookResultDefaults(verification?.result);
     return {
       ...base,
       event: "verification.completed",

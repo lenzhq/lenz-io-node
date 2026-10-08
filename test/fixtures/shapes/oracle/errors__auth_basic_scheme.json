@@ -1,0 +1,13 @@
+{
+  "error": {
+    "class": "LenzAuthError",
+    "message": "Unauthorized",
+    "cause_": "Unauthorized",
+    "fix": "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
+    "docUrl": "https://lenz.io/docs/auth",
+    "requestId": "",
+    "statusCode": 401,
+    "code": "",
+    "name": "LenzAuthError"
+  }
+}
