@@ -1,0 +1,15 @@
+{
+  "value": {
+    "batch_id": "c4ee0497cadc2f23",
+    "items": [
+      {
+        "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
+        "claim_text": "The Earth is round."
+      },
+      {
+        "task_id": "3f0a3b05d2f4ae94b617c3759c31238e",
+        "claim_text": "Water boils at 100C at sea level."
+      }
+    ]
+  }
+}

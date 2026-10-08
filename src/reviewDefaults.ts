@@ -1,10 +1,13 @@
+import { normalizeCitecheck, normalizeReview } from "./compat.js";
+
 /**
  * The same for a citation check's body: `[]` for the three lists, `null` for
  * `more_citations`. Keys the server sent are never touched. Returns a copy.
  */
 export function withCitecheckDefaults<T>(body: T): T {
-  if (!isObject(body)) return body;
-  const b: Record<string, unknown> = { ...body };
+  const normalized = normalizeCitecheck(body);
+  if (!isObject(normalized)) return body;
+  const b: Record<string, unknown> = { ...normalized };
   for (const key of ["citations", "citation_issues", "citation_failures"]) b[key] ??= [];
   if (b["more_citations"] === undefined) b["more_citations"] = null;
   return b as T;
@@ -32,7 +35,9 @@ function withNull(v: unknown, key: string): unknown {
  */
 export function withReviewDefaults<T>(body: T): T {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
-  const b = { ...(body as Record<string, unknown>) };
+  // Both response shapes first, so a default never sits beside a value the
+  // server sent under the other name.
+  const b = { ...(normalizeReview(body) as Record<string, unknown>) };
   b["citation_issues"] ??= [];
   b["citation_failures"] ??= [];
   // Only the full view carries rows: `citations` sits beside `claims`.

@@ -1,0 +1,22 @@
+{
+  "payload": {
+    "event": "verification.failed",
+    "event_id": "evt_fd2254e805fd382669126c88",
+    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "status": "failed",
+    "verification": {
+      "status": "failed",
+      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "failure": {
+        "code": "no_checkable_claim",
+        "detail": "No claim in the input could be checked against public evidence.",
+        "hint": "It is a request to write an essay. Send one factual claim, or run the text through /extract to enumerate its claims.",
+        "failure_class": "invalid_input",
+        "retryable": false,
+        "docs_url": "https://lenz.io/docs/errors#invalid-input"
+      }
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-10T12:02:02.002222+00:00"
+  }
+}

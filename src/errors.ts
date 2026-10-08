@@ -538,6 +538,11 @@ function optString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/** An error body in the API's newer shape: it links `docs_url`, never `doc_url`. */
+function isNewErrorShape(parsed: Record<string, unknown>): boolean {
+  return "docs_url" in parsed && !("doc_url" in parsed);
+}
+
 function parseBody(raw: string | undefined | null): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -621,12 +626,26 @@ export function mapResponseToError(
       err.status = optString(parsed["status"]);
       err.fix = err.hint || "Wait for the run with client.wait(taskId), then read its result.";
     } else {
-      err.failureReason = optString(parsed["failure_reason"]);
-      err.failureClass = optString(parsed["failure_class"]);
+      // The newer response shape nests these in `failure` (its `code` says
+      // `no_checkable_claim` where the original says `not_a_claim`). Read
+      // there only when the body is in that shape; the original's flat fields
+      // are read exactly as before.
+      const nested = parsed["failure"];
+      const failure =
+        nested &&
+        typeof nested === "object" &&
+        !Array.isArray(nested) &&
+        !("failure_reason" in parsed)
+          ? (nested as Record<string, unknown>)
+          : null;
+      const source = failure ?? parsed;
+      const reason = failure ? optString(failure["code"]) : optString(parsed["failure_reason"]);
+      err.failureReason = reason === "no_checkable_claim" ? "not_a_claim" : reason;
+      err.failureClass = optString(source["failure_class"]);
       // Only a real boolean is a retry signal, as in the wait path.
-      const retryable = parsed["retryable"];
+      const retryable = source["retryable"];
       err.retryable = typeof retryable === "boolean" ? retryable : null;
-      err.docUrl = optString(parsed["docs_url"]) || err.docUrl;
+      err.docUrl = optString(source["docs_url"]) || err.docUrl;
       err.fix =
         err.hint ||
         (err.retryable
@@ -655,6 +674,14 @@ export function mapResponseToError(
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
     err.remaining = optNumber(parsed["remaining"]);
     err.requested = optNumber(parsed["requested"]);
+    if (err.remaining === null && isNewErrorShape(parsed)) {
+      // The newer shape may send only the pool: the capability's unit is the
+      // price of one of the units requested.
+      const balance = optNumber(parsed["credits_remaining"]);
+      const cost = optNumber(parsed["cost"]);
+      const unit = cost !== null && err.requested ? cost / err.requested : cost;
+      if (balance !== null && unit) err.remaining = Math.floor(balance / unit);
+    }
     // Pool units. Assigned to their own fields, never folded into
     // `remaining` — that one is in the capability's unit and callers branch
     // on it.
@@ -670,7 +697,19 @@ export function mapResponseToError(
     }
   } else if (err instanceof LenzRateLimitError) {
     err.limit = optNumber(parsed["limit"]);
+    // The newer response shape names the wait `retry_after` only. The
+    // in-flight 429s never carried `reset_in_seconds`, so they keep `null`.
     err.resetInSeconds = optNumber(parsed["reset_in_seconds"]);
+    // The newer response shape (it links `docs_url`, never `doc_url`) names
+    // the daily cap's wait `retry_after`. A 429 that never carried
+    // `reset_in_seconds` (the in-flight ones, no doc link) keeps `null`.
+    if (
+      err.resetInSeconds === null &&
+      isNewErrorShape(parsed) &&
+      !("retry_after_seconds" in parsed)
+    ) {
+      err.resetInSeconds = optNumber(parsed["retry_after"]);
+    }
     const rlUpgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof rlUpgradeUrl === "string" ? rlUpgradeUrl : "";
     // Header first, then the body. `reset_in_seconds` is what the server

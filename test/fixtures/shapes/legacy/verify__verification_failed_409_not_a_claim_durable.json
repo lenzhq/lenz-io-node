@@ -1,0 +1,14 @@
+{
+  "status": 409,
+  "body": {
+    "detail": "This check failed and has no result.",
+    "code": "verification_failed",
+    "status": "failed",
+    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "hint": "Resubmit to POST /verify if retryable is true. GET /verify/status/c4ee0497cadc2f23b3fe8047e3f801ff has the full failure.",
+    "failure_reason": "not_a_claim",
+    "failure_class": "invalid_input",
+    "retryable": false,
+    "docs_url": "https://lenz.io/docs/errors#invalid-input"
+  }
+}

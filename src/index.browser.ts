@@ -127,6 +127,7 @@ export type {
   EntityRef,
   ExtractInput,
   ExtractStatus,
+  ExtractedClaim,
   ExtractedClaims,
   ExtractedEntity,
   LibraryItem,

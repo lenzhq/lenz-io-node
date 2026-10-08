@@ -784,7 +784,7 @@ describe("Default wait deadlines", () => {
     const out = await expectDeadlineNear300s(
       client.verifyBatchAndWait({ claims: [{ text: "a" }] }),
     );
-    expect(out).toEqual([{ task_id: "t1", claim_text: "a", status: "timeout" }]);
+    expect(out).toEqual([{ task_id: "t1", claim: "a", claim_text: "a", status: "timeout" }]);
   });
 });
 
@@ -2127,7 +2127,7 @@ describe("usage", () => {
     expect(u.verify.bonus).toBe(2);
     expect(u.assess.bonus).toBe(25);
     // The deprecated per-capability `credits` is an alias of `bonus` until
-    // the server drops it on 2026-11-29.
+    // a server may send only one of the two names.
     expect(u.verify.credits).toBe(u.verify.bonus);
     expect(u.assess.credits).toBe(u.assess.bonus);
   });
@@ -2142,7 +2142,8 @@ describe("usage", () => {
   });
 
   it("parses a response that has already dropped the deprecated credits alias", async () => {
-    // After 2026-11-29 the server stops sending it; `bonus` carries on.
+    // A server that sends no per-block `credits`: `bonus` carries on, and
+    // the alias is not invented for a block the server sent.
     const withoutAlias = (cap: Record<string, unknown>): Record<string, unknown> => {
       const copy = { ...cap };
       delete copy["credits"];

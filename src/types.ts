@@ -72,7 +72,11 @@ export interface Audit {
   panel_agreement?: string;
 }
 
+/** One claim a `multi_claim` pause offers. */
 export interface CandidateClaim {
+  /** The claim. */
+  claim?: string;
+  /** @deprecated Read `claim`; the same text. */
   text?: string;
   domain?: string;
 }
@@ -149,6 +153,17 @@ export interface Verification {
   sources?: Source[];
   audit?: Audit;
   created_at?: string | null;
+  /**
+   * When the verification finished. Sent by the API's newer response shape;
+   * absent from the original shape, which sends `modified_at` instead.
+   */
+  completed_at?: string | null;
+  /**
+   * @deprecated Read `completed_at`. The completion time when the
+   * verification finished on a later UTC calendar day than `created_at`,
+   * else `null`. Computed from `created_at` and `completed_at` when the
+   * server sends only those.
+   */
   modified_at?: string | null;
   /**
    * Output language (ISO 639-1). Always populated when the SDK is
@@ -297,6 +312,9 @@ export interface VerificationListItem {
   key_finding?: string;
   executive_summary?: string;
   created_at?: string | null;
+  /** See `Verification.completed_at`. */
+  completed_at?: string | null;
+  /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
   modified_at?: string | null;
   /** Output language (ISO 639-1). See `Verification.language`. */
   language?: string;
@@ -388,9 +406,28 @@ export interface ClaimLocation {
   positions: Position[] | null;
 }
 
+/**
+ * One claim `extract` found, with where the text makes it (`positions`,
+ * `null` unless the call set `locate: true` and the claim was placed).
+ */
+export type ExtractedClaim = ClaimLocation;
+
 export interface ExtractedClaims {
+  /**
+   * `"ready"`, `"not_a_claim"` or `"no_match"`. The API's newer response
+   * shape says `"no_checkable_claim"` for nothing checkable; the SDK reports
+   * it as `"not_a_claim"`, so code written against this value keeps working.
+   */
   status?: ExtractStatus;
+  /**
+   * Every claim found, in order: one entry for one claim, `[]` for none.
+   * Each carries `positions` (see {@link ClaimLocation}). Filled from
+   * `claim` / `identified_claims` / `locations` when the server sends those.
+   */
+  claims?: ExtractedClaim[];
+  /** @deprecated Read `claims[0].claim`. The first claim, `""` for none. */
   claim?: string;
+  /** @deprecated Read `claims`. Every claim when there are several, `[]` for one. */
   identified_claims?: string[];
   /**
    * @deprecated Always empty since 2026-09-12. Kept because the server still
@@ -412,6 +449,10 @@ export interface ExtractedClaims {
    * unfiltered). Offsets are code points — see {@link Position}.
    * Optional only so a response from an API that predates the field still
    * fits; read it as `out.locations ?? null`.
+   *
+   * @deprecated Read `claims[i].positions`. Computed from `claims` when the
+   * server sends only that; it then reads `null`, not `[]`, when every claim
+   * was left out.
    */
   locations?: ClaimLocation[] | null;
 }
@@ -431,8 +472,30 @@ export interface AssessClaim {
   claim?: string;
   /** Output language (ISO 639-1). Echoes the request's language. */
   language?: string;
-  verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
-  confidence?: string; // "high" | "medium" | "low"
+  /**
+   * `"completed"` (the row has a verdict) or `"failed"` (it has none;
+   * `failure` says why). Branch on this rather than on `verdict === "Error"`.
+   */
+  status?: "completed" | "failed" | (string & NonNullable<unknown>);
+  /**
+   * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
+   * `"Error"` on a failed row (kept for existing code: read `status`).
+   */
+  verdict?: string;
+  /** "high" | "medium" | "low"; `"low"` on a failed row (read `status`). */
+  confidence?: string;
+  /**
+   * Why a failed row has no verdict: `code` (`no_checkable_claim`,
+   * `framing_failed`, `upstream_unavailable`, `timeout`, an open set),
+   * `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. `null` on a
+   * row with a verdict. Fields the server did not send read `null`.
+   */
+  failure?: ReviewFailureBlock | null;
+  /**
+   * Other claims found in this item that were NOT assessed: a compound item
+   * is assessed on its main claim. Send these as their own items. Else `[]`.
+   */
+  more_claims?: string[];
   verification_url?: string | null;
   /**
    * The reasoning of a reviewer who agrees with the panel's verdict. A
@@ -473,6 +536,9 @@ export interface AssessClaim {
    * deterministic, so retrying the same text will not help (a provider
    * outage comes back as `upstream_unavailable` instead); `no_claim` wants a
    * different input. Read `hint`.
+   *
+   * @deprecated Read `failure.code` (which says `no_checkable_claim` where
+   * this says `no_claim`).
    */
   error_code?: string | null;
   /**
@@ -480,15 +546,14 @@ export interface AssessClaim {
    * that filled it was retired. Kept because the server still sends the key.
    */
   candidate_claims?: string[];
-  /**
-   * Other claims found in this item that were NOT assessed — a compound
-   * item is assessed on its main claim. Send these as their own items to
-   * check the rest. Else `[]`.
-   */
+  /** @deprecated Read `more_claims`; the same list. */
   identified_claims?: string[];
   /**
    * One sentence on what to send next. Set on every Error row and on a
    * row with non-empty `identified_claims`; `null` on a plain verdict row.
+   *
+   * @deprecated Read `failure.hint`. Computed from it when the server sends
+   * only `failure`; a row with a verdict then reads `null`.
    */
   hint?: string | null;
 }
@@ -514,8 +579,22 @@ export interface AssessClaim {
  * it degrade to the plain `error` message.
  */
 export interface AssessResponse {
+  /**
+   * `"ok"` (at least one row has a verdict), `"error"`, or, when the input
+   * holds nothing checkable, `"no_checkable_claim"` (`"not_a_claim"` on the
+   * API's original response shape). Passed through as the server sent it;
+   * absent from servers older than the field.
+   */
+  status?: string;
   claims: AssessClaim[];
+  /**
+   * Why the single form found nothing to assess (`code`, `detail`, `hint`,
+   * ...); `null` otherwise.
+   */
+  failure?: ReviewFailureBlock | null;
+  /** @deprecated Read `failure.detail`. */
   error?: string | null;
+  /** @deprecated Read `failure.code` (`no_checkable_claim` where this says `no_claim`). */
   error_code?: string; // '' | 'no_claim'
   /**
    * @deprecated Always empty since 2026-09-12. Kept because the server still
@@ -532,6 +611,9 @@ export interface AssessResponse {
 
 export interface TaskAccepted {
   task_id: string;
+  /** The claim this task checks (on `verifyBatch` / `select` items). */
+  claim?: string;
+  /** @deprecated Read `claim`; the same text. */
   claim_text?: string;
 }
 
@@ -594,10 +676,16 @@ export interface TaskStatus {
    */
   similar_claims?: SimilarVerification[];
   /**
-   * Diagnostic on a `failed` status. The server's failed response is
-   * `{"status": "failed", "error": "..."}` — `error` is the live wire field.
-   * `failure_reason` / `failure_detail` are kept for forward/back compat;
-   * read precedence is `error || failure_detail || failure_reason`.
+   * On a `failed` status, why: `code` (e.g. `no_checkable_claim`,
+   * `research_empty`), `detail` (one sentence), `hint`, `failure_class`,
+   * `retryable`, `docs_url`. Built from the flat fields below when the
+   * server sends those.
+   */
+  failure?: ReviewFailureBlock | null;
+  /**
+   * @deprecated Read `failure.detail`. The diagnostic sentence on a
+   * `failed` status; read precedence is `error || failure_detail ||
+   * failure_reason`.
    */
   error?: string;
   failure_reason?: string;
@@ -656,6 +744,8 @@ export type FailureClass =
  */
 export interface BatchItemResult {
   task_id: string;
+  claim?: string;
+  /** @deprecated Read `claim`; the same text. */
   claim_text?: string;
   status: "completed" | "needs_input" | "failed" | "timeout";
   verification?: Verification;
@@ -687,9 +777,9 @@ export interface UsageCredits {
   /** The non-expiring part of `remaining`: credits from grants and top-ups. */
   extra: number;
   /**
-   * @deprecated Old name of {@link UsageCredits.extra}, the same number. The
-   * server removes it on **2026-11-29**; read `extra` instead. `usage()` fills
-   * it from `extra` once the server stops sending it.
+   * @deprecated Old name of {@link UsageCredits.extra}, the same number; read
+   * `extra` instead. Kept for existing callers: `usage()` fills it from
+   * `extra` when the server does not send it.
    */
   bonus: number;
   resets_at: string | null;
@@ -723,12 +813,12 @@ export interface UsageCapacity {
   /** {@link UsageCredits.extra}, in this capability's unit. */
   bonus: number;
   /**
-   * @deprecated Alias of {@link UsageCapacity.bonus}. The server removes it on
-   * **2026-11-29**; read `bonus` instead.
+   * @deprecated Alias of {@link UsageCapacity.bonus}; read `bonus` instead.
+   * Kept for existing callers.
    *
    * It never meant the pool — before the single pool existed it meant this
    * capability's one-off top-up balance, which is exactly what `bonus` now
-   * reports. Optional because the server stops sending it on that date.
+   * reports.
    */
   credits?: number;
   remaining: number;
@@ -777,6 +867,11 @@ export interface Usage {
    * string on servers predating this field — fall back to `plan`.
    */
   plan_label: string;
+  /**
+   * @deprecated Read `credits.resets_at`, the same time. Kept for existing
+   * callers: `usage()` fills it from `credits.resets_at` when the server
+   * does not send it.
+   */
   quota_resets_at: string | null;
   /**
    * The pool — the authoritative balance every capability spends from.
@@ -833,17 +928,18 @@ export interface Usage {
    */
   cost_options: Record<string, Record<string, Record<string, number>>>;
   /**
-   * @deprecated Removed 2026-11-29. Derive from {@link Usage.credits} and
-   * {@link Usage.costs} instead:
+   * @deprecated Derive from {@link Usage.credits} and {@link Usage.costs}
+   * instead. Kept for existing callers: `usage()` computes the block from
+   * `credits` and `costs` when the server sends only those.
    *
    * ```ts
    * const left = Math.floor(u.credits.remaining / u.costs["verify"]!);
    * ```
    */
   verify: UsageCapacity;
-  /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
+  /** @deprecated See {@link Usage.verify}. */
   ask: UsageCapacity;
-  /** @deprecated Removed 2026-11-29. See {@link Usage.verify}. */
+  /** @deprecated See {@link Usage.verify}. */
   assess: UsageCapacity;
   extract: UsageExtract;
   /**
@@ -1248,9 +1344,16 @@ export interface Escalation {
 /** The failure block `GET /verify/status` answers a failed task with. */
 export interface ReviewFailureBlock {
   /**
-   * The specific cause, e.g. `no_claim`, `insufficient_credits`,
-   * `assessment_failed`, `timeout`. An open set; `null` when the API has
-   * no specific cause to name.
+   * The specific cause, e.g. `no_checkable_claim`, `insufficient_credits`,
+   * `assessment_failed`, `timeout`. An open set; `null` when the API has no
+   * specific cause to name.
+   */
+  code?: string | null;
+  /** One sentence on what went wrong; `null` when the server sent none. */
+  detail?: string | null;
+  /**
+   * @deprecated Read `code`. The same cause in its original words
+   * (`no_claim` / `not_a_claim` where `code` says `no_checkable_claim`).
    */
   failure_reason: string | null;
   failure_class: FailureClass;
@@ -1292,9 +1395,16 @@ export interface ReviewCitationCheckCounts {
 export interface ReviewSummary {
   /** Claims this review works on; `null` until the draft is read. */
   claims_selected: number | null;
+  /** Claims found in the draft; `null` until the draft is read. */
+  claims_found?: number | null;
   /** The resolved `maxAssessments`. */
   claim_limit: number;
-  /** The draft held at least `claim_limit` claims, so more MAY exist. */
+  /** More than `claim_limit` claims were found: `more_claims` lists the rest. */
+  claim_limit_exceeded?: boolean | null;
+  /**
+   * @deprecated Read `claim_limit_exceeded`. The draft held at least
+   * `claim_limit` claims, so more MAY exist.
+   */
   claim_limit_reached: boolean | null;
   /** The text was cut at 50,000 characters. */
   input_truncated: boolean;
@@ -1308,7 +1418,9 @@ export interface ReviewSummary {
   citations_selected: number | null;
   /** The resolved `maxCitations`. */
   citation_limit: number | null;
-  /** `citations_found` is over `citation_limit`. */
+  /** `citations_found` is over `citation_limit`: `more_citations` lists the rest. */
+  citation_limit_exceeded?: boolean | null;
+  /** @deprecated Read `citation_limit_exceeded`; the same value. */
   citation_limit_reached: boolean | null;
   citation_checks: ReviewCitationCheckCounts | null;
   /** `citation_issues.length`. */
@@ -1354,9 +1466,16 @@ export interface ReviewAssessment {
   dissent: string | null;
   /** Set when the quick check served an existing deep verdict. */
   verification_url: string | null;
-  /** On a failed assessment, as on `/assess` rows. An open set. */
+  /**
+   * @deprecated Read `failure.code`. On a failed assessment, as on `/assess`
+   * rows (`no_claim` where `failure.code` says `no_checkable_claim`).
+   */
   error_code: string | null;
+  /** Other claims found in this item that were not assessed; `[]` when none. */
+  more_claims?: string[];
+  /** @deprecated Read `more_claims`; the same list. */
   identified_claims: string[];
+  /** One sentence on what to send next (a compound item); else `null`. */
   hint: string | null;
   /**
    * With `suggestEdits: true`: the claim with its wrong part corrected, from
@@ -1403,6 +1522,9 @@ export interface ReviewVerification {
   suggested_rewrite: string | null;
   warnings: string[];
   created_at: string | null;
+  /** When the deep check finished; absent from the API's original response shape. */
+  completed_at?: string | null;
+  /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
   modified_at: string | null;
   /** `GET /verifications/{id}`: the sources. */
   verification_url: string | null;
@@ -1883,6 +2005,9 @@ export interface CitecheckSummary {
   citations_found: number | null;
   citations_selected: number | null;
   citation_limit: number | null;
+  /** `citations_found` is over `citation_limit`. */
+  citation_limit_exceeded?: boolean | null;
+  /** @deprecated Read `citation_limit_exceeded`; the same value. */
   citation_limit_reached: boolean | null;
   citation_checks: ReviewCitationCheckCounts | null;
   citation_issues: number;
@@ -1904,6 +2029,8 @@ export interface Citecheck {
   outcome: ReviewOutcome | null;
   created_at: string;
   completed_at: string | null;
+  /** The language the reasoning is written in (ISO 639-1); absent from older servers. */
+  language?: string;
   /** How long to wait before polling again; `null` once terminal. */
   poll_after_seconds: number | null;
   policy: CitecheckPolicy;

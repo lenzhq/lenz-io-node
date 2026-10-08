@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzQuotaExceededError",
+    "message": "No remaining claim checks.",
+    "cause_": "No remaining claim checks.",
+    "fix": "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
+    "docUrl": "https://lenz.io/docs/billing",
+    "requestId": "",
+    "statusCode": 402,
+    "code": "no_credits",
+    "name": "LenzQuotaExceededError",
+    "upgradeUrl": "https://lenz.io/plans?wall=bc5bd140-b822-0842-6d24-9a938053610f",
+    "remaining": 0,
+    "resetsAt": "2026-03-10T12:02:02+00:00",
+    "requested": null,
+    "creditBalance": 0,
+    "cost": 10
+  }
+}

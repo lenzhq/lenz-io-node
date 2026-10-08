@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "body": {
+    "status": "needs_input",
+    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "reason": "multi_claim",
+    "claims": [
+      {
+        "claim": "The Earth is round.",
+        "domain": "Science"
+      },
+      {
+        "claim": "Water boils at 100C at sea level.",
+        "domain": "Science"
+      }
+    ],
+    "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+  }
+}

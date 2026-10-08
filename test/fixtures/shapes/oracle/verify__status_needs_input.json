@@ -1,0 +1,52 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "needs_input",
+      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "reason": "multi_claim",
+      "claims": [
+        {
+          "text": "The Earth is round.",
+          "domain": "Science"
+        },
+        {
+          "text": "Water boils at 100C at sea level.",
+          "domain": "Science"
+        }
+      ],
+      "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzNeedsInputError",
+      "message": "Pipeline paused: multi_claim",
+      "cause_": "The verification needs caller input to proceed.",
+      "fix": "Inspect the payload, then call client.select(taskId, { texts: [...] }) with the chosen claim(s).",
+      "docUrl": "https://lenz.io/docs/verify#needs-input",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzNeedsInputError",
+      "taskId": "t",
+      "kind": "multi_claim",
+      "payload": {
+        "status": "needs_input",
+        "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+        "reason": "multi_claim",
+        "claims": [
+          {
+            "text": "The Earth is round.",
+            "domain": "Science"
+          },
+          {
+            "text": "Water boils at 100C at sea level.",
+            "domain": "Science"
+          }
+        ],
+        "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+      },
+      "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+    }
+  }
+}

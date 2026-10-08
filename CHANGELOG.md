@@ -6,6 +6,81 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Reads both forms of the API's responses.** The API is adding a newer
+  response form with one name for each field across every endpoint, chosen
+  per request by the `X-Lenz-API-Version` header. This release still sends
+  `2026-05-13` and gets the original form; every method and webhook parser
+  now also reads the newer one, and returns both sets of names from either:
+  - `ExtractedClaims.claims`: every claim as `{ claim, positions }`, always a
+    list (new `ExtractedClaim` type).
+  - `AssessClaim.status` (`completed` | `failed`), `AssessClaim.failure`,
+    `AssessClaim.more_claims`; `AssessResponse.status` and
+    `AssessResponse.failure`.
+  - `TaskStatus.failure`, and `failure` / `verification` on
+    `verification.*` webhook events.
+  - `claim` on `verifyBatch` / `select` receipt items, on `BatchItemResult`
+    and on `needs_input` options (`CandidateClaim`).
+  - `completed_at` on verifications (sent by the newer form only).
+  - `ReviewSummary.claims_found`, `claim_limit_exceeded` and
+    `citation_limit_exceeded` (also on `CitecheckSummary`).
+  - `code` and `detail` on every failure block (`ReviewFailureBlock`),
+    `ReviewAssessment.more_claims`, `Citecheck.language`.
+- A failure's `code` says `no_checkable_claim` where the original fields say
+  `not_a_claim` / `no_claim`.
+
+### Deprecated
+
+- The original names, kept with their original meaning whichever form
+  arrives, so existing code behaves exactly as before: a failed `assess` row
+  still reads `verdict: "Error"`, `confidence: "low"` and `error_code`;
+  `extract`'s `status` still reads `not_a_claim`; `claim` /
+  `identified_claims` / `locations` on `extract`; `claim_text`; option
+  `text`; `error`, `failure_reason` and the flat failure fields on a failed
+  `TaskStatus`; `modified_at` (computed from `created_at` and `completed_at`
+  by its later-calendar-day rule); `claim_limit_reached` /
+  `citation_limit_reached`; the `/me/usage` per-capability blocks,
+  `credits.bonus` and `quota_resets_at` (recomputed from `credits` and
+  `costs`); `VerificationFailed.error`. Only `raw` on a webhook event and
+  `LenzError.body` show the wire form as sent.
+- A response in the original form is returned exactly as before: no key is
+  added under an original name and no value changes. It only gains the newer
+  names it lacks (`AssessResponse.status` reads `ok`, `no_checkable_claim` or
+  `error`).
+- On the newer form of `review.*` / `citecheck.*` webhook events, which carry
+  no `task_id`, the event's `taskId` is the review / citation-check id.
+
+### When the newer form is served
+
+These differences come from the server and show only when a call is answered
+in the newer form (this release does not ask for it):
+
+- Sentences are reworded: a failed verification's `error` (and the
+  `LenzPipelineError` message built from it), `/assess`'s `error`, some
+  `hint`s.
+- Some 422 codes are renamed (`blank_item` is `blank_input`), every 422 has a
+  `code` (`validation_error` for a schema error) and an `errors` list, and
+  its `detail` is a sentence, so `LenzValidationError.message` reads that
+  sentence instead of "Validation failed".
+- `/verify`'s receipt has no `chain_id`; a review row carries no stored
+  `hint`.
+
+### Changed
+
+- **`verify` and `verifyBatch` no longer send `webhook_url: ""`** when no
+  webhook URL is set; the field is omitted. The API treats the two the same
+  on these endpoints (the key's default URL). `review` and `citecheck` are
+  unchanged: there `""` means "no webhook" and is still sent.
+
+### Fixed
+
+- **Correction to the 2.9.0 and 2.14.0 entries:** the 2026-11-29 removal
+  announced for `credits.bonus`, the per-capability `credits` field and the
+  `verify` / `ask` / `assess` blocks of `/me/usage` is cancelled. The fields
+  stay deprecated and are kept for existing callers. The README, the type
+  docs and `openapi.json` no longer give a date.
+
 ## [2.20.0] - 2026-10-05
 
 ### Added

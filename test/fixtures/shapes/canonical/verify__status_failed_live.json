@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "failure": {
+      "code": "research_empty",
+      "detail": "No sources about the claim were found.",
+      "hint": null,
+      "failure_class": "insufficient_evidence",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#insufficient-evidence"
+    }
+  }
+}

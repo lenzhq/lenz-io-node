@@ -1,0 +1,26 @@
+{
+  "value": {
+    "event": "verification.needs_input",
+    "taskId": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "attempt": 1,
+    "deliveredAt": "2026-03-10T12:02:02.002222+00:00",
+    "verificationId": null,
+    "batchId": null,
+    "status": "needs_input",
+    "needsInput": {
+      "reason": "multi_claim",
+      "claims": [
+        {
+          "text": "The Earth is round.",
+          "domain": ""
+        },
+        {
+          "text": "The Moon is made of cheese.",
+          "domain": "Science"
+        }
+      ],
+      "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+    },
+    "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+  }
+}

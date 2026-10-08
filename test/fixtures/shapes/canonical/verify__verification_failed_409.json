@@ -1,0 +1,18 @@
+{
+  "status": 409,
+  "body": {
+    "detail": "This check failed and has no result.",
+    "code": "verification_failed",
+    "status": "failed",
+    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "hint": "Resubmit to POST /verify if retryable is true. GET /verify/status/c4ee0497cadc2f23b3fe8047e3f801ff has the full failure.",
+    "failure": {
+      "code": "research_empty",
+      "detail": "No sources about the claim were found.",
+      "hint": null,
+      "failure_class": "insufficient_evidence",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#insufficient-evidence"
+    }
+  }
+}

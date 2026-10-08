@@ -14,7 +14,7 @@
  * SDKs' keysets.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -54,6 +54,7 @@ function loadFixture(name: string): Record<string, unknown> {
 const KEYSETS: Record<string, ReadonlySet<string>> = {
   ExtractedClaims: new Set([
     "status",
+    "claims",
     "claim",
     "identified_claims",
     "candidate_claims",
@@ -66,9 +67,20 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ExtractedEntity: new Set(["name", "type"]),
   ClaimLocation: new Set(["claim", "positions"]),
   Position: new Set(["start", "end", "text"]),
-  AssessResponse: new Set(["claims", "error", "error_code", "candidate_claims", "more_claims"]),
+  AssessResponse: new Set([
+    "status",
+    "claims",
+    "failure",
+    "error",
+    "error_code",
+    "candidate_claims",
+    "more_claims",
+  ]),
   AssessClaim: new Set([
     "claim",
+    "status",
+    "failure",
+    "more_claims",
     "verdict",
     "confidence",
     "verification_url",
@@ -88,6 +100,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "progress",
     "result",
     "claims",
+    "failure",
     "candidates",
     "similar_claims",
     "error",
@@ -99,7 +112,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "hint",
   ]),
   Progress: new Set(["step", "index", "total", "elapsed_seconds", "poll_after_seconds"]),
-  CandidateClaim: new Set(["text", "domain"]),
+  CandidateClaim: new Set(["claim", "text", "domain"]),
   Verification: new Set([
     "verification_id",
     "claim",
@@ -115,6 +128,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "sources",
     "audit",
     "created_at",
+    "completed_at",
     "modified_at",
     "language",
     "visibility",
@@ -157,6 +171,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "key_finding",
     "executive_summary",
     "created_at",
+    "completed_at",
     "modified_at",
     "language",
     "suggested_rewrite",
@@ -185,11 +200,10 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "extract",
     "has_webhook_secret",
   ]),
-  // `bonus` is the deprecated old name of `extra`; the server stops sending
-  // it on 2026-11-29 and this entry goes with it.
+  // `bonus` is the deprecated old name of `extra`, kept for existing callers.
   UsageCredits: new Set(["total", "used", "remaining", "extra", "bonus", "resets_at"]),
-  // The block's `credits` is the deprecated alias of `bonus`; the server
-  // stops sending it on 2026-11-29 and this entry goes with it.
+  // The block's `credits` is the deprecated alias of `bonus`, kept for
+  // existing callers.
   UsageCapacity: new Set([
     "quota_used",
     "quota_total",
@@ -256,7 +270,9 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ]),
   ReviewSummary: new Set([
     "claims_selected",
+    "claims_found",
     "claim_limit",
+    "claim_limit_exceeded",
     "claim_limit_reached",
     "input_truncated",
     "assessments",
@@ -265,6 +281,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "citations_found",
     "citations_selected",
     "citation_limit",
+    "citation_limit_exceeded",
     "citation_limit_reached",
     "citation_checks",
     "citation_issues",
@@ -332,6 +349,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "outcome",
     "created_at",
     "completed_at",
+    "language",
     "poll_after_seconds",
     "policy",
     "summary",
@@ -347,6 +365,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "citations_found",
     "citations_selected",
     "citation_limit",
+    "citation_limit_exceeded",
     "citation_limit_reached",
     "citation_checks",
     "citation_issues",
@@ -354,7 +373,15 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ReviewAssessmentCounts: new Set(["completed", "failed"]),
   ReviewVerificationCounts: new Set(["planned", "completed", "failed"]),
   ReviewCredits: new Set(["charged"]),
-  ReviewFailureBlock: new Set(["failure_reason", "failure_class", "retryable", "hint", "docs_url"]),
+  ReviewFailureBlock: new Set([
+    "code",
+    "detail",
+    "failure_reason",
+    "failure_class",
+    "retryable",
+    "hint",
+    "docs_url",
+  ]),
   Escalation: new Set(["matched_rules", "disposition"]),
   ReviewIssue: new Set([
     "claim_index",
@@ -397,8 +424,10 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "dissent",
     "verification_url",
     "error_code",
+    "more_claims",
     "identified_claims",
     "hint",
+    "suggested_rewrite",
     "failure",
   ]),
   ReviewVerification: new Set([
@@ -420,6 +449,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "suggested_rewrite",
     "warnings",
     "created_at",
+    "completed_at",
     "modified_at",
     "verification_url",
     "url",
@@ -508,15 +538,21 @@ const NESTED: Record<string, Record<string, string | null>> = {
   ReviewAssessment: { failure: "ReviewFailureBlock" },
   ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
   ReviewWebhookPayload: { review: "ReviewFull" },
-  ExtractedClaims: { key_entities: "ExtractedEntity", locations: "ClaimLocation" },
+  ExtractedClaims: {
+    key_entities: "ExtractedEntity",
+    locations: "ClaimLocation",
+    claims: "ClaimLocation",
+  },
   ClaimLocation: { positions: "Position" },
-  AssessResponse: { claims: "AssessClaim" },
+  AssessResponse: { claims: "AssessClaim", failure: "ReviewFailureBlock" },
+  AssessClaim: { failure: "ReviewFailureBlock" },
   TaskStatus: {
     result: "Verification",
     claims: "CandidateClaim",
     // Was `null` — an opaque dict bag. It has a shape now, so descend:
     // that is what makes this test catch a server-side progress change.
     progress: "Progress",
+    failure: "ReviewFailureBlock",
   },
   Verification: {
     entities: "EntityRef",
@@ -1158,5 +1194,35 @@ describe("review fixtures", () => {
       );
       expect(err).toBeInstanceOf(LenzUpstreamUnavailableError);
     });
+  }
+});
+
+// The same recordings in both response shapes (`fixtures/shapes/`): every key
+// either shape sends is one the SDK's types name.
+describe("contract, both response shapes", () => {
+  const SHAPES_ROOT = join(__dirname, "fixtures", "shapes");
+  const IFACE_BY_PREFIX: Array<[string, string]> = [
+    ["assess__", "AssessResponse"],
+    ["extract__", "ExtractedClaims"],
+    ["verify__status_", "TaskStatus"],
+    ["verify__verification_200", "Verification"],
+    ["review__get_", "ReviewFull"],
+    ["citecheck__get_", "Citecheck"],
+    ["account__me_usage_", "Usage"],
+  ];
+  for (const shape of ["legacy", "canonical"]) {
+    for (const file of readdirSync(join(SHAPES_ROOT, shape)).sort()) {
+      const name = file.replace(/\.json$/, "");
+      const iface = IFACE_BY_PREFIX.find(([prefix]) => name.startsWith(prefix))?.[1];
+      if (!iface) continue;
+      it(`${shape}/${name} → ${iface} has no unknown fields`, () => {
+        const recorded = JSON.parse(readFileSync(join(SHAPES_ROOT, shape, file), "utf-8")) as {
+          status: number;
+          body: unknown;
+        };
+        if (recorded.status >= 400) return;
+        expect(walk(recorded.body, iface, "")).toEqual([]);
+      });
+    }
   }
 });

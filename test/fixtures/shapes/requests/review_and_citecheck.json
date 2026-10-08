@@ -1,0 +1,59 @@
+{
+  "review: no webhookUrl": {
+    "text": "x",
+    "visibility": "private"
+  },
+  "review: webhookUrl empty": {
+    "text": "x",
+    "webhook_url": "",
+    "visibility": "private"
+  },
+  "review: webhookUrl null": {
+    "text": "x",
+    "visibility": "private"
+  },
+  "review: webhookUrl set": {
+    "text": "x",
+    "webhook_url": "https://example.com/hook",
+    "visibility": "private"
+  },
+  "review: every option": {
+    "text": "x",
+    "language": "es",
+    "webhook_url": "",
+    "visibility": "unlisted",
+    "escalate": {
+      "verdicts": ["False"],
+      "confidence": ["low"],
+      "max_assessments": 3,
+      "max_verifications": 1,
+      "depth": "low",
+      "max_citations": 2,
+      "suggest_edits": true
+    }
+  },
+  "citecheck: no webhookUrl": {
+    "text": "x"
+  },
+  "citecheck: webhookUrl empty": {
+    "text": "x",
+    "webhook_url": ""
+  },
+  "citecheck: webhookUrl null": {
+    "text": "x"
+  },
+  "citecheck: webhookUrl set": {
+    "text": "x",
+    "webhook_url": "https://example.com/hook"
+  },
+  "citecheck: pairs": {
+    "pairs": [
+      {
+        "statement": "s",
+        "url": "https://example.com"
+      }
+    ],
+    "language": "de",
+    "webhook_url": ""
+  }
+}
