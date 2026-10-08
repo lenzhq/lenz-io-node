@@ -26,7 +26,7 @@
  *
  * // 1. extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
- * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+ * const claims = (out.claims ?? []).map((c) => c.claim);
  *
  * // 2. assess — one call per 20 claims (extract finds up to 100), one
  * //    row per claim in the same order. A row with verdict 'Error' has
@@ -172,6 +172,15 @@ const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 // published package.
 import { VERSION as SDK_VERSION } from "./_version.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
+import {
+  normalizeAssess,
+  normalizeBatchAccepted,
+  normalizeExtract,
+  normalizeTaskStatus,
+  normalizeUsage,
+  normalizeVerification,
+  normalizeVerificationList,
+} from "./compat.js";
 
 /**
  * Cross-runtime UUID. Prefers the WebCrypto global (browsers, Node ≥20, Deno,
@@ -421,12 +430,13 @@ function pollHintMs(progress: Progress | undefined): number | undefined {
 class VerificationsNamespace {
   constructor(private readonly client: Lenz) {}
 
-  list({ page = 1 }: { page?: number } = {}): Promise<VerificationList> {
-    return this.client.request<VerificationList>({
+  async list({ page = 1 }: { page?: number } = {}): Promise<VerificationList> {
+    const body = await this.client.request<VerificationList>({
       method: "GET",
       path: "/verifications",
       query: { page },
     });
+    return normalizeVerificationList(body) as VerificationList;
   }
 
   /**
@@ -442,13 +452,14 @@ class VerificationsNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  get(verificationId: string): Promise<Verification> {
-    return this.client.request<Verification>({
+  async get(verificationId: string): Promise<Verification> {
+    const body = await this.client.request<Verification>({
       method: "GET",
       path: `/verifications/${verificationId}`,
       authRequired: false,
       authOptional: true, // send the key if we have one → owner sees private rows
     });
+    return normalizeVerification(body) as Verification;
   }
 
   /**
@@ -561,8 +572,8 @@ class AskNamespace {
 class LibraryNamespace {
   constructor(private readonly client: Lenz) {}
 
-  list(input: LibraryListInput = {}): Promise<LibraryList> {
-    return this.client.request<LibraryList>({
+  async list(input: LibraryListInput = {}): Promise<LibraryList> {
+    const body = await this.client.request<LibraryList>({
       method: "GET",
       path: "/library",
       query: {
@@ -576,6 +587,7 @@ class LibraryNamespace {
       },
       authRequired: false,
     });
+    return normalizeVerificationList(body) as LibraryList;
   }
 }
 
@@ -616,8 +628,10 @@ export class Lenz {
         const item: Record<string, unknown> = {
           text: c.claim || c.text,
           source_url: c.source_url ?? "",
-          webhook_url: c.webhook_url ?? "",
         };
+        // Omitted when unset: an omitted webhook_url means the key's default
+        // URL. An empty string is never sent in its place.
+        if (c.webhook_url) item.webhook_url = c.webhook_url;
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
         if (c.depth) item.depth = c.depth;
@@ -632,12 +646,13 @@ export class Lenz {
     if (input.depth) body["depth"] = input.depth;
     const headers: Record<string, string> = {};
     if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
-    return this.request<BatchAccepted>({
+    const accepted = await this.request<BatchAccepted>({
       method: "POST",
       path: "/verify/batch",
       json: body,
       headers,
     });
+    return normalizeBatchAccepted(accepted) as BatchAccepted;
   }
 
   /**
@@ -669,7 +684,7 @@ export class Lenz {
     const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-    return this.request<ExtractedClaims>({
+    const out = await this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract",
       json: body,
@@ -678,6 +693,7 @@ export class Lenz {
       // asked for it.
       timeoutMs: input.timeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
     });
+    return normalizeExtract(out, input.locate) as ExtractedClaims;
   }
 
   /**
@@ -694,7 +710,7 @@ export class Lenz {
    *
    * ```ts
    * const out = await client.extract({ text: llmOutput });
-   * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+   * const claims = (out.claims ?? []).map((c) => c.claim);
    * const quick: AssessClaim[] = []; // one row per claim, same order, 20 claims a call
    * for (let i = 0; i < claims.length; i += 20) {
    *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
@@ -753,24 +769,28 @@ export class Lenz {
       // Sent only when asked, so a request without the option (and what its
       // idempotency key covers) is exactly what it was before.
       if (input.suggestRewrite) body.suggest_rewrite = true;
-      return this.request<AssessResponse>({
+      return normalizeAssess(
+        await this.request<AssessResponse>({
+          method: "POST",
+          path: "/assess",
+          json: body,
+          timeoutMs,
+          headers,
+        }),
+      ) as AssessResponse;
+    }
+    const body: Record<string, unknown> = { text: single };
+    if (input.language) body.language = input.language;
+    if (input.suggestRewrite) body.suggest_rewrite = true;
+    return normalizeAssess(
+      await this.request<AssessResponse>({
         method: "POST",
         path: "/assess",
         json: body,
         timeoutMs,
         headers,
-      });
-    }
-    const body: Record<string, unknown> = { text: single };
-    if (input.language) body.language = input.language;
-    if (input.suggestRewrite) body.suggest_rewrite = true;
-    return this.request<AssessResponse>({
-      method: "POST",
-      path: "/assess",
-      json: body,
-      timeoutMs,
-      headers,
-    });
+      }),
+    ) as AssessResponse;
   }
 
   /**
@@ -791,12 +811,13 @@ export class Lenz {
     const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-    return this.request<BatchAccepted>({
+    const accepted = await this.request<BatchAccepted>({
       method: "POST",
       path: `/verify/${taskId}/select`,
       json: { texts: chosen },
       headers,
     });
+    return normalizeBatchAccepted(accepted) as BatchAccepted;
   }
 
   /**
@@ -807,26 +828,19 @@ export class Lenz {
    * never answers 410.
    */
   async getStatus(taskId: string): Promise<TaskStatus> {
-    return this.request<TaskStatus>({
+    const body = await this.request<TaskStatus>({
       method: "GET",
       path: `/verify/status/${taskId}`,
     });
+    return normalizeTaskStatus(body) as TaskStatus;
   }
 
   async usage(): Promise<Usage> {
     const usage = await this.request<Usage>({ method: "GET", path: "/me/usage" });
-    // `credits.extra` and its deprecated old name `credits.bonus` are the same
-    // number. Fill whichever one the server did not send, so both read
-    // correctly against a server that sends only one of them.
-    const credits = usage.credits as unknown as Record<string, unknown> | undefined;
-    if (credits && typeof credits === "object") {
-      if (credits["extra"] == null && credits["bonus"] != null) {
-        credits["extra"] = credits["bonus"];
-      } else if (credits["bonus"] == null && credits["extra"] != null) {
-        credits["bonus"] = credits["extra"];
-      }
-    }
-    return usage;
+    // Both response shapes: `credits.extra` / `credits.bonus` (the same
+    // number), `quota_resets_at`, and the per-capability blocks, recomputed
+    // from `credits` and `costs` when the server sends only the pool.
+    return normalizeUsage(usage) as Usage;
   }
 
   // ── Review: the whole recipe in one call ──
@@ -1023,7 +1037,12 @@ export class Lenz {
       deadline,
       // The raw body, so the guard judges what the server sent: a default
       // filled first would let a bare `{citecheck_id, status}` pass as a result.
-      read: (transport) => this._readCitecheck(citecheckId, transport),
+      read: async (transport) => {
+        const raw = await this._readCitecheck(citecheckId, transport);
+        // Defaults only on a body that already passes as this check, so the
+        // guard still judges what the server sent.
+        return isCitecheckBody(raw, citecheckId) ? withCitecheckDefaults(raw) : raw;
+      },
       isBody: (body) => isCitecheckBody(body, citecheckId),
       failed: (check) => new CitecheckFailedError(check),
       timedOut: (last) => new CitecheckTimeoutError(citecheckId, last, timeoutMs),
@@ -1227,16 +1246,27 @@ export class Lenz {
     return accepted.items.map((it): BatchItemResult => {
       // Removed under the account's retention period: final, with no result.
       if (gone.has(it.task_id)) {
-        return { task_id: it.task_id, claim_text: it.claim_text, status: "failed" };
+        return {
+          task_id: it.task_id,
+          claim: it.claim ?? it.claim_text,
+          claim_text: it.claim_text ?? it.claim,
+          status: "failed",
+        };
       }
       const status = terminal.get(it.task_id);
       if (!it.task_id || timedOut.has(it.task_id) || !status) {
-        return { task_id: it.task_id, claim_text: it.claim_text, status: "timeout" };
+        return {
+          task_id: it.task_id,
+          claim: it.claim ?? it.claim_text,
+          claim_text: it.claim_text ?? it.claim,
+          status: "timeout",
+        };
       }
       if (status.status === "completed" && status.result) {
         return {
           task_id: it.task_id,
-          claim_text: it.claim_text,
+          claim: it.claim ?? it.claim_text,
+          claim_text: it.claim_text ?? it.claim,
           status: "completed",
           verification: status.result,
           status_detail: status,
@@ -1245,7 +1275,8 @@ export class Lenz {
       if (status.status === "needs_input") {
         return {
           task_id: it.task_id,
-          claim_text: it.claim_text,
+          claim: it.claim ?? it.claim_text,
+          claim_text: it.claim_text ?? it.claim,
           status: "needs_input",
           status_detail: status,
         };
@@ -1253,7 +1284,8 @@ export class Lenz {
       // failed, or completed-without-result (treated as failed).
       return {
         task_id: it.task_id,
-        claim_text: it.claim_text,
+        claim: it.claim ?? it.claim_text,
+        claim_text: it.claim_text ?? it.claim,
         status: "failed",
         status_detail: status,
       };
@@ -1381,8 +1413,14 @@ export class Lenz {
       err.hint = status.hint ?? "";
       throw err;
     }
-    // failed. Server sends the diagnostic under `error`; fall back to legacy fields.
-    const detail = status.error || status.failure_detail || status.failure_reason || "unknown";
+    // failed. `getStatus` fills `error` from `failure.detail` on the newer
+    // response shape; the other fields are older fallbacks.
+    const detail =
+      status.error ||
+      status.failure?.detail ||
+      status.failure_detail ||
+      status.failure_reason ||
+      "unknown";
     const err = new LenzPipelineError({
       message: `Pipeline failed: ${detail}`,
       cause: detail,
@@ -1407,8 +1445,10 @@ export class Lenz {
       // `text`, which every server version accepts.
       text: input.claim || input.text,
       source_url: input.sourceUrl ?? "",
-      webhook_url: input.webhookUrl ?? "",
     };
+    // Omitted when unset, never sent as "": an omitted webhook_url means the
+    // key's default URL.
+    if (input.webhookUrl) body.webhook_url = input.webhookUrl;
     // Omit-when-empty so existing English callers keep byte-identical
     // request bodies (no extra "language": "" key on the wire).
     if (input.language) body.language = input.language;

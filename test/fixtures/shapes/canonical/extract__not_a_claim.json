@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "body": {
+    "status": "no_checkable_claim",
+    "claims": [],
+    "domain": "",
+    "key_entities": [],
+    "presumed_intent": "",
+    "original_input": "What a lovely day."
+  }
+}

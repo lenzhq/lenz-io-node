@@ -621,12 +621,24 @@ export function mapResponseToError(
       err.status = optString(parsed["status"]);
       err.fix = err.hint || "Wait for the run with client.wait(taskId), then read its result.";
     } else {
-      err.failureReason = optString(parsed["failure_reason"]);
-      err.failureClass = optString(parsed["failure_class"]);
+      // The newer response shape nests these in `failure` (its `code` says
+      // `no_checkable_claim` where the original says `not_a_claim`); the
+      // top-level fields win when the server sent them.
+      const failure =
+        parsed["failure"] &&
+        typeof parsed["failure"] === "object" &&
+        !Array.isArray(parsed["failure"])
+          ? (parsed["failure"] as Record<string, unknown>)
+          : {};
+      const failureCode = optString(failure["code"]);
+      err.failureReason =
+        optString(parsed["failure_reason"]) ||
+        (failureCode === "no_checkable_claim" ? "not_a_claim" : failureCode);
+      err.failureClass = optString(parsed["failure_class"]) || optString(failure["failure_class"]);
       // Only a real boolean is a retry signal, as in the wait path.
-      const retryable = parsed["retryable"];
+      const retryable = parsed["retryable"] ?? failure["retryable"];
       err.retryable = typeof retryable === "boolean" ? retryable : null;
-      err.docUrl = optString(parsed["docs_url"]) || err.docUrl;
+      err.docUrl = optString(parsed["docs_url"]) || optString(failure["docs_url"]) || err.docUrl;
       err.fix =
         err.hint ||
         (err.retryable
@@ -670,7 +682,11 @@ export function mapResponseToError(
     }
   } else if (err instanceof LenzRateLimitError) {
     err.limit = optNumber(parsed["limit"]);
-    err.resetInSeconds = optNumber(parsed["reset_in_seconds"]);
+    // The newer response shape names the wait `retry_after` only. The
+    // in-flight 429s never carried `reset_in_seconds`, so they keep `null`.
+    err.resetInSeconds =
+      optNumber(parsed["reset_in_seconds"]) ??
+      (code.endsWith("_in_flight") ? null : optNumber(parsed["retry_after"]));
     const rlUpgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof rlUpgradeUrl === "string" ? rlUpgradeUrl : "";
     // Header first, then the body. `reset_in_seconds` is what the server

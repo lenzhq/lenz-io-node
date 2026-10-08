@@ -1090,7 +1090,12 @@ describe("getReview() citations", () => {
           ...c,
           positions: null,
           suggested_edits: null,
-          assessment: { ...c.assessment, suggested_rewrite: null },
+          // `more_claims` is the newer name of `identified_claims`.
+          assessment: {
+            ...c.assessment,
+            suggested_rewrite: null,
+            more_claims: c.assessment.identified_claims,
+          },
         })),
       );
     },
@@ -1129,7 +1134,12 @@ describe("getReview() claim positions", () => {
       LOCATED.claims.map((c) => ({
         ...c,
         suggested_edits: null,
-        assessment: { ...c.assessment, suggested_rewrite: null },
+        // `more_claims` is the newer name of `identified_claims`.
+        assessment: {
+          ...c.assessment,
+          suggested_rewrite: null,
+          more_claims: c.assessment.identified_claims,
+        },
       })),
     );
     expect(review.more_claim_locations).toEqual(LOCATED.more_claim_locations);

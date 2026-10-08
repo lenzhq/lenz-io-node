@@ -1,0 +1,32 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "failed",
+      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "error": "Not a verifiable claim.",
+      "failure_reason": "not_a_claim",
+      "failure_class": "invalid_input",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#invalid-input",
+      "hint": "The input is a greeting, not a statement that can be checked. Send one factual claim, or run the text through /extract to enumerate its claims."
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzPipelineError",
+      "message": "Pipeline failed: Not a verifiable claim.",
+      "cause_": "Not a verifiable claim.",
+      "fix": "Retry with a different claim, or check status.error for the diagnostic.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzPipelineError",
+      "taskId": "t",
+      "failureReason": "not_a_claim",
+      "failureClass": "invalid_input",
+      "retryable": false,
+      "hint": "The input is a greeting, not a statement that can be checked. Send one factual claim, or run the text through /extract to enumerate its claims."
+    }
+  }
+}

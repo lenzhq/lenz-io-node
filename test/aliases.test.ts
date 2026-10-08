@@ -66,7 +66,7 @@ describe("verify", () => {
   it("claim is unchanged", async () => {
     const { fetch, calls } = makeFetch(accepted, 202);
     await new Lenz({ apiKey: "lenz_t", fetch }).verify({ claim: CLAIM });
-    expect(sent(calls)).toEqual({ text: CLAIM, source_url: "", webhook_url: "" });
+    expect(sent(calls)).toEqual({ text: CLAIM, source_url: "" });
   });
 });
 
@@ -78,15 +78,13 @@ describe("verifyBatch", () => {
     await new Lenz({ apiKey: "lenz_t", fetch }).verifyBatch({
       claims: [{ claim: CLAIM, language: "es" }],
     });
-    expect(sent(calls).claims).toEqual([
-      { text: CLAIM, source_url: "", webhook_url: "", language: "es" },
-    ]);
+    expect(sent(calls).claims).toEqual([{ text: CLAIM, source_url: "", language: "es" }]);
   });
 
   it("item text is unchanged", async () => {
     const { fetch, calls } = makeFetch(accepted, 202);
     await new Lenz({ apiKey: "lenz_t", fetch }).verifyBatch({ claims: [{ text: CLAIM }] });
-    expect(sent(calls).claims).toEqual([{ text: CLAIM, source_url: "", webhook_url: "" }]);
+    expect(sent(calls).claims).toEqual([{ text: CLAIM, source_url: "" }]);
   });
 });
 

@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "claims[1] is blank.",
+    "cause_": "claims[1] is blank.",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "blank_item",
+    "name": "LenzValidationError",
+    "errors": []
+  }
+}

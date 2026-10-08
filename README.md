@@ -214,7 +214,7 @@ const client = new Lenz({ apiKey: "lenz_..." });
 // 1. extract — pull verifiable claims out of any text (free)
 //    add focus: "..." to narrow it to the claims you care about
 const out = await client.extract({ text: llmOutput });
-const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+const claims = (out.claims ?? []).map((c) => c.claim);
 
 // 2. assess — one call per 20 claims (extract finds up to 100), one row per
 //    claim, in the same order (~15s a call, sync)
@@ -401,6 +401,27 @@ Every claim-shaped response shares these fields at top level:
 | `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                         |
 | `lenz_score` | `number \| null` | Integer 1–10 (deep verdicts and list endpoints; `assess` omits it).                     |
 
+### Newer field names
+
+Responses carry newer names beside the original ones. Both are filled
+whichever form of the response the API sends (except `completed_at`, which
+only the newer form carries), so code written against either keeps working; the original names are deprecated (struck through in editors)
+and kept for existing code.
+
+| Read this                                          | Instead of (deprecated)                             |
+| -------------------------------------------------- | --------------------------------------------------- |
+| `extract` → `claims` (`[{ claim, positions }]`)    | `claim`, `identified_claims`, `locations`           |
+| `assess` row `status` (`completed` \| `failed`)    | `verdict === "Error"`                               |
+| `failure` (`code`, `detail`, `hint`, ...)          | `error`, `error_code`, `failure_reason`, row `hint` |
+| `more_claims` on an `assess` or review row         | `identified_claims`                                 |
+| `claim` on receipt items and `needs_input` options | `claim_text`, `text`                                |
+| `completed_at` on a verification                   | `modified_at` (set only on a later calendar day)    |
+| `claim_limit_exceeded`, `citation_limit_exceeded`  | `claim_limit_reached`, `citation_limit_reached`     |
+
+A failure's `code` says `no_checkable_claim` where the original fields say
+`not_a_claim` (`verify`, `extract`) or `no_claim` (`assess`, `review`).
+`extract`'s `status` keeps reading `not_a_claim`.
+
 ### Coverage reasons
 
 On an account with the warranty, a verification carries `coverage`. When
@@ -533,9 +554,11 @@ Read `costs` as a map rather than destructuring known names: a new capability
 appears in it without an SDK release, and the keys are the server's own.
 
 `credits.bonus` is the **deprecated** old name of `credits.extra`, the same
-number; it disappears from the API on **2026-11-29**. So does the
-per-capability `credits` field, which was always that capability's one-off
-top-up balance and is now `bonus`.
+number, and the per-capability `credits` field (always that capability's
+one-off top-up balance) is the deprecated name of `bonus`. Both, like the
+`verify` / `ask` / `assess` blocks and `quota_resets_at`, are kept for
+existing code: `usage()` fills them in from `credits` and `costs` when the API
+sends only those.
 
 ### Depth pricing
 

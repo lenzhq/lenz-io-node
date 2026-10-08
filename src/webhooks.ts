@@ -21,7 +21,15 @@ import { Buffer } from "node:buffer";
 
 import { LenzWebhookSignatureError } from "./errors.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
-import type { Citecheck, Coverage, FailureClass, ReviewFull } from "./types.js";
+import { normalizeTaskStatus, normalizeVerification } from "./compat.js";
+import type {
+  Citecheck,
+  Coverage,
+  FailureClass,
+  ReviewFailureBlock,
+  ReviewFull,
+  TaskStatus,
+} from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
@@ -88,30 +96,50 @@ export type WebhookEventKind =
 
 export interface WebhookEventBase {
   event: WebhookEventKind;
+  /**
+   * The verification's `task_id`. On `review.*` / `citecheck.*` it is the
+   * delivery's identity, not pollable, and `""` when the payload carries none.
+   */
   taskId: string;
   attempt: number;
   deliveredAt: string;
   verificationId: string | null;
   batchId: string | null;
   status: string;
+  /** The payload exactly as delivered, in whichever shape the server sent. */
   raw: Record<string, unknown>;
 }
 
-export interface VerificationCompleted extends WebhookEventBase {
+/**
+ * The verification as `client.getStatus` returns it: on the newer payload
+ * shape the event carries it as `verification`; on the original shape it is
+ * built from the flat fields. `undefined` only when neither is there.
+ */
+interface VerificationEventBody {
+  verification?: TaskStatus;
+}
+
+export interface VerificationCompleted extends WebhookEventBase, VerificationEventBody {
   event: "verification.completed";
   result: Record<string, unknown>;
 }
 
-export interface VerificationFailed extends WebhookEventBase {
+export interface VerificationFailed extends WebhookEventBase, VerificationEventBody {
   event: "verification.failed";
+  /**
+   * @deprecated Read `failure.code`. The failure code, with its original
+   * words (`not_a_claim` where `failure.code` says `no_checkable_claim`).
+   */
   error: string;
+  /** Why it failed: `code`, `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. */
+  failure: ReviewFailureBlock | null;
   /** WHY it failed — the closed `FailureClass` set; "" when an older server omits it. */
   failureClass: FailureClass;
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
   retryable: boolean | null;
 }
 
-export interface VerificationNeedsInput extends WebhookEventBase {
+export interface VerificationNeedsInput extends WebhookEventBase, VerificationEventBody {
   event: "verification.needs_input";
   needsInput: Record<string, unknown>;
   /**
@@ -211,11 +239,54 @@ export type WebhookEvent =
   | CertificateTimestamped
   | WebhookEventBase; // catch-all for forward compatibility
 
+function asObject(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/**
+ * The verification body of a `verification.*` event: the newer shape's
+ * `verification`, else one built from the original flat payload.
+ */
+function verificationBody(event: string, payload: Record<string, unknown>): TaskStatus | undefined {
+  const nested = asObject(payload["verification"]);
+  if (nested) return normalizeTaskStatus(nested) as TaskStatus;
+  const taskId = payload["task_id"];
+  if (event === "verification.completed") {
+    return normalizeTaskStatus({
+      status: "completed",
+      task_id: taskId,
+      result: payload["result"],
+    }) as TaskStatus;
+  }
+  if (event === "verification.failed") {
+    const flat: Record<string, unknown> = { status: "failed", task_id: taskId };
+    // The original payload's `error` is the failure code.
+    if (typeof payload["error"] === "string") flat["failure_reason"] = payload["error"];
+    for (const key of ["failure_class", "retryable"]) {
+      if (payload[key] !== undefined) flat[key] = payload[key];
+    }
+    const status = normalizeTaskStatus(flat) as Record<string, unknown>;
+    // `error` here was never a sentence: drop the copy made from it.
+    const failure = asObject(status["failure"]);
+    if (failure) status["failure"] = { ...failure, detail: null };
+    delete status["error"];
+    return status as unknown as TaskStatus;
+  }
+  if (event === "verification.needs_input") {
+    const ni = asObject(payload["needs_input"]) ?? {};
+    return normalizeTaskStatus({ status: "needs_input", task_id: taskId, ...ni }) as TaskStatus;
+  }
+  return undefined;
+}
+
 function buildEvent(payload: Record<string, unknown>): WebhookEvent {
   const event = String(payload["event"] ?? "");
+  const verification = event.startsWith("verification.")
+    ? verificationBody(event, payload)
+    : undefined;
   const base: WebhookEventBase = {
     event,
-    taskId: String(payload["task_id"] ?? ""),
+    taskId: String(payload["task_id"] ?? verification?.task_id ?? ""),
     attempt: Number(payload["attempt"] ?? 1) || 1,
     deliveredAt: String(payload["delivered_at"] ?? ""),
     verificationId: (payload["verification_id"] as string | null) ?? null,
@@ -224,28 +295,56 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     raw: payload,
   };
   if (event === "verification.completed") {
+    const result = payload["result"] ?? verification?.result;
     return {
       ...base,
       event: "verification.completed",
-      result: (payload["result"] as Record<string, unknown>) ?? {},
+      result: (normalizeVerification(result) as Record<string, unknown>) ?? {},
+      verification,
     };
   }
   if (event === "verification.failed") {
+    const failure = (verification?.failure ?? null) as ReviewFailureBlock | null;
+    const retryable = payload["retryable"] ?? failure?.retryable;
     return {
       ...base,
       event: "verification.failed",
-      error: String(payload["error"] ?? ""),
-      failureClass: String(payload["failure_class"] ?? ""),
-      retryable: typeof payload["retryable"] === "boolean" ? payload["retryable"] : null,
+      error: String(payload["error"] ?? failure?.failure_reason ?? ""),
+      failureClass: String(payload["failure_class"] ?? failure?.failure_class ?? ""),
+      retryable: typeof retryable === "boolean" ? retryable : null,
+      failure,
+      verification,
     };
   }
   if (event === "verification.needs_input") {
-    const needsInput = (payload["needs_input"] as Record<string, unknown>) ?? {};
+    let needsInput = (payload["needs_input"] as Record<string, unknown>) ?? null;
+    if (needsInput === null && verification) {
+      // The newer shape: the same fields, on the verification body.
+      const rest: Record<string, unknown> = {
+        ...(verification as unknown as Record<string, unknown>),
+      };
+      delete rest["status"];
+      delete rest["task_id"];
+      needsInput = rest;
+    }
+    needsInput ??= {};
+    if (Array.isArray(needsInput["claims"])) {
+      // Each option under both names: `claim` (newer) and `text` (original).
+      needsInput = {
+        ...needsInput,
+        claims: needsInput["claims"].map((c: unknown) => {
+          const o = asObject(c);
+          if (!o) return c;
+          return { ...o, claim: o["claim"] ?? o["text"], text: o["text"] ?? o["claim"] };
+        }),
+      };
+    }
     return {
       ...base,
       event: "verification.needs_input",
       needsInput,
       hint: String(needsInput["hint"] ?? ""),
+      verification,
     };
   }
   if (event === "certificate.timestamped") {
