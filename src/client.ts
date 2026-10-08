@@ -364,6 +364,16 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
 }
 
 /**
+ * Whether `verify` / `verifyBatch` send a `webhook_url`. An unset, empty or
+ * blank one is left out, which means the credential's default URL, as it did
+ * in 2.x (where the API read `""` that way); the API version this release
+ * asks for reads a blank value as "no webhook", so it is never sent.
+ */
+function sendsWebhookUrl(url: unknown): boolean {
+  return typeof url === "string" ? url.trim() !== "" : Boolean(url);
+}
+
+/**
  * The server's machine-readable `code` from the response body, or `""`.
  *
  * Reads it exactly the way `mapResponseToError` does — string-typed only, so
@@ -636,7 +646,7 @@ export class Lenz {
         };
         // Omitted when unset: an omitted webhook_url means the key's default
         // URL. An empty string is never sent in its place.
-        if (c.webhook_url) item.webhook_url = c.webhook_url;
+        if (sendsWebhookUrl(c.webhook_url)) item.webhook_url = c.webhook_url;
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
         if (c.depth) item.depth = c.depth;
@@ -645,7 +655,7 @@ export class Lenz {
     };
     // Batch-wide defaults — per-item values (in the claims map above) override
     // server-side when set.
-    if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
+    if (sendsWebhookUrl(input.webhookUrl)) body["webhook_url"] = input.webhookUrl;
     if (input.language) body["language"] = input.language;
     if (input.visibility) body["visibility"] = input.visibility;
     if (input.depth) body["depth"] = input.depth;
@@ -1453,7 +1463,7 @@ export class Lenz {
     };
     // Omitted when unset, never sent as "": an omitted webhook_url means the
     // key's default URL.
-    if (input.webhookUrl) body.webhook_url = input.webhookUrl;
+    if (sendsWebhookUrl(input.webhookUrl)) body.webhook_url = input.webhookUrl;
     // Omit-when-empty so existing English callers keep byte-identical
     // request bodies (no extra "language": "" key on the wire).
     if (input.language) body.language = input.language;

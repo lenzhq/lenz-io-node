@@ -66,17 +66,11 @@ const CHAIN_ID = ["value.chain_id"];
 const TASK_ID = ["value.taskId"];
 const MESSAGE = ["error.message", "error.cause_"];
 const SERVER_DIFFERS: Record<string, string[]> = {
-  // A failed check's sentence: the original said "Pipeline stopped at:
-  // <step>" (and other fixed texts); the newer one says what happened.
-  verify__status_failed_live: STATUS_SENTENCE,
-  verify__status_failed_live_retryable: STATUS_SENTENCE,
+  // A failed check read back from storage said "Pipeline stopped: <code>."
+  // (a running one said "Pipeline stopped at: <code>", which is what the SDK
+  // rebuilds); the newer shape no longer tells the two apart.
   verify__status_failed_durable: STATUS_SENTENCE,
   verify__status_failed_durable_framing: STATUS_SENTENCE,
-  verify__status_cancelled_durable: STATUS_SENTENCE,
-  verify__status_task_stuck: STATUS_SENTENCE,
-  verify__status_not_a_claim: STATUS_SENTENCE,
-  verify__stored_progress_failed_crashed: STATUS_SENTENCE,
-  verify__stored_progress_failed_insufficient_evidence: STATUS_SENTENCE,
   // ... and a stored not-a-claim failure carries its hint, which the
   // original left out.
   verify__status_not_a_claim_durable: [

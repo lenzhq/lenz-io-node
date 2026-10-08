@@ -41,18 +41,47 @@ All notable changes to this SDK are documented here. Format follows
     error's `errors` are its field items and its message "Validation failed",
     `LenzRateLimitError.resetInSeconds` reads the daily limit's wait,
     `LenzQuotaExceededError.creditBalance` is filled for a citation check.
+- **Webhooks of calls made with 3.0 arrive in the newer shape.** The API
+  sends each webhook in the version of the request that asked for it, so a
+  `verify`, `verifyBatch`, `select`, `review` or `citecheck` made with this
+  release is answered by `verification.*` events with `event_id` and the
+  verification under `verification`, and by `review.*` / `citecheck.*`
+  events without `task_id`. Parse them with `LenzWebhooks` from 2.21.0 or
+  later (which reads both shapes and fills the 2.x names), or read both
+  shapes yourself; a receiver on 2.20.0 or older, or one that reads the raw
+  JSON, must be updated before its sender moves to 3.0.
 - **What shows the newer shape as sent:** `LenzError.body` and a webhook
   event's `raw`. Code that reads those raw bodies reads the newer names
   (`docs_url`, `retry_after`, `failure`, `claims`, ...).
 - **What the API now words or sends differently**, which no client can
-  rebuild: a failed verification's sentence (`error`, and the
-  `LenzPipelineError` message built from it) and some hints and 4xx messages
-  are worded anew; `verify`'s receipt has no `chain_id`; the `taskId` of a
-  `review.*` / `citecheck.*` webhook event is the review / citation-check id
-  (dedupe on `eventId`); a repeated `verify` answered from the first one is a
-  202 (the SDK returns the same receipt either way).
+  rebuild:
+  - a failed check's `error` (and the `LenzPipelineError` message built from
+    it) reads "Pipeline stopped at: <code>" or its fixed sentence, as a
+    running check's failure did; a failure read back from storage said
+    "Pipeline stopped: <code>." in 2.x;
+  - the 409 `verification_failed` from `verifications.get` carries the run's
+    own `hint` (and so `fix`), where 2.x sometimes carried a generic one; a
+    failed poll read back from storage can carry a `hint` 2.x left out;
+  - some other hints and 4xx messages are worded anew (`err.message` /
+    `cause_` of a blank input or an unparseable body, a failed review's
+    hint);
+  - a review row stored without a failure block reads one, where 2.x read
+    `failure: null`; a review's deep check's `modified_at` is computed from
+    `completed_at` by the 2.x rule instead of read as stored;
+  - an extraction the API first read as not a claim and then found one in
+    says `status: "ready"` (2.x: `"not_a_claim"`);
+  - `verify`'s receipt has no `chain_id`; the `taskId` of a `review.*` /
+    `citecheck.*` webhook event is the review / citation-check id (dedupe on
+    `eventId`); a repeated `verify` answered from the first one is a 202
+    (the SDK returns the same receipt either way).
+- Error `code`s the API now sends where 2.x had none (`not_authenticated`,
+  `not_found`, `validation_error`, `malformed_body`, `verification_not_ready`
+  on `/ask`, ...) read as `""` on the error, per endpoint; a 422 keeps its 2.x
+  `code`, message and `errors` (a schema error's field items, `/review` and
+  `/citecheck`'s own envelope, `blank_item` on an `assess` list). The raw
+  `body` carries the codes as sent.
 - `webhookUrl` keeps its meaning on every method: on `verify` and
-  `verifyBatch` an unset or empty one is left out of the request (your
+  `verifyBatch` an unset, empty or blank one is left out of the request (your
   credential's default URL); on `review` and `citecheck` `""` still means no
   webhook for this call.
 

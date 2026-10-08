@@ -252,10 +252,16 @@ describe("webhook_url in request bodies", () => {
     const client = new sdk.Lenz({ apiKey: "lenz_t", fetch });
     await client.verify({ claim: "a" });
     await client.verify({ claim: "a", webhookUrl: "" });
+    // Blank is omitted too: the API version 3.0 asks for reads it as "no
+    // webhook", 2.x's server as the credential's default.
+    await client.verify({ claim: "a", webhookUrl: "   " });
+    await client.verifyBatch({ claims: [{ claim: "b", webhook_url: " " }], webhookUrl: "\t" });
     await client.verify({ claim: "a", webhookUrl: "https://example.com/h" });
     expect(bodies).toEqual([
       { text: "a", source_url: "" },
       { text: "a", source_url: "" },
+      { text: "a", source_url: "" },
+      { claims: [{ text: "b", source_url: "" }] },
       { text: "a", source_url: "", webhook_url: "https://example.com/h" },
     ]);
   });

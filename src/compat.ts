@@ -396,6 +396,29 @@ export function normalizeVerificationList(body: unknown): unknown {
 
 // ── /verify/status ──
 
+/** The original poll's fixed `error` sentences, by failure code. */
+const LEGACY_STATUS_ERROR: Record<string, string> = {
+  cancelled: "Cancelled.",
+  task_stuck: "The task was never completed and has been marked failed.",
+  task_error: "Pipeline failed.",
+  not_a_claim: "Not a verifiable claim.",
+};
+
+/**
+ * A failed poll's original `error`: its fixed sentence for the codes that had
+ * one, else "Pipeline stopped at: <code>" (the form a running check's failure
+ * took; a failure read back from storage said "Pipeline stopped: <code>.").
+ * The newer shape's sentence when there is no code.
+ */
+function legacyStatusError(code: unknown, detail: unknown): string | null {
+  if (typeof code === "string" && code) {
+    return has(LEGACY_STATUS_ERROR, code)
+      ? LEGACY_STATUS_ERROR[code]!
+      : `Pipeline stopped at: ${code}`;
+  }
+  return str(detail);
+}
+
 /** A newer-shape failed status carries `failure` (and none of the flat fields). */
 function isNewFailedStatus(body: Obj): boolean {
   return isObj(body["failure"]) && !has(body, "failure_reason") && !has(body, "error");
@@ -411,7 +434,8 @@ export function normalizeTaskStatus(body: unknown): unknown {
   if (isNewFailedStatus(body)) {
     const failure = normalizeFailureBlock(body["failure"], "not_a_claim") as Obj;
     out["failure"] = failure;
-    if (typeof failure["detail"] === "string") fill(out, "error", failure["detail"]);
+    const sentence = legacyStatusError(failure["failure_reason"], failure["detail"]);
+    if (sentence !== null) fill(out, "error", sentence);
     if (typeof failure["failure_reason"] === "string") {
       fill(out, "failure_reason", failure["failure_reason"]);
     }
