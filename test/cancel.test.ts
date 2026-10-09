@@ -397,3 +397,83 @@ describe("a 200 that is not a cancel result", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("every id that goes into a path", () => {
+  const ok = () => new Response("{}", { status: 200 });
+  const TRAVERSAL: Array<[string, string]> = [
+    ["../x", "..%2Fx"],
+    ["a/b", "a%2Fb"],
+    ["a?b", "a%3Fb"],
+    ["a#b", "a%23b"],
+  ];
+
+  // Each call with the path it must make for a normal id `ID`.
+  const CALLS: Array<[string, (c: Lenz, id: string) => Promise<unknown>, string, string]> = [
+    ["getStatus", (c, id) => c.getStatus(id), "GET", "/verify/status/ID"],
+    ["select", (c, id) => c.select(id, { claims: ["a"] }), "POST", "/verify/ID/select"],
+    ["verifications.get", (c, id) => c.verifications.get(id), "GET", "/verifications/ID"],
+    [
+      "verifications.getCertificate",
+      (c, id) => c.verifications.getCertificate(id),
+      "GET",
+      "/verifications/ID/certificate",
+    ],
+    ["verifications.delete", (c, id) => c.verifications.delete(id), "DELETE", "/verifications/ID"],
+    [
+      "verifications.related",
+      (c, id) => c.verifications.related(id),
+      "GET",
+      "/verifications/ID/related",
+    ],
+    ["ask.history", (c, id) => c.ask.history(id), "GET", "/ask/ID"],
+    ["ask.send", (c, id) => c.ask.send(id, { message: "x" }), "POST", "/ask/ID"],
+    ["ask.reset", (c, id) => c.ask.reset(id), "DELETE", "/ask/ID"],
+    ["getReview", (c, id) => c.getReview(id), "GET", "/reviews/ID"],
+    ["getCitecheck", (c, id) => c.getCitecheck(id), "GET", "/citechecks/ID"],
+    ["cancel", (c, id) => c.cancel(id), "POST", "/verify/ID/cancel"],
+    ["cancelReview", (c, id) => c.cancelReview(id), "POST", "/reviews/ID/cancel"],
+    ["cancelCitecheck", (c, id) => c.cancelCitecheck(id), "POST", "/citechecks/ID/cancel"],
+  ];
+
+  const answer = (name: string) =>
+    name === "cancel"
+      ? () =>
+          new Response(JSON.stringify({ task_id: "t", cancelled: true, status: "cancelled" }), {
+            status: 200,
+          })
+      : ok;
+
+  it.each(CALLS)("%s: a traversal id stays one path segment", async (name, call, method, tpl) => {
+    for (const [id, encoded] of TRAVERSAL) {
+      const { fetch, calls } = serving(answer(name));
+      await call(make(fetch), id).catch(() => undefined);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.init.method).toBe(method);
+      expect(calls[0]!.url.search).toBe(name === "verifications.related" ? "?limit=5" : "");
+      expect(calls[0]!.url.hash).toBe("");
+      expect(calls[0]!.url.pathname).toBe(`/api/v1${tpl.replace("ID", encoded)}`);
+    }
+  });
+
+  it.each(CALLS)("%s: '.' and '..' are refused with no request", async (name, call) => {
+    const { fetch, calls } = serving(answer(name));
+    for (const id of [".", "..", ""]) {
+      const err = (await call(make(fetch), id).catch((e: unknown) => e)) as Error;
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(LenzError);
+      expect(err.message).toMatch(new RegExp(`^${name.replace(".", "\\.")}\\(\\) `));
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("wait refuses them too, before polling", async () => {
+    const { fetch, calls } = serving(ok);
+    for (const id of [".", ".."]) {
+      const err = (await make(fetch)
+        .wait(id, { timeoutMs: 1000 })
+        .catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe("wait() was given an invalid task_id.");
+    }
+    expect(calls).toHaveLength(0);
+  });
+});

@@ -788,9 +788,10 @@ class VerificationsNamespace {
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
   async get(verificationId: string): Promise<Verification> {
+    const id = requirePathId("verifications.get", "verification_id", verificationId);
     const body = await this.client.request<Verification>({
       method: "GET",
-      path: `/verifications/${verificationId}`,
+      path: `/verifications/${id}`,
       authRequired: false,
       authOptional: true, // send the key if we have one → owner sees private rows
     });
@@ -815,18 +816,20 @@ class VerificationsNamespace {
    * open-source checker without involving Lenz. A withdrawn certificate is
    * still served — it is the record of what was warranted.
    */
-  getCertificate(verificationId: string): Promise<Certificate> {
+  async getCertificate(verificationId: string): Promise<Certificate> {
+    const id = requirePathId("verifications.getCertificate", "verification_id", verificationId);
     return this.client.request<Certificate>({
       method: "GET",
-      path: `/verifications/${verificationId}/certificate`,
+      path: `/verifications/${id}/certificate`,
     });
   }
 
   async delete(verificationId: string): Promise<boolean> {
+    const id = requirePathId("verifications.delete", "verification_id", verificationId);
     try {
       await this.client.request<unknown>({
         method: "DELETE",
-        path: `/verifications/${verificationId}`,
+        path: `/verifications/${id}`,
       });
       return true;
     } catch (exc) {
@@ -846,13 +849,14 @@ class VerificationsNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  related(
+  async related(
     verificationId: string,
     { limit = 5 }: { limit?: number } = {},
   ): Promise<RelatedVerifications> {
+    const id = requirePathId("verifications.related", "verification_id", verificationId);
     return this.client.request<RelatedVerifications>({
       method: "GET",
-      path: `/verifications/${verificationId}/related`,
+      path: `/verifications/${id}/related`,
       query: { limit },
       authRequired: false,
       authOptional: true, // send the key if we have one → owner sees own rows
@@ -868,10 +872,11 @@ class AskNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  history(verificationId: string): Promise<AskHistory> {
+  async history(verificationId: string): Promise<AskHistory> {
+    const id = requirePathId("ask.history", "verification_id", verificationId);
     return this.client.request<AskHistory>({
       method: "GET",
-      path: `/ask/${verificationId}`,
+      path: `/ask/${id}`,
     });
   }
 
@@ -886,6 +891,7 @@ class AskNamespace {
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
   async send(verificationId: string, input: AskSendInput): Promise<AskReply> {
+    const id = requirePathId("ask.send", "verification_id", verificationId);
     const body: Record<string, unknown> = { message: input.message };
     if (input.language) body.language = input.language;
     const idempotencyKey = await callIdempotencyKey(input);
@@ -893,16 +899,17 @@ class AskNamespace {
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.client.request<AskReply>({
       method: "POST",
-      path: `/ask/${verificationId}`,
+      path: `/ask/${id}`,
       json: body,
       headers,
     });
   }
 
   async reset(verificationId: string): Promise<boolean> {
+    const id = requirePathId("ask.reset", "verification_id", verificationId);
     await this.client.request<unknown>({
       method: "DELETE",
-      path: `/ask/${verificationId}`,
+      path: `/ask/${id}`,
     });
     return true;
   }
@@ -1180,6 +1187,7 @@ export class Lenz {
    * claim offered in the prior interrupt — the server rejects anything else.
    */
   async select(taskId: string, input: SelectInput): Promise<BatchAccepted> {
+    const id = requirePathId("select", "task_id", taskId);
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
     if (!chosen || chosen.length === 0) {
       throw new Error("select requires a non-empty claims array");
@@ -1191,7 +1199,7 @@ export class Lenz {
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     const accepted = await this.request<BatchAccepted>({
       method: "POST",
-      path: `/verify/${taskId}/select`,
+      path: `/verify/${id}/select`,
       json: { texts: chosen },
       headers,
     });
@@ -1224,9 +1232,10 @@ export class Lenz {
     taskId: string,
     transport: Pick<RequestOptions, "timeoutMs" | "deadlineAt"> = {},
   ): Promise<TaskStatus> {
+    const id = requirePathId("getStatus", "task_id", taskId);
     const body = await this.request<TaskStatus>({
       method: "GET",
-      path: `/verify/status/${taskId}`,
+      path: `/verify/status/${id}`,
       ...transport,
     });
     return normalizeTaskStatus(body) as TaskStatus;
@@ -1707,6 +1716,7 @@ export class Lenz {
     if (!taskId) {
       throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
     }
+    requirePathId("wait", "task_id", taskId);
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       [taskId],
