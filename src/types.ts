@@ -99,8 +99,8 @@ export interface EntityRef {
 export interface SimilarVerification {
   verification_id?: string;
   claim?: string;
-  verdict?: string;
-  confidence?: string;
+  verdict?: Verdict | (string & NonNullable<unknown>);
+  confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null;
   url?: string;
   distance?: number;
@@ -139,8 +139,8 @@ export interface Verification {
   entities?: EntityRef[];
   presumed_intent?: string;
   // Verdict block (flat)
-  verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
-  confidence?: string; // "high" | "medium" | "low"
+  verdict?: Verdict | (string & NonNullable<unknown>);
+  confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null; // integer 1–10
   /**
    * The analysis's key finding: one declarative sentence stating the
@@ -304,8 +304,8 @@ export interface VerificationListItem {
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
-  verdict?: string;
-  confidence?: string;
+  verdict?: Verdict | (string & NonNullable<unknown>);
+  confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null;
   /** The analysis's key finding (2.6.0). See `Verification.key_finding`. */
   key_finding?: string;
@@ -480,9 +480,9 @@ export interface AssessClaim {
    * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
    * `"Error"` on a failed row (kept for existing code: read `status`).
    */
-  verdict?: string;
+  verdict?: Verdict | (string & NonNullable<unknown>);
   /** "high" | "medium" | "low"; `"low"` on a failed row (read `status`). */
-  confidence?: string;
+  confidence?: Confidence | (string & NonNullable<unknown>);
   /**
    * Why a failed row has no verdict: `code` (`no_checkable_claim`,
    * `framing_failed`, `upstream_unavailable`, `timeout`, an open set),
@@ -1322,6 +1322,20 @@ export type VerdictLabel = "True" | "Mostly True" | "Mixed" | "Mostly False" | "
 
 /** A confidence band. */
 export type ConfidenceBand = "low" | "medium" | "high";
+
+/**
+ * A verdict as read on a verification or an assess row: one of the five
+ * labels, or `"Error"` on a failed assess row. Fields typed with it also take
+ * any other string (`Verdict | (string & {})`), so a value a later API adds
+ * still reads.
+ */
+export type Verdict = VerdictLabel | "Error";
+
+/** A confidence as read on a verification or an assess row (same as `ConfidenceBand`). */
+export type Confidence = ConfidenceBand;
+
+/** A check's depth: `"standard"` (10 credits) or `"low"` (5 credits, fewer sources). */
+export type Depth = "standard" | "low";
 
 /**
  * Where a review stands. `verifying` is skipped when no deep check was

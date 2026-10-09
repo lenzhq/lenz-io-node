@@ -41,7 +41,7 @@
  */
 
 export { API_VERSION, DEFAULT_BASE_URL, Lenz } from "./client.js";
-export type { LenzOptions } from "./client.js";
+export type { LenzLogger, LenzOptions } from "./client.js";
 
 export {
   LenzAPIError,
@@ -96,6 +96,9 @@ export type {
 
 export type {
   ConfidenceBand,
+  Confidence,
+  Depth,
+  Verdict,
   Escalation,
   EscalationDisposition,
   EscalationPolicy,
