@@ -16,9 +16,28 @@ generators, deep-research products, due-diligence platforms, vertical
 agents producing structured deliverables. Not chat AI, not voice AI,
 not real-time copilots — pipeline runs are the wrong shape for those.
 
+## First call
+
 ```bash
 npm install lenz-io
+export LENZ_API_KEY=lenz_...   # from https://lenz.io/api-credentials (a free account comes with credits)
 ```
+
+```ts
+import { Lenz } from "lenz-io";
+
+const client = new Lenz(); // reads LENZ_API_KEY
+
+const { claims } = await client.assess({ claim: "The Eiffel Tower is in Berlin." });
+for (const row of claims) {
+  if (row.status === "failed") console.log("No verdict:", row.failure?.hint);
+  else console.log(row.verdict, row.confidence, row.claim); // False high The Eiffel Tower is in Berlin.
+}
+```
+
+`assess` is the quick check: a verdict and a confidence for each claim in
+about 15-20 seconds, 1 credit a claim. For sources and a 1-10 score, deep-check
+a claim with `verify` (below); to check a whole draft, `review` it.
 
 ## Review a draft
 
@@ -167,6 +186,8 @@ Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check;
 `idempotencyKey` within 24 hours returns the same review; a new key is a new
 review.
 
+A runnable version is in [`examples/core/review-draft.ts`](examples/core/review-draft.ts).
+
 ## Check a draft's citations
 
 `citecheck` runs the citation check on its own, without the rest of a review:
@@ -202,6 +223,7 @@ The body carries the same rows as a review's: `citations`, `citation_issues`,
 `citecheckAndWait` throws `CitecheckFailedError` when the check fails and
 `CitecheckTimeoutError` at the deadline. `citecheck.completed` and
 `citecheck.failed` webhooks parse into `CitecheckCompleted` / `CitecheckFailed`.
+A runnable version is in [`examples/core/citecheck.ts`](examples/core/citecheck.ts).
 
 ## Quickstart — the canonical integration
 
@@ -230,7 +252,7 @@ for (const c of quick) {
 // 3. verify — escalate the low-confidence rows to the full panel + citations
 // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
 const doubtful = quick
-  .filter((c) => c.status !== "failed" && c.confidence === "low")
+  .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
   .map((c) => ({ claim: c.claim! }))
   .slice(0, 20);
 const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
@@ -241,12 +263,14 @@ for (const r of results) {
   }
 }
 
-// 4. ask — follow-up grounded on a verification
+// 4. ask — a follow-up question on a completed deep check, when there is one
 const deep = results.find((r) => r.status === "completed")?.verification;
-const reply = await client.ask.send(deep!.verification_id!, {
-  message: "Which source is strongest?",
-});
-console.log(reply.content);
+if (deep?.verification_id) {
+  const reply = await client.ask.send(deep.verification_id, {
+    message: "Which source is strongest?",
+  });
+  console.log(reply.content);
+}
 ```
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
@@ -327,8 +351,8 @@ your own claims. Use webhooks for production async flows.
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
-- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
-- **`client.library.list(...)`** → browse the public catalog (no API key needed).
+- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll()) …`), one request a page. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
+- **`client.library.list(...)`** → browse the public catalog (no API key needed). `library.listAll(filters)` iterates every page of a filtered list (any `sort` but `"random"`).
 - **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
@@ -588,11 +612,15 @@ business plan a new warranty certificate, charged at the depth you requested.
 ## Errors
 
 Every error subclass is typed and carries a `requestId` you can quote on
-support tickets:
+support tickets, and `retryable`: `true` when sending the same request again
+later can succeed (a network failure, a transport timeout, a 429, a 5xx),
+`false` when it cannot (any other 4xx), `null` when unknown.
 
 ```ts
 import {
   LenzAuthError,
+  LenzConnectionError,
+  LenzNotFoundError,
   LenzQuotaExceededError,
   LenzRateLimitError,
   LenzUpstreamUnavailableError,
@@ -628,6 +656,14 @@ try {
     for (const fieldErr of exc.errors) {
       console.error(fieldErr["loc"], fieldErr["msg"]);
     }
+  } else if (exc instanceof LenzNotFoundError) {
+    // HTTP 404: nothing with that id is visible to this key. Check the id;
+    // retrying will not help.
+  } else if (exc instanceof LenzConnectionError) {
+    // No HTTP answer after the automatic retries: a network failure, or
+    // (LenzRequestTimeoutError, a subclass) one attempt ran past timeoutMs.
+    // exc.cause is the underlying fetch error. Paid calls send an
+    // Idempotency-Key, so sending the same call again is safe.
   } else if (exc instanceof LenzUpstreamUnavailableError) {
     // HTTP 503, code "upstream_unavailable" (model/search providers
     // exhausted) or "capacity" (submissions shed at the door). Nothing was
@@ -647,6 +683,18 @@ A failed _verification_ (as opposed to a failed HTTP call) throws
 a transient provider-side exhaustion where resubmitting the same claim is the
 right move; older servers leave it `null`.
 
+`LenzConnectionError` and `LenzUpstreamUnavailableError` are subclasses of
+`LenzAPIError`, so a 2.x handler for it still catches them. A
+`LenzRequestTimeoutError` (one HTTP attempt took too long) is not a
+`LenzTimeoutError`, which means a wait (`wait`, `*AndWait`) reached its
+deadline while the job kept running on the server: read it later, do not
+resubmit it.
+
+`wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once when a poll
+answers an error waiting cannot change (401, 403, 404): `wait` throws it, and
+in a batch that claim reads `"failed"` while the others keep being polled. A
+5xx, a 429 or a network drop is polled through.
+
 A read of a verification removed under its account's retention period throws
 `LenzGoneError` (HTTP 410, `code` `"purged"`, with `purgedAt`), and `wait` /
 `verifyAndWait` stop on it instead of polling to the deadline. See
@@ -657,7 +705,10 @@ A response that names an API version other than `2026-10-11` in its
 replay of an idempotent call can) is not parsed: the call throws
 `LenzApiVersionError` with `apiVersion` (the version named), `statusCode` and
 `body` (as sent). If it persists, contact support with the request id;
-lenz-io 2.x reads both versions. A response with no such header is not
+lenz-io 2.x reads both versions. An idempotent request first sent with 2.x
+(before lenz.io served `2026-10-11`) and replayed with the same key is
+answered this way: finish such work with 2.x, and never change the key to
+get past it, which would run the call again. A response with no such header is not
 checked, and neither are webhook events.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
@@ -718,18 +769,16 @@ covered verification is kept and can still be downloaded.
 
 ## Idempotency
 
-`verify`, `verifyAndWait`, `select`, `assess` and `extract` send an
-auto-generated `Idempotency-Key` on every call by default: a random key per
-call, reused across that call's own retries, so a network drop or a client
-timeout doesn't spawn a duplicate verification or charge a second credit. The
-key is never derived from the request. Override with `idempotencyKey: "..."`
-to pin a specific key, or `idempotency: false` to opt out.
-
-`review` always sends one: a random key per call unless you pass
-`idempotencyKey`. A resend with the same key within 24 hours returns the same
-review; a new key is a new review.
-
-`ask.send` takes a key too, but only pins one you choose:
+Every call that runs or charges for work sends an `Idempotency-Key` by
+default: `verify`, `verifyAndWait`, `verifyBatch`, `verifyBatchAndWait`,
+`select`, `assess`, `extract`, `ask.send`, `review` and `citecheck`. The key
+is random per call and reused across that call's own retries, so a network
+drop or a client timeout doesn't start a duplicate verification or charge a
+second credit. It is never derived from the request: the same text sent again
+in a new call is a new request. Pin a key with `idempotencyKey: "..."` (so a
+retry from another process replays too), or opt out with
+`idempotency: false` (not available on `review` and `citecheck`, which always
+send one).
 
 ```ts
 const reply = await client.ask.send(verificationId, {
@@ -738,15 +787,12 @@ const reply = await client.ask.send(verificationId, {
 });
 ```
 
-With a key, a retry of a question that already got a reply replays that reply
-instead of spending a second credit and leaving the question plus a second
-answer in the conversation. A retry sent while the first call is still running
-gets a 409 (`LenzError`, `statusCode` 409) — there is no reply to replay yet.
-
-No key is ever generated for you here, and none is derived from the message: a
-reply depends on the conversation so far, so asking the same question again is
-a normal thing to do. Without a key the call behaves exactly as before — a
-retry asks again, and pays again.
+A resend with the same key within 24 hours replays the first answer (the same
+receipt, review or reply) instead of running the call again. A resend while
+the first call is still running gets a 409 (`LenzError`, `statusCode` 409,
+`body.code` `idempotency_conflict`): wait and send it again with the same key,
+never with a new one, which would run the call a second time. On `ask.send`,
+asking the same question again in a new call is a new turn.
 
 ## Steering extract
 
@@ -884,6 +930,7 @@ new Lenz({
   timeoutMs: 30000,
   maxRetries: 3,
   fetch: customFetch, // inject for tests
+  logger: console, // optional: retries (debug) and verifyAndWait's task id (info); silent without one
 });
 ```
 

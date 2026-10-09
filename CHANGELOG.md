@@ -12,6 +12,13 @@ against 2.x keeps compiling and reading the same fields with the same values
 (they are deprecated, see "Deprecated"), except for the breaking changes
 below. Some upgrades need a change first: see "Migrating".
 
+> **Upgrading from 2.x.** Must: move webhook receivers to lenz-io 2.21.0 or
+> later before any sender moves to 3.0; update code that reads raw response
+> bodies; re-record recorded 2.x response fixtures; finish an idempotent
+> request first sent with 2.x with 2.x (its replay answers
+> `LenzApiVersionError` in 3.x; never change the key to get past it). May:
+> move off the deprecated names, which keep working. Details: "Migrating".
+
 ### Breaking
 
 - **3.0 reads only the API's `2026-10-11` response shape for its own calls**
@@ -75,6 +82,33 @@ below. Some upgrades need a change first: see "Migrating".
 
 ### Changed
 
+Intentional behaviour changes; nothing else that worked on 2.21 behaves
+differently:
+
+- **`verifyBatch` / `verifyBatchAndWait` and `ask.send` send an
+  `Idempotency-Key` by default**, like `verify`, `assess`, `extract` and
+  `select` already did: a random key per call, reused across that call's own
+  retries, so a retried batch or question is not run (and charged) twice. A
+  key you pass wins; `idempotency: false` sends none. The request body is
+  unchanged. A resend while the first call is still running gets the 409 it
+  got before (`body.code` `idempotency_conflict`); send it again with the
+  same key.
+- **`wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once on an error
+  waiting cannot change** (401, 403, 404, `LenzApiVersionError`): `wait`
+  throws it, where 2.x polled on to a `LenzTimeoutError` at the deadline; in
+  a batch that claim reads `"failed"` (no `status_detail`) and the others
+  keep being polled. A 5xx, a 429 and a network drop are polled through as
+  before, and every poll request now ends by the wait's deadline.
+- **Network failures and transport timeouts throw subclasses of the class
+  they threw in 2.x**: `LenzConnectionError` and, for a timeout,
+  `LenzRequestTimeoutError`, both `LenzAPIError`s. A timeout's message reads
+  `<METHOD> <path> timed out after <n>ms (<k> attempts).` instead of the raw
+  `AbortError: …`; a body that stalls past the timeout keeps its message.
+  **A 404 throws `LenzNotFoundError`** (a `LenzError`, as before) whose `fix`
+  says to check the id rather than to retry; its message is unchanged.
+- **The client no longer prints `[lenz-io] Submitted task: …`** to the
+  console on every `verifyAndWait`. Pass a `logger` to get it (see Added).
+
 - **The newer names are the way to read a response**: `claims`, `status` and
   `failure`, `claim`, `more_claims`, `completed_at`, `claim_limit_exceeded`,
   `citation_limit_exceeded`, `credits` with `costs`, `failure.code`. See
@@ -91,6 +125,46 @@ below. Some upgrades need a change first: see "Migrating".
 - On a `verification.completed` event, `verification.result` has the same
   defaults as `result` (a field the payload leaves out reads as `result`
   reads it); `raw` stays as delivered.
+
+### Added
+
+- **`LenzNotFoundError`** (404), **`LenzConnectionError`** and
+  **`LenzRequestTimeoutError`** (see Changed). `LenzRequestTimeoutError` is
+  one HTTP attempt that took too long; `LenzTimeoutError` remains a wait that
+  reached its deadline while the job kept running.
+- **`retryable` on every error** (`boolean | null`, set when the error is
+  built): `true` for a network failure, a transport timeout, a 429 or a 5xx,
+  `false` for any other 4xx and for `LenzApiVersionError`, `null` when
+  unknown; a boolean the response body states wins. A failed run
+  (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`) keeps
+  the server's value, `null` when it stated none, as in 2.x.
+- **The underlying `fetch` error as the native `cause`** of a
+  `LenzConnectionError`; the string `cause_` line is unchanged.
+- **Every error class from the browser entry**: `LenzUpstreamUnavailableError`
+  and the new classes were missing from it.
+- **`logger` option** on `new Lenz({ logger })` (`LenzLogger`: optional
+  `debug`, `info`, `warn`; `console` fits): retries go to `debug`, the
+  `verifyAndWait` task id to `info`. Silent without one.
+- **`idempotency` option** on `verifyBatch`, `verifyBatchAndWait` and
+  `ask.send`.
+- **`isEvent(event, kind)`** narrows a parsed webhook event without a cast,
+  only when the event's name is `kind` and the member it promises
+  (`verification` with its `result`, `review`, `citecheck`, `coverage`) was
+  parsed; `WebhookEventMap` names the narrowed types. **`eventId`**
+  (optional) on every webhook event, from the payload's `event_id` in either
+  shape.
+- **`verifications.listAll()` and `library.listAll(filters)`**: every item
+  across pages, as an `AsyncIterable`, one page request at a time. The page
+  size is read from each response, the start page is honoured, and the walk
+  stops on a short or empty page; `sort: "random"` is refused.
+- **`Verdict`, `Confidence` and `Depth` types**, and the `verdict` /
+  `confidence` fields typed plain `string` (verifications, list items,
+  related verifications, `assess` rows) now name their values
+  (`Verdict | (string & {})`), so an editor completes them; any string
+  still fits.
+- README: a "First call" section, and runnable `review` and `citecheck`
+  examples (`examples/core/review-draft.ts`, `examples/core/citecheck.ts`),
+  type-checked with the other examples by `npm run type`.
 
 ### Deprecated
 
@@ -136,6 +210,7 @@ replacement).
 |                                                                                    | `LenzQuotaExceededError.creditsRemaining` (still warns once)       | `remaining`                                                                      |
 |                                                                                    | `ReviewFailedError.errorCode`                                      | `review.failure.code`                                                            |
 |                                                                                    | `CitecheckFailedError.errorCode`                                   | `citecheck.failure.code`                                                         |
+| `verifyBatch` items                                                                | `idempotency_key` (never sent; no effect)                          | `idempotencyKey` on the batch                                                    |
 
 `creditsRemaining`, which earlier releases said would be removed in 3.0, is
 kept, and its one-time console warning now says "a future major release".
@@ -162,6 +237,13 @@ and `error_code`.
   newer shape: a recorded body in the earlier shape is refused
   (`LenzApiVersionError`) when it carries its version header, and is not
   guaranteed to read correctly when it does not.
+- **An idempotent request first sent before lenz.io served `2026-10-11`**
+  and replayed later with the same `Idempotency-Key` is answered in the
+  version it was first answered in, which 3.x refuses
+  (`LenzApiVersionError`). Finish such work with 2.x; never change the key to
+  get past it, which would run the call a second time. In practice none
+  remain at release: replays last 24 hours, and the API has stored both
+  shapes for every request since its versioning release on 2026-10-09.
 - Node 22.12 or later.
 
 **Optional**

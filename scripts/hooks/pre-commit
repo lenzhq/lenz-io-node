@@ -8,7 +8,7 @@
 #
 # Runs (~10s total on a warm cache):
 #   1. npm run lint   — eslint + prettier --check
-#   2. npm run type   — tsc --noEmit
+#   2. npm run type   — tsc --noEmit (src, tests, examples)
 #   3. npm test       — vitest run (skips live-API smoke via env)
 #   4. npm run build  — tsup (catches packaging breakage)
 #

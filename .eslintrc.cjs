@@ -4,7 +4,7 @@ module.exports = {
   parserOptions: { ecmaVersion: 2022, sourceType: "module" },
   plugins: ["@typescript-eslint"],
   extends: ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
-  ignorePatterns: ["dist/", "node_modules/", "examples/"],
+  ignorePatterns: ["dist/", "node_modules/"],
   rules: {
     "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     "@typescript-eslint/no-explicit-any": "off",

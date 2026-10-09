@@ -66,11 +66,12 @@
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint --fix . && prettier --write .",
     "pretype": "npm run --silent sync-version",
-    "type": "tsc --noEmit",
+    "type": "tsc --noEmit && tsc -p tsconfig.examples.json",
     "regen": "if [ -z \"$LENZ_REPO\" ]; then echo 'Set LENZ_REPO=/path/to/Lenz' >&2; exit 1; fi && cd \"$LENZ_REPO\" && uv run python manage.py emit_openapi --output \"$OLDPWD/openapi.json\" --pretty && cd \"$OLDPWD\" && echo \"Refreshed openapi.json from $LENZ_REPO\"",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",

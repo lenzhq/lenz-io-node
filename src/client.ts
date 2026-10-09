@@ -21,45 +21,46 @@
  *   byte-identical English path. The omit-when-empty convention exists
  *   precisely to avoid that.
  *
- * Four API primitives form a research-depth ladder — find claims, judge
- * them fast, prove them deep, follow up:
+ * Six API calls: `extract`, `assess`, `verify` and `ask` form a
+ * research-depth ladder (find claims, judge them fast, prove them deep,
+ * follow up); `review` runs it on a whole draft and `citecheck` checks a
+ * draft's citations on their own.
  *
  * ```ts
- * import { Lenz } from 'lenz-io';
- * const client = new Lenz({ apiKey: 'lenz_...' });
+ * import { Lenz, type AssessClaim } from 'lenz-io';
+ * const client = new Lenz(); // reads LENZ_API_KEY
  *
- * // 1. extract — pull verifiable claims out of text (free, 1000/day)
+ * // 1. extract — pull verifiable claims out of text (free, 1000 calls a day)
  * const out = await client.extract({ text: llmOutput });
  * const claims = (out.claims ?? []).map((c) => c.claim);
  *
- * // 2. assess — one call per 20 claims (extract finds up to 100), one
- * //    row per claim in the same order. A row with verdict 'Error' has
- * //    error_code + hint; a compound item lists the rest in identified_claims.
+ * // 2. assess — a quick verdict per claim: up to 20 claims a call, one row per
+ * //    claim in the same order. A row with status 'failed' has no verdict
+ * //    (`failure` says why); a compound item lists the rest in more_claims.
  * const quick: AssessClaim[] = [];
  * for (let i = 0; i < claims.length; i += 20) {
  *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
  * }
  *
- * // 3. verify — escalate the low-confidence rows to the full pipeline (~90s, paid)
- * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
+ * // 3. verify — deep-check the low-confidence rows (~90s, paid, 20 a call)
  * const doubtful = quick
- *   .filter((c) => c.verdict !== 'Error' && c.confidence === 'low')
+ *   .filter((c) => c.status !== 'failed' && c.confidence === 'low' && c.claim)
  *   .map((c) => ({ claim: c.claim! }))
  *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
  *
- * // 4. ask — follow-up grounded on a verification
+ * // 4. ask — a follow-up question on a completed deep check, when there is one
  * const deep = results.find((r) => r.status === 'completed')?.verification;
- * const reply = await client.ask.send(deep!.verification_id!, {
- *   message: 'Which source is strongest?',
- * });
+ * if (deep?.verification_id) {
+ *   const reply = await client.ask.send(deep.verification_id, {
+ *     message: 'Which source is strongest?',
+ *   });
+ *   console.log(reply.content);
+ * }
  *
- * // Async / parallel verify-family verbs:
- * const task = await client.verify({ claim: '...' });   // returns task_id
- * const v = await client.wait(task);                     // block until it lands
- * const results = await client.verifyBatchAndWait({      // fan out + poll all
- *   claims: [{ text: '...' }, { text: '...' }],
- * });
+ * // Async verify: submit, then wait (or receive the webhook)
+ * const task = await client.verify({ claim: '...' }); // returns task_id
+ * const v = await client.wait(task); // block until it lands
  * ```
  */
 
@@ -817,9 +818,10 @@ export class Lenz {
    *   `more_claims`, unchecked and free.
    * - `assess({ claims })` — up to 20 claims in one call (~15s); returns
    *   exactly one entry per item, in the order sent. This is the step after
-   *   `extract` in the ladder. A row with `verdict === "Error"` has
-   *   `error_code` and `hint` and is free; a compound item is assessed on
-   *   its main claim and lists the rest in `identified_claims`.
+   *   `extract` in the ladder. A row with `status === "failed"` has no
+   *   verdict, a `failure` saying why (`code`, `hint`) and is free; a
+   *   compound item is assessed on its main claim and lists the rest in
+   *   `more_claims`.
    *
    * ```ts
    * const out = await client.extract({ text: llmOutput });
@@ -830,7 +832,7 @@ export class Lenz {
    * }
    * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
    * const doubtful = quick
-   *   .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+   *   .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
    *   .map((c) => ({ claim: c.claim! }))
    *   .slice(0, 20);
    * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];

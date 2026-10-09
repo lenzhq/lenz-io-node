@@ -1035,8 +1035,8 @@ export interface VerifyInput {
    */
   language?: string;
   /**
-   * "standard" (server default) or "low". "low" runs a shallower check —
-   * fewer sources, faster. Same models, same quota cost. Omitted from the
+   * "standard" (server default, 10 credits) or "low" (5 credits). "low"
+   * runs a shallower check — fewer sources, faster, same models. Omitted from the
    * request body when unset. The completed `Verification.depth` echoes the
    * depth the verdict was actually produced with, which can be "standard"
    * for a "low" request served from cache.

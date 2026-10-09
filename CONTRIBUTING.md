@@ -38,7 +38,7 @@ pass: `release.yml` runs them through `smoke.yml`, which fails when
 
 ```bash
 npm run build       # tsup → dist/index.{js,cjs,d.ts,d.cts}
-npm run type        # tsc --noEmit
+npm run type        # tsc --noEmit, then the examples (tsconfig.examples.json)
 npm run lint        # eslint + prettier
 ```
 
