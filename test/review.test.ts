@@ -475,7 +475,7 @@ describe("reviewAndWait()", () => {
     expect(calls).toHaveLength(2); // the POST, then exactly one GET
   });
 
-  // D7 (3.0): the budget starts after the submit, as every other wait's
+  // Since 3.0 the budget starts after the submit, as every other wait's
   // does, so it no longer bounds the submit (re-baselined from "the submit's
   // retry ladder stops at the deadline" and "a hung submit is aborted at the
   // deadline, not at the client timeout").

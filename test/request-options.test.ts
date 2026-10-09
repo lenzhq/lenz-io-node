@@ -63,7 +63,7 @@ type Takes = "all" | "wait" | "submitWait";
 const ALL = ["signal", "timeoutMs", "maxRetries", "headers"] as const;
 const OPTION_NAMES: Record<Takes, readonly string[]> = {
   all: ALL,
-  // `timeoutMs` there is the wait's budget, an existing name; no retries (D4).
+  // `timeoutMs` there is the wait's budget, an existing name; no retries.
   wait: ["signal", "headers"],
   // `maxRetries` is the submit's.
   submitWait: ["signal", "maxRetries", "headers"],
@@ -573,6 +573,24 @@ describe("what the per-call timeoutMs bounds, and precedence", () => {
     expect(extra).toEqual([["x-a", "2"]]);
   });
 
+  for (const [name, copy, expected] of [
+    ["the client's", undefined, 30_000],
+    ["the copy's", { timeoutMs: 12_000 }, 12_000],
+  ] as const) {
+    it(`a review wait with no budget reads once with ${name} attempt timeout`, async () => {
+      const { fetch, aborts, sent } = recorder([{ status: 202, body: REVIEW_ACCEPTED }], {
+        hang: true,
+      });
+      const root = new Lenz({ apiKey: "lenz_t", fetch });
+      const c = copy ? root.withOptions(copy) : root;
+      const pending = settle(c.reviewAndWait({ text: "a" }, { timeoutMs: 0 }));
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(await pending).toHaveProperty("name", "ReviewTimeoutError");
+      expect(sent).toHaveLength(2);
+      expect(aborts).toEqual([expected]);
+    });
+  }
+
   it("an untouched copy timeout leaves the client's", async () => {
     expect(await firstAbort((c) => c.usage(), {}, { headers: { "X-A": "1" } })).toBe(30_000);
   });
@@ -641,10 +659,10 @@ describe("maxRetries precedence", () => {
   });
 });
 
-// ── validation (D12) ─────────────────────────────────────────────────────
+// ── validation ───────────────────────────────────────────────────────────
 
 describe("validation: one rule for every per-request setting", () => {
-  const BAD_TIMEOUTS: unknown[] = [0, -1, NaN, Infinity, -Infinity, "5", null];
+  const BAD_TIMEOUTS: unknown[] = [0, -1, NaN, Infinity, -Infinity, "5", null, 2 ** 31];
   const BAD_RETRIES: unknown[] = [-1, 1.5, NaN, Infinity, "2", null];
 
   function noNetwork() {
@@ -681,7 +699,7 @@ describe("validation: one rule for every per-request setting", () => {
       const c = new Lenz({ apiKey: "lenz_t", fetch });
       const o = { timeoutMs: value } as unknown as RequestOptions;
       expect((await refused(() => c.verify({ claim: "a" }, o), fetch)).message).toMatch(
-        /timeoutMs must be a finite number/,
+        /timeoutMs must be (a finite number|at most)/,
       );
       await refused(() => c.assess({ claim: "a" }, o), fetch);
       await refused(() => c.getReview("r1", o), fetch);
@@ -689,9 +707,16 @@ describe("validation: one rule for every per-request setting", () => {
       await refused(() => c.library.listAll({}, o), fetch);
       await refused(() => c.verifications.listAll(o), fetch);
       await refused(() => c.withOptions(o), fetch);
-      await refused(() => new Lenz({ apiKey: "lenz_t", fetch, timeoutMs: value as number }), fetch);
+      // On the 2.x fields, null still means "not given" (below).
+      if (value !== null) {
+        await refused(
+          () => new Lenz({ apiKey: "lenz_t", fetch, timeoutMs: value as number }),
+          fetch,
+        );
+      }
     });
 
+    if (value === null) continue;
     it(`the deprecated in-input timeoutMs ${String(value)} is refused`, async () => {
       const fetch = noNetwork();
       const c = new Lenz({ apiKey: "lenz_t", fetch });
@@ -711,10 +736,12 @@ describe("validation: one rule for every per-request setting", () => {
       await refused(() => c.citecheckAndWait({ text: "a" }, o), fetch);
       await refused(() => c.verifyBatchAndWait({ claims: [{ claim: "a" }] }, o), fetch);
       await refused(() => c.withOptions(o), fetch);
-      await refused(
-        () => new Lenz({ apiKey: "lenz_t", fetch, maxRetries: value as number }),
-        fetch,
-      );
+      if (value !== null) {
+        await refused(
+          () => new Lenz({ apiKey: "lenz_t", fetch, maxRetries: value as number }),
+          fetch,
+        );
+      }
     });
   }
 
@@ -746,12 +773,85 @@ describe("validation: one rule for every per-request setting", () => {
     expect(sent).toHaveLength(2);
   });
 
-  it("wait() takes no maxRetries (D4): a value there is ignored, not refused", async () => {
-    const { fetch, sent } = recorder([{ body: COMPLETED }]);
+  it("wait() takes no maxRetries: a value there is refused, naming it", async () => {
+    const fetch = noNetwork();
     const c = new Lenz({ apiKey: "lenz_t", fetch });
-    const o = { maxRetries: -1 } as unknown as RequestOptions;
-    await c.wait("t1", o);
-    expect(sent).toHaveLength(1);
+    const o = { maxRetries: 1 } as unknown as RequestOptions;
+    expect((await refused(() => c.wait("t1", o), fetch)).message).toMatch(/takes no maxRetries/);
+  });
+
+  it("null on a 2.x field (constructor, extract / assess input) means not given", async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch, aborts, sent } = recorder([], { hang: true });
+      const c = new Lenz({
+        apiKey: "lenz_t",
+        fetch,
+        timeoutMs: null as unknown as number,
+        maxRetries: null as unknown as number,
+      });
+      const p1 = settle(c.usage());
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      await p1;
+      // The defaults: 30 s attempts, 3 retries.
+      expect(sent).toHaveLength(4);
+      expect(aborts[0]).toBe(30_000);
+      const one = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+      const before = aborts.length;
+      const p2 = settle(one.extract({ text: "a", timeoutMs: null as unknown as number }));
+      const p3 = settle(one.assess({ claim: "a", timeoutMs: null as unknown as number }));
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      await Promise.all([p2, p3]);
+      // Started at 1,000,000 ms: the 100 s and 150 s floors.
+      expect(aborts.slice(before).sort((a, b) => a - b)).toEqual([1_100_000, 1_150_000]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the request options refuse null", async () => {
+    const fetch = noNetwork();
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    await refused(() => c.usage({ timeoutMs: null as unknown as number }), fetch);
+    await refused(() => c.usage({ maxRetries: null as unknown as number }), fetch);
+  });
+
+  for (const name of ["X A", "X:A", "", "Ä-Header", "X\nA"]) {
+    it(`the header name ${JSON.stringify(name)} is refused before any key or request`, async () => {
+      const fetch = noNetwork();
+      const c = new Lenz({ apiKey: "lenz_t", fetch });
+      const o = { headers: { [name]: "v" } };
+      expect((await refused(() => c.verify({ claim: "a" }, o), fetch)).message).toMatch(
+        /not a valid header name/,
+      );
+      await refused(() => c.withOptions(o), fetch);
+    });
+  }
+
+  for (const value of ["a\r\nX-Evil: 1", "a\nb", "a\u0000b", "\u0100", " lead", "trail\t"]) {
+    it(`the header value ${JSON.stringify(value)} is refused before any key or request`, async () => {
+      const fetch = noNetwork();
+      const c = new Lenz({ apiKey: "lenz_t", fetch });
+      const o = { headers: { "X-A": value } };
+      expect((await refused(() => c.verify({ claim: "a" }, o), fetch)).message).toMatch(
+        /must be text without line breaks/,
+      );
+      await refused(() => c.reviewAndWait({ text: "a" }, o), fetch);
+      await refused(() => c.withOptions(o), fetch);
+    });
+  }
+
+  it("empty values, inner whitespace and Latin-1 text are sent as given", async () => {
+    const { fetch, sent } = recorder([{ body: {} }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    await c.usage({ headers: { "X-A": "", "X-B": "a  b\tc", "X-C": "caf\u00e9" } });
+    expect(
+      sent[0]!.headers.filter(([n]) => n.startsWith("X-") && n !== "X-Lenz-API-Version"),
+    ).toEqual([
+      ["X-A", ""],
+      ["X-B", "a  b\tc"],
+      ["X-C", "caf\u00e9"],
+    ]);
   });
 
   it("listAll checks its options when called, before the first page", () => {
@@ -759,6 +859,8 @@ describe("validation: one rule for every per-request setting", () => {
     const c = new Lenz({ apiKey: "lenz_t", fetch });
     expect(() => c.verifications.listAll({ maxRetries: -1 })).toThrow(/maxRetries/);
     expect(() => c.library.listAll({}, { headers: { Host: "x" } })).toThrow(/Host/);
+    // The options first, then the input.
+    expect(() => c.library.listAll({ sort: "random" }, { maxRetries: -1 })).toThrow(/maxRetries/);
   });
 
   it("valid constructor values are taken as before", async () => {
@@ -795,6 +897,18 @@ describe("request option headers", () => {
     });
     expect(h.filter(([n]) => n.toLowerCase() === "x-a")).toEqual([["X-A", "call"]]);
     expect(h.filter(([n]) => n.toLowerCase() === "x-b")).toEqual([["x-b", "copy"]]);
+  });
+
+  it("a name set again keeps its place on the wire", async () => {
+    const h = await headersOf((c) => c.usage({ headers: { "x-a": "call" } }), {
+      headers: { "X-A": "copy", "X-B": "copy" },
+    });
+    expect(
+      h.filter(([n]) => n.toLowerCase().startsWith("x-") && n !== "X-Lenz-API-Version"),
+    ).toEqual([
+      ["x-a", "call"],
+      ["X-B", "copy"],
+    ]);
   });
 
   it("within one object, the last spelling wins", async () => {
@@ -879,6 +993,55 @@ describe("request option headers", () => {
   });
 });
 
+// ── options are read once, when the call is made ─────────────────────────
+
+describe("a call's options are copied when it is made", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("listAll: every page uses the headers as they were at the call", async () => {
+    const { fetch, sent } = recorder([{ body: LIST(1, 2, 3) }, { body: LIST(2, 1, 3) }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const headers: Record<string, string> = { "X-A": "1" };
+    const it = c.verifications.listAll({ headers })[Symbol.asyncIterator]();
+    headers["X-A"] = "changed";
+    await it.next();
+    headers["X-B"] = "added";
+    while (!(await it.next()).done);
+    expect(sent.map((s) => [header(s, "X-A"), header(s, "X-B")])).toEqual([
+      ["1", undefined],
+      ["1", undefined],
+    ]);
+  });
+
+  it("library.listAll: the same, options object and all", async () => {
+    const { fetch, sent } = recorder([{ body: LIST(1, 2, 3) }, { body: LIST(2, 1, 3) }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const options: RequestOptions = { headers: { "X-A": "1" } };
+    const it = c.library.listAll({}, options)[Symbol.asyncIterator]();
+    await it.next();
+    options.headers = { "X-A": "changed" };
+    while (!(await it.next()).done);
+    expect(sent.map((s) => header(s, "X-A"))).toEqual(["1", "1"]);
+  });
+
+  it("a wait: every poll uses the headers as they were at the call", async () => {
+    const { fetch, sent } = recorder([{ body: PROCESSING }, { body: COMPLETED }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const headers: Record<string, string> = { "X-A": "1" };
+    const pending = settle(
+      c.wait("t1", { headers, onProgress: () => (headers["X-A"] = "changed") }),
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+    expect(sent.map((s) => header(s, "X-A"))).toEqual(["1", "1"]);
+  });
+});
+
 // ── withOptions ──────────────────────────────────────────────────────────
 
 describe("withOptions()", () => {
@@ -926,6 +1089,27 @@ describe("withOptions()", () => {
     root.getStatus = (async () => COMPLETED as unknown as TaskStatus) as typeof root.getStatus;
     const copy = root.withOptions({ timeoutMs: 5_000 });
     expect((await copy.wait("t1")).verification_id).toBe("v1");
+  });
+
+  it("keeps a namespace's own overrides and class, bound to the copy", async () => {
+    const { fetch, sent } = recorder([{ body: LIST(1, 1, 1) }]);
+    const root = new Lenz({ apiKey: "lenz_t", fetch });
+    class MyAsk
+      extends (Object.getPrototypeOf(root.ask) as { constructor: new (c: Lenz) => object })
+        .constructor
+    {
+      tag = "mine";
+    }
+    (root as unknown as { ask: object }).ask = new MyAsk(root);
+    root.verifications.get = (async () => ({
+      verification_id: "stub",
+    })) as typeof root.verifications.get;
+    const copy = root.withOptions({ headers: { "X-A": "1" } });
+    expect(copy.ask).toBeInstanceOf(MyAsk);
+    expect((copy.ask as unknown as { tag: string }).tag).toBe("mine");
+    expect((await copy.verifications.get("v1")).verification_id).toBe("stub");
+    await copy.verifications.list();
+    expect(header(sent[0]!, "X-A")).toBe("1");
   });
 
   it("binds the namespaces to the copy", async () => {

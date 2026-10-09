@@ -19,7 +19,7 @@ import {
   type TaskStatus,
   type VerifyBatchInput,
 } from "../src/index.js";
-import { recorder, settle, type Reply } from "./support/recorder.js";
+import { countedController, recorder, settle, type Reply } from "./support/recorder.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string): Record<string, unknown> =>
@@ -72,12 +72,15 @@ async function aborted(
 ) {
   const { fetch, sent } = recorder(replies, opts.fallback);
   const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: opts.maxRetries ?? 3 });
-  const controller = new AbortController();
+  const { controller, live } = countedController();
   const pending = settle(run(client, controller.signal));
   await vi.advanceTimersByTimeAsync(abortAt);
   controller.abort(opts.reason ?? new Error("stop"));
   await vi.advanceTimersByTimeAsync(1);
   const err = await pending;
+  // Nothing is left behind: no timer armed, no listener on the signal.
+  expect(vi.getTimerCount()).toBe(0);
+  expect(live()).toBe(0);
   return { err: err as LenzAbortError, sent, client };
 }
 
@@ -114,6 +117,7 @@ describe("before the call", () => {
       }
       expect(fetch).not.toHaveBeenCalled();
       expect(uuid).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       uuid.mockRestore();
     }
@@ -457,6 +461,70 @@ describe("during a wait", () => {
     );
     expectAbort(err);
     expect(err.reviewId).toBe(REVIEW_ID);
+  });
+});
+
+describe("aborts from a callback, and overrides", () => {
+  it("an abort from onProgress on a wait with no budget is the abort, not a timeout", async () => {
+    const { fetch } = recorder([{ body: PROCESSING }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const { controller, live } = countedController();
+    const err = await settle(
+      c.wait("t", {
+        timeoutMs: 0,
+        signal: controller.signal,
+        onProgress: () => controller.abort(),
+      }),
+    );
+    expectAbort(err);
+    expect(err.taskId).toBe("t");
+    expect(live()).toBe(0);
+  });
+
+  it("an abort from onProgress at the deadline of a batch wait is the abort", async () => {
+    const { fetch } = recorder([{ status: 202, body: BATCH }], { body: PROCESSING });
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const controller = new AbortController();
+    const err = await settle(
+      c.verifyBatchAndWait(
+        { claims: [{ claim: "a" }, { claim: "b" }] },
+        { timeoutMs: 0, signal: controller.signal, onProgress: () => controller.abort() },
+      ),
+    );
+    expectAbort(err);
+    expect(err.batchId).toBe("b1");
+  });
+
+  it("verifyAndWait through a wait override that ignores the signal still stops", async () => {
+    class Hangs extends Lenz {
+      override wait(): Promise<never> {
+        return new Promise(() => {});
+      }
+    }
+    const { fetch } = recorder([{ status: 202, body: TASK }]);
+    const c = new Hangs({ apiKey: "lenz_t", fetch });
+    const { controller, live } = countedController();
+    const pending = settle(c.verifyAndWait({ claim: "a" }, { signal: controller.signal }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(1);
+    const err = await pending;
+    expectAbort(err);
+    expect(err.taskId).toBe("t1");
+    expect(live()).toBe(0);
+  });
+
+  it("polls through a getStatus override that never answers leave no listener", async () => {
+    const c = new Lenz({ apiKey: "lenz_t", fetch: vi.fn() as unknown as typeof fetch });
+    c.getStatus = (() => new Promise<TaskStatus>(() => {})) as typeof c.getStatus;
+    const { controller, live } = countedController();
+    for (let i = 0; i < 5; i++) {
+      const pending = settle(c.wait("t1", { signal: controller.signal, timeoutMs: 3_000 }));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await pending).toHaveProperty("name", "LenzTimeoutError");
+    }
+    expect(live()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

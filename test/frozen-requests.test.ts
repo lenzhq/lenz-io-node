@@ -873,12 +873,12 @@ describe("frozen: retry and sleep traces", () => {
 
 // ── the review / citation-check wait clock ───────────────────────────────
 
-// Re-baselined for D7 (3.0): reviewAndWait and citecheckAndWait start their
+// Re-baselined in 3.0: reviewAndWait and citecheckAndWait start their
 // budget after the submit, as every other wait does. The submit makes its
 // attempts with the client's timeout and retries; `timeoutMs <= 0` submits
 // normally, then reads once. Before, the budget bounded the submit (its
 // attempt was cut at the budget, 0 ms for a budget of 0).
-describe("frozen: the review and citecheck wait clock (D7: started after the submit)", () => {
+describe("frozen: the review and citecheck wait clock (started after the submit)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

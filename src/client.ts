@@ -392,26 +392,44 @@ interface Call {
   /** The call's own retries, when it set them. */
   maxRetries?: number;
   /**
-   * The call's own signal and headers, as given: what a nested public call
-   * (a wait's `getStatus`, `verifyBatchAndWait`'s `verifyBatch`) is handed,
-   * since it merges the copy's itself.
+   * The call's own options, copied when the call was made (its headers
+   * object too), so a caller changing its objects later changes nothing:
+   * what a nested public call (each page of a `listAll`, a wait's
+   * `getStatus`, `verifyBatchAndWait`'s `verifyBatch`) is handed, since it
+   * merges the copy's itself.
    */
-  own: { signal?: AbortSignal; headers?: Record<string, string | null | undefined> };
+  own: RequestOptions;
 }
 
-/** A per-request timeout (D12): a finite number of ms above 0, or not given. */
-function checkTimeoutMs(value: unknown, where: string): void {
-  if (value === undefined) return;
+/** The longest delay a timer can hold (2^31 - 1 ms, about 24.8 days). */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * A per-request timeout: a finite number of ms above 0 and at most
+ * `MAX_TIMEOUT_MS`, or not given. `legacy` names a field 2.x already took
+ * (the constructor's, the input's), where `null` still means "not given".
+ */
+function checkTimeoutMs(value: unknown, where: string, legacy = false): void {
+  if (value === undefined || (legacy && value === null)) return;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new Error(
       `${where}: timeoutMs must be a finite number of milliseconds above 0 (got ${String(value)}).`,
     );
   }
+  if (value > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `${where}: timeoutMs must be at most ${MAX_TIMEOUT_MS} ms, the longest a timer can wait ` +
+        `(got ${String(value)}).`,
+    );
+  }
 }
 
-/** A per-request retry count (D12): a whole number, 0 or more, or not given. */
-function checkMaxRetries(value: unknown, where: string): void {
-  if (value === undefined) return;
+/**
+ * A per-request retry count: a whole number, 0 or more, or not given.
+ * `legacy` as for `checkTimeoutMs`.
+ */
+function checkMaxRetries(value: unknown, where: string, legacy = false): void {
+  if (value === undefined || (legacy && value === null)) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(
       `${where}: maxRetries must be a whole number, 0 or more (got ${String(value)}).`,
@@ -435,7 +453,9 @@ function checkHeaders(headers: unknown, where: string): void {
     throw new Error(`${where}: headers must be an object of header names and values.`);
   }
   for (const [name, value] of Object.entries(headers)) {
-    if (name === "") throw new Error(`${where}: a header name cannot be empty.`);
+    if (!HEADER_NAME.test(name)) {
+      throw new Error(`${where}: ${JSON.stringify(name)} is not a valid header name.`);
+    }
     if (RESERVED_HEADERS.has(name.toLowerCase())) {
       throw new Error(
         `${where}: the ${name} header is set by the client and cannot be sent as an option ` +
@@ -447,7 +467,29 @@ function checkHeaders(headers: unknown, where: string): void {
         `${where}: the value of header ${name} must be a string, or null to remove it.`,
       );
     }
+    if (typeof value === "string" && !isHeaderValue(value)) {
+      throw new Error(
+        `${where}: the value of header ${name} must be text without line breaks, NUL or ` +
+          "characters above U+00FF, and without leading or trailing spaces or tabs.",
+      );
+    }
   }
+}
+
+/** A header name: an RFC 7230 token. */
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * A header value fetch sends as given: a ByteString (every character at most
+ * U+00FF) with no CR, LF or NUL, and no leading or trailing space or tab
+ * (which fetch would strip). Empty, and inner whitespace, are fine.
+ */
+function isHeaderValue(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i);
+    if (c > 0xff || c === 0x0d || c === 0x0a || c === 0x00) return false;
+  }
+  return !/^[ \t]|[ \t]$/.test(value);
 }
 
 /** Checks the request options a method takes, before any key or request. */
@@ -461,6 +503,12 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
     throw new Error(`${where}: signal must be an AbortSignal.`);
   }
   if (kind === "request") checkTimeoutMs(o.timeoutMs, where);
+  if (kind === "wait" && o.maxRetries !== undefined) {
+    throw new Error(
+      `${where}: a wait takes no maxRetries (each poll uses the client's); ` +
+        "set it on a copy with withOptions({ maxRetries }).",
+    );
+  }
   if (kind !== "wait") checkMaxRetries(o.maxRetries, where);
   checkHeaders(o.headers, where);
   return o;
@@ -468,8 +516,8 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
 
 /**
  * Headers merged without regard to case: a later spelling of a name replaces
- * an earlier one, value and spelling; `null` removes it; `undefined` is not
- * given.
+ * an earlier one, value and spelling, in the earlier one's place; `null`
+ * removes it; `undefined` is not given.
  */
 function mergeHeaders(
   base: HeaderList,
@@ -481,8 +529,9 @@ function mergeHeaders(
   for (const [name, value] of Object.entries(add)) {
     if (value === undefined) continue;
     const lower = name.toLowerCase();
-    out.delete(lower);
-    if (value !== null) out.set(lower, [name, value]);
+    // A name set again keeps its place on the wire; its spelling and value change.
+    if (value === null) out.delete(lower);
+    else out.set(lower, [name, value]);
   }
   return [...out.values()];
 }
@@ -540,8 +589,12 @@ function linkSignals(
  * public method an override may have replaced (a 2.21 `getStatus` or
  * `verifyBatch` ignores the signal).
  */
-async function raceAbort<T>(promise: Promise<T>, signals: readonly AbortSignal[]): Promise<T> {
-  if (signals.length === 0) return promise;
+async function raceAbort<T>(
+  promise: Promise<T>,
+  signals: readonly AbortSignal[],
+  others: ReadonlyArray<Promise<never>> = [],
+): Promise<T> {
+  if (signals.length === 0) return others.length ? Promise.race([promise, ...others]) : promise;
   let onAbort: () => void = () => {};
   const aborted = new Promise<never>((_res, rej) => {
     onAbort = () => rej(abortError(firedSignal(signals) ?? signals[0]!));
@@ -552,7 +605,7 @@ async function raceAbort<T>(promise: Promise<T>, signals: readonly AbortSignal[]
   if (fired) onAbort();
   else for (const signal of signals) signal.addEventListener("abort", onAbort, { once: true });
   try {
-    return await Promise.race([promise, aborted]);
+    return await Promise.race([promise, aborted, ...others]);
   } finally {
     for (const signal of signals) signal.removeEventListener("abort", onAbort);
   }
@@ -578,8 +631,8 @@ async function withAbortContext<T>(context: AbortContext, run: () => Promise<T>)
 
 /**
  * The request options of a call, checked and resolved against `client`'s
- * copy options. Throws before any key is made or request sent: a bad value
- * (D12), then, when `checkAbort`, a signal that has already fired.
+ * copy options. Throws before any key is made or request sent: a bad value,
+ * then, when `checkAbort`, a signal that has already fired.
  */
 function resolveCall(
   client: object,
@@ -588,7 +641,7 @@ function resolveCall(
   kind: CallKind = "request",
   checkAbort = true,
 ): Call {
-  const o = checkOptions(options, where, kind);
+  const o = snapshotOptions(checkOptions(options, where, kind), kind);
   const copy = COPY_OPTIONS.get(client);
   const signals = o.signal
     ? [...(copy?.signals ?? NO_SIGNALS), o.signal]
@@ -596,14 +649,22 @@ function resolveCall(
   const call: Call = {
     signals,
     headers: mergeHeaders(copy?.headers ?? NO_HEADERS, o.headers),
-    own: {},
+    own: o,
   };
-  if (kind === "request" && o.timeoutMs !== undefined) call.timeoutMs = o.timeoutMs;
-  if (kind !== "wait" && o.maxRetries !== undefined) call.maxRetries = o.maxRetries;
-  if (o.signal !== undefined) call.own.signal = o.signal;
-  if (o.headers !== undefined) call.own.headers = o.headers;
+  if (o.timeoutMs !== undefined) call.timeoutMs = o.timeoutMs;
+  if (o.maxRetries !== undefined) call.maxRetries = o.maxRetries;
   if (checkAbort) throwIfAborted(signals);
   return call;
+}
+
+/** The request options a method takes, copied: only the fields given, headers copied too. */
+function snapshotOptions(o: RequestOptions, kind: CallKind): RequestOptions {
+  const out: RequestOptions = {};
+  if (o.signal !== undefined) out.signal = o.signal;
+  if (kind === "request" && o.timeoutMs !== undefined) out.timeoutMs = o.timeoutMs;
+  if (kind !== "wait" && o.maxRetries !== undefined) out.maxRetries = o.maxRetries;
+  if (o.headers !== undefined) out.headers = { ...o.headers };
+  return out;
 }
 
 /** What a resolved call hands its request. */
@@ -619,7 +680,7 @@ function transportOf(
   return t;
 }
 
-/** The call's own signal and headers, for a nested public call; only the ones given. */
+/** The call's own signal and headers (as copied), for a nested public call; only the ones given. */
 function ownOptions(call: Call): RequestOptions {
   const out: RequestOptions = {};
   if (call.own.signal !== undefined) out.signal = call.own.signal;
@@ -1133,7 +1194,8 @@ class VerificationsNamespace {
   }: { page?: number } & RequestOptions = {}): AsyncIterable<VerificationListItem> {
     const first = startPage(page);
     const call = resolveCall(this.client, options, "verifications.listAll", "request", false);
-    return walkPages((p) => this.list({ ...options, page: p }), first, call.signals);
+    // Every page uses the options as they were when listAll was called.
+    return walkPages((p) => this.list({ ...call.own, page: p }), first, call.signals);
   }
 
   /**
@@ -1330,14 +1392,19 @@ class LibraryNamespace {
    * read: once it fires, the next item throws `LenzAbortError`.
    */
   listAll(input: LibraryListInput = {}, options?: RequestOptions): AsyncIterable<LibraryItem> {
+    const call = resolveCall(this.client, options, "library.listAll", "request", false);
     if (input.sort === "random") {
       throw new Error(
         'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
       );
     }
     const first = startPage(input.page);
-    const call = resolveCall(this.client, options, "library.listAll", "request", false);
-    return walkPages((page: number) => this.list({ ...input, page }, options), first, call.signals);
+    // Every page uses the options as they were when listAll was called.
+    return walkPages(
+      (page: number) => this.list({ ...input, page }, call.own),
+      first,
+      call.signals,
+    );
   }
 }
 
@@ -1376,9 +1443,9 @@ export class Lenz {
   readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
-    // One rule for every per-request setting (D12), checked before anything.
-    checkTimeoutMs(opts.timeoutMs, "new Lenz()");
-    checkMaxRetries(opts.maxRetries, "new Lenz()");
+    // One rule for every per-request timeout and retry count, checked first.
+    checkTimeoutMs(opts.timeoutMs, "new Lenz()", true);
+    checkMaxRetries(opts.maxRetries, "new Lenz()", true);
     this.apiKey = opts.apiKey ?? envVar("LENZ_API_KEY") ?? "";
     this.baseUrl = (opts.baseUrl ?? envVar("LENZ_BASE_URL") ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -1402,7 +1469,7 @@ export class Lenz {
    *
    * A copy with a `signal` is dead once it fires: every later call on it
    * throws `LenzAbortError`. Make one per request
-   * (`client.withOptions({ signal: req.signal })`), and cancel server-side
+   * (`client.withOptions({ signal: request.signal })`), and cancel server-side
    * work through the client you made it from.
    */
   withOptions(opts: RequestOptions): this {
@@ -1417,14 +1484,17 @@ export class Lenz {
         : (base?.signals ?? NO_SIGNALS),
       headers: mergeHeaders(base?.headers ?? NO_HEADERS, o.headers),
     });
-    const namespaces = copy as unknown as {
-      verifications: VerificationsNamespace;
-      ask: AskNamespace;
-      library: LibraryNamespace;
-    };
-    namespaces.verifications = new VerificationsNamespace(copy);
-    namespaces.ask = new AskNamespace(copy);
-    namespaces.library = new LibraryNamespace(copy);
+    // Each namespace is copied from the one it replaces (its class and any
+    // method set on it kept) and bound to the copy.
+    const namespaces = copy as unknown as Record<"verifications" | "ask" | "library", object>;
+    for (const name of ["verifications", "ask", "library"] as const) {
+      const from = namespaces[name];
+      namespaces[name] = Object.assign(
+        Object.create(Object.getPrototypeOf(from) as object) as object,
+        from,
+        { client: copy },
+      );
+    }
     return copy;
   }
 
@@ -1504,7 +1574,7 @@ export class Lenz {
    * at all), or `"no_match"` (claims were found, none fell within `focus`).
    */
   async extract(input: ExtractInput, options?: RequestOptions): Promise<ExtractedClaims> {
-    checkTimeoutMs(input.timeoutMs, "extract() input");
+    checkTimeoutMs(input.timeoutMs, "extract() input", true);
     const call = resolveCall(this, options, "extract()");
     const body: Record<string, unknown> = { text: input.text };
     if (input.language) body.language = input.language;
@@ -1580,7 +1650,7 @@ export class Lenz {
    * verified.
    */
   async assess(input: AssessInput, options?: RequestOptions): Promise<AssessResponse> {
-    checkTimeoutMs(input.timeoutMs, "assess() input");
+    checkTimeoutMs(input.timeoutMs, "assess() input", true);
     // `claim` is the documented name; `text` the alias. Either way the wire
     // key is `text`, which every server version accepts.
     const single = input.claim || input.text;
@@ -2117,12 +2187,10 @@ export class Lenz {
           signals,
           optionHeaders,
           maxRetries: 0,
-          // Cut at what is left. Only when the submit used the whole budget
-          // does the first poll get 5 s, so `partial` can fill.
-          timeoutMs: Math.min(
-            this.timeoutMs,
-            poll === 0 && budget <= 0 ? REVIEW_POLL_FLOOR_S * 1000 : budget,
-          ),
+          // Cut at what is left. A first poll with no budget left (a
+          // `timeoutMs` of 0 or less) gets the client's own timeout, so the
+          // one read can fill `partial`.
+          timeoutMs: poll === 0 && budget <= 0 ? this.timeoutMs : Math.min(this.timeoutMs, budget),
         });
         // A 2xx that is not this job (an empty body, a proxy's error object,
         // another id, a body missing its lists) is a failed poll, never an
@@ -2204,7 +2272,11 @@ export class Lenz {
       acceptedId("task_id", accepted.task_id);
       this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
       return withAbortContext({ taskId: accepted.task_id }, () =>
-        this.wait(accepted, { timeoutMs, onProgress, ...ownOptions(call) }),
+        // Raced, in case an override of `wait` ignores the signal.
+        raceAbort(
+          this.wait(accepted, { timeoutMs, onProgress, ...ownOptions(call) }),
+          call.signals,
+        ),
       );
     });
   }
@@ -2406,6 +2478,7 @@ export class Lenz {
       // budget at all (timeoutMs <= 0) still looks once, bounded by the
       // client's own timeout, as 2.x did.
       if (remaining <= 0 && (round > 0 || timeoutMs > 0)) {
+        throwIfAborted(call.signals);
         pending.forEach((id) => timedOut.add(id));
         break;
       }
@@ -2482,6 +2555,8 @@ export class Lenz {
       });
       pending = stillPending;
       if (pending.length === 0) break;
+      // A callback may have aborted: that is the abort, not the deadline.
+      throwIfAborted(call.signals);
       const left = deadline - Date.now();
       if (left <= 0) {
         pending.forEach((id) => timedOut.add(id));
@@ -2511,12 +2586,11 @@ export class Lenz {
   ): Promise<TaskStatus> {
     // The wait's own signal and headers: getStatus adds the copy's itself.
     // An override that ignores them still stops at the signal (the race).
-    const poll = raceAbort(
-      this.getStatus(taskId, { ...budget, ...ownOptions(call) }),
-      call.signals,
-    );
+    // One race, so the signal's listener goes when any of them wins, the
+    // deadline included (an override that never settles keeps none).
+    const poll = this.getStatus(taskId, { ...budget, ...ownOptions(call) });
     const deadlineAt = budget.deadlineAt;
-    if (deadlineAt === undefined) return poll;
+    if (deadlineAt === undefined) return raceAbort(poll, call.signals);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cutoff = new Promise<never>((_res, rej) => {
       timer = setTimeout(
@@ -2530,7 +2604,7 @@ export class Lenz {
       );
     });
     try {
-      return await Promise.race([poll, cutoff]);
+      return await raceAbort(poll, call.signals, [cutoff]);
     } finally {
       clearTimeout(timer);
     }
@@ -2966,6 +3040,9 @@ export class Lenz {
           path: opts.path,
         });
       } finally {
+        // Whatever ended the attempt (an abort while an error response was
+        // inspected included), its timer and listeners go with it.
+        clearTimeout(timer);
         link.unlink();
       }
     };

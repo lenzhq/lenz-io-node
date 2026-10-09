@@ -113,3 +113,26 @@ export async function settle(p: Promise<unknown>): Promise<unknown> {
 export function expectNoRequest(sent: Sent[]): void {
   expect(sent).toHaveLength(0);
 }
+
+/**
+ * An AbortController whose signal counts the listeners added to it and not
+ * yet removed: `live()` is 0 once a call has cleaned up after itself.
+ */
+export function countedController(): { controller: AbortController; live: () => number } {
+  const controller = new AbortController();
+  const signal = controller.signal;
+  type Listener = Parameters<AbortSignal["addEventListener"]>[1];
+  type ListenerOptions = Parameters<AbortSignal["addEventListener"]>[2];
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  const added = new Set<unknown>();
+  signal.addEventListener = ((type: "abort", fn: Listener, o?: ListenerOptions) => {
+    added.add(fn);
+    add(type, fn, o);
+  }) as typeof signal.addEventListener;
+  signal.removeEventListener = ((type: "abort", fn: Listener) => {
+    added.delete(fn);
+    remove(type, fn);
+  }) as typeof signal.removeEventListener;
+  return { controller, live: () => added.size };
+}

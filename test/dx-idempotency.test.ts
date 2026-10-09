@@ -127,7 +127,7 @@ describe("S1: an in-flight 409 is retried with the same key and body", () => {
     expect(err.statusCode).toBe(409);
   });
 
-  // D7 (3.0): reviewAndWait's budget starts after the submit, so it no
+  // Since 3.0 reviewAndWait's budget starts after the submit, so it no
   // longer cuts the submit's 409 retry (re-baselined from "the call's
   // deadline bounds it").
   it("reviewAndWait's submit is not cut by the wait's budget", async () => {
