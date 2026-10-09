@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Lenz, LenzAPIError, type TaskStatus } from "../src/index.js";
-import { header, recorder, settle } from "./support/recorder.js";
+import { countedController, header, recorder, settle } from "./support/recorder.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string): Record<string, unknown> =>
@@ -180,5 +180,123 @@ describe("cancel answers are checked", () => {
     const c = new Lenz({ apiKey: "lenz_t", fetch });
     expect((await c.cancelReview(REVIEW_ID)).review_id).toBe(REVIEW_ID);
     expect((await c.cancelCitecheck(CITECHECK_ID)).citecheck_id).toBe(CITECHECK_ID);
+  });
+});
+
+describe("a transport failure that cannot be marked is still a failed poll", () => {
+  const failing = (reason: unknown) => () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(reason);
+        },
+      }),
+      { status: 200 },
+    );
+
+  for (const [label, reason] of [
+    ["a frozen error", Object.freeze(new TypeError("terminated"))],
+    ["a primitive", "boom"],
+  ] as const) {
+    it(`wait: a body that rejects with ${label}`, async () => {
+      const queue: Array<() => Response> = [
+        failing(reason),
+        () =>
+          new Response(JSON.stringify({ status: "completed", result: { verification_id: "v1" } }), {
+            status: 200,
+          }),
+      ];
+      const fetch = vi.fn(async () => queue.shift()!()) as unknown as typeof globalThis.fetch;
+      const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+      const pending = settle(c.wait("t1"));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await pending).toMatchObject({ verification_id: "v1" });
+    });
+
+    it(`reviewAndWait: a body that rejects with ${label}`, async () => {
+      const queue: Array<() => Response> = [
+        () => new Response(JSON.stringify(REVIEW_ACCEPTED), { status: 202 }),
+        failing(reason),
+        () => new Response(JSON.stringify(REVIEW_COMPLETED), { status: 200 }),
+      ];
+      const fetch = vi.fn(async () => queue.shift()!()) as unknown as typeof globalThis.fetch;
+      const c = new Lenz({ apiKey: "lenz_t", fetch });
+      const pending = settle(c.reviewAndWait({ text: "a" }));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await pending).toMatchObject({ status: "completed" });
+    });
+
+    it(`a plain call still throws ${label} as it is`, async () => {
+      const fetch = vi.fn(async () => failing(reason)()) as unknown as typeof globalThis.fetch;
+      const c = new Lenz({ apiKey: "lenz_t", fetch });
+      expect(await settle(c.usage())).toBe(reason);
+    });
+  }
+});
+
+describe("a batch wait ends on the first poll's programming error", () => {
+  class OneBroken extends Lenz {
+    override getStatus(taskId: string): Promise<TaskStatus> {
+      if (taskId === "t1") return Promise.reject(new TypeError("a bug"));
+      return new Promise(() => {}); // t2 never answers
+    }
+  }
+
+  for (const timeoutMs of [200, 600_000]) {
+    it(`with a ${timeoutMs} ms budget: the TypeError at once, nothing left behind`, async () => {
+      const { fetch } = recorder([{ status: 202, body: BATCH }]);
+      const c = new OneBroken({ apiKey: "lenz_t", fetch });
+      const { controller, live } = countedController();
+      let settled: unknown = "pending";
+      const pending = c
+        .verifyBatchAndWait(
+          { claims: [{ claim: "a" }, { claim: "b" }] },
+          { timeoutMs, signal: controller.signal },
+        )
+        .then(
+          (v) => (settled = v),
+          (e: unknown) => (settled = e),
+        );
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBeInstanceOf(TypeError);
+      await pending;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(live()).toBe(0);
+    });
+  }
+});
+
+describe("a stated wait is capped at the longest a timer can hold", () => {
+  for (const [label, reply] of [
+    ["a 503's Retry-After header", { status: 503, headers: { "Retry-After": "1e300" } }],
+    [
+      "a 503's body",
+      { status: 503, body: { detail: "busy", code: "capacity", retry_after: 1e300 } },
+    ],
+    ["a 429's Retry-After header", { status: 429, headers: { "Retry-After": "1e300" } }],
+    ["a 429's body", { status: 429, body: { detail: "slow", reset_in_seconds: 1e300 } }],
+  ] as const) {
+    it(`${label}: retryAfter is 2,147,483 s`, async () => {
+      const { fetch } = recorder([reply]);
+      const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+      const err = (await settle(c.usage())) as { retryAfter: number | null };
+      expect(err.retryAfter).toBe(2_147_483);
+    });
+  }
+
+  it("a wait under the cap is kept as stated", async () => {
+    const { fetch } = recorder([{ status: 503, headers: { "Retry-After": "120" } }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    expect(((await settle(c.usage())) as { retryAfter: number }).retryAfter).toBe(120);
+  });
+
+  it("a 503 stating no usable wait keeps null; a 429 keeps 0", async () => {
+    const { fetch } = recorder([
+      { status: 503, headers: { "Retry-After": "soon" } },
+      { status: 429, headers: { "Retry-After": "soon" } },
+    ]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    expect(((await settle(c.usage())) as { retryAfter: unknown }).retryAfter).toBeNull();
+    expect(((await settle(c.usage())) as { retryAfter: unknown }).retryAfter).toBe(0);
   });
 });

@@ -764,6 +764,17 @@ function getHeader(headers: Record<string, string>, name: string): string {
  * `resetInSeconds` reads the daily limit's wait. `body` is always the body as
  * sent.
  */
+/**
+ * The longest wait `retryAfter` reports, in seconds: 2,147,483 s, the longest
+ * a timer can hold in ms, so code that sleeps `retryAfter * 1000` never
+ * overflows `setTimeout`.
+ */
+const MAX_STATED_WAIT_S = 2_147_483;
+
+function capWait(seconds: number | null): number | null {
+  return seconds === null ? null : Math.min(seconds, MAX_STATED_WAIT_S);
+}
+
 export function mapResponseToError(
   statusCode: number,
   body: string | null | undefined,
@@ -878,10 +889,11 @@ export function mapResponseToError(
   if (err instanceof LenzAPIError) {
     // Body `retry_after` first (both 503 shapes carry it), header as the
     // fallback for any proxy that strips the body.
-    err.retryAfter =
+    err.retryAfter = capWait(
       optNumber(parsed["retry_after"]) ??
-      optNumber(parsed["retry_after_seconds"]) ??
-      optNumber(getHeader(headers, "Retry-After"));
+        optNumber(parsed["retry_after_seconds"]) ??
+        optNumber(getHeader(headers, "Retry-After")),
+    );
   } else if (err instanceof LenzQuotaExceededError) {
     const upgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
@@ -930,11 +942,12 @@ export function mapResponseToError(
     // never emitted — kept last purely as a defensive read.
     // `retry_after_seconds` is the /review in-flight 429's name for it.
     err.retryAfter =
-      optNumber(getHeader(headers, "Retry-After")) ??
-      optNumber(parsed["reset_in_seconds"]) ??
-      optNumber(parsed["retry_after_seconds"]) ??
-      optNumber(parsed["retry_after"]) ??
-      0;
+      capWait(
+        optNumber(getHeader(headers, "Retry-After")) ??
+          optNumber(parsed["reset_in_seconds"]) ??
+          optNumber(parsed["retry_after_seconds"]) ??
+          optNumber(parsed["retry_after"]),
+      ) ?? 0;
   }
 
   return err;

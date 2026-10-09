@@ -136,6 +136,11 @@ worked on 2.21 behaves differently:
   override's `TypeError`, say. 2.x waited through it to the deadline and
   threw a timeout. 5xx, 429 and network failures are polled through as
   before.
+- **`retryAfter` is capped at 2,147,483 seconds** (on `LenzAPIError` and its
+  subclasses, and on `LenzRateLimitError`), the longest wait a timer can hold
+  in ms, so code that sleeps `retryAfter * 1000` cannot overflow `setTimeout`.
+  A huge stated `Retry-After` (say `1e300`) was passed through in 2.21. A
+  value that is not a number still reads `null` (`0` on a 429, as before).
 - **Cancel answers are checked**: `cancel` throws `LenzAPIError` when the
   answer names another task or carries no `status`; `cancelReview` and
   `cancelCitecheck` when it is not the job asked for (its id, a status and its
