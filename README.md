@@ -346,7 +346,9 @@ your own claims. Use webhooks for production async flows.
 Inputs are camelCase; outputs keep the API's names. (The 2.x snake_case
 inputs, `source_url` / `webhook_url` on a batch item and `cited_title` /
 `cited_authors` / `cited_year` / `cited_journal` on a citation pair, still
-work and are deprecated.)
+work and are deprecated. A citation pair's own enumerable keys are read, as
+when it is serialized. Giving both spellings of a field with different values
+throws an `Error` naming both before anything is sent.)
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
@@ -428,9 +430,12 @@ await client.reviewAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate });
 await client.citecheckAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate });
 ```
 
-`timeoutMs` is the wait's deadline (300 s by default for verifications, 10
-minutes for reviews and citation checks); `0` or less polls once. The
-verification waits call `onProgress(taskId, progress)`; review and citation
+`timeoutMs` is the wait's deadline: 300 s by default for verifications, 10
+minutes for reviews and citation checks. A verification wait starts it after
+the submit, and with `0` or less it still polls once. A review or citation
+wait counts the submit inside it: with `0` or less the submit gets no time and
+usually ends in `LenzRequestTimeoutError`, so give those waits a real budget.
+The verification waits call `onProgress(taskId, progress)`; review and citation
 waits call `onUpdate(body)` with the whole changed body. Passing `timeoutMs` /
 `onProgress` inside the `verifyAndWait` / `verifyBatchAndWait` input, as 2.x
 did, still works and is deprecated; when both are given, the second argument

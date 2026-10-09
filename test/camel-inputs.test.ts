@@ -11,9 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { Lenz } from "../src/index.js";
-import type { CitationPair, VerifyBatchInput } from "../src/index.js";
-
-type VerifyBatchItem = VerifyBatchInput["claims"][number];
+import type { CitationPair, VerifyBatchItem } from "../src/index.js";
 
 interface FetchCall {
   url: string;
@@ -119,11 +117,44 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
     );
   });
 
+  it("a value 2.x ignored counts as absent: null, an empty source_url, a blank webhook_url", async () => {
+    const call = await batchBody([
+      { claim: "a", source_url: null as unknown as string, sourceUrl: "https://s.example/p" },
+      { claim: "b", sourceUrl: "", source_url: "https://s.example/q" },
+      { claim: "c", webhook_url: "", webhookUrl: "https://h.example/w" },
+      { claim: "d", webhookUrl: "  ", webhook_url: "https://h.example/v" },
+      { claim: "e", webhookUrl: null as unknown as string, webhook_url: "https://h.example/u" },
+      { claim: "f", source_url: "", sourceUrl: null as unknown as string, webhook_url: "" },
+    ]);
+    expect(raw(call)).toBe(
+      '{"claims":[{"text":"a","source_url":"https://s.example/p"},' +
+        '{"text":"b","source_url":"https://s.example/q"},' +
+        '{"text":"c","source_url":"","webhook_url":"https://h.example/w"},' +
+        '{"text":"d","source_url":"","webhook_url":"https://h.example/v"},' +
+        '{"text":"e","source_url":"","webhook_url":"https://h.example/u"},' +
+        '{"text":"f","source_url":""}]}',
+    );
+  });
+
+  it("a blank source_url is a value (2.x sent it)", async () => {
+    const { fetch, calls } = makeFetch([{ status: 202, body: BATCH_ACCEPTED }]);
+    const err = await new Lenz({ apiKey: "lenz_t", fetch })
+      .verifyBatch({ claims: [{ claim: "a", source_url: " ", sourceUrl: "https://s.example/p" }] })
+      .catch((e: unknown) => e);
+    expect((err as Error).message).toBe(
+      "verifyBatch() claims[0]: sourceUrl and source_url differ; send one of them.",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
   it("both spellings, different: a plain Error naming both, nothing sent", async () => {
     const { fetch, calls } = makeFetch([{ status: 202, body: BATCH_ACCEPTED }]);
     const err = await new Lenz({ apiKey: "lenz_t", fetch })
       .verifyBatch({
-        claims: [{ claim: "a" }, { claim: "b", webhook_url: "https://a.example", webhookUrl: "" }],
+        claims: [
+          { claim: "a" },
+          { claim: "b", webhook_url: "https://a.example", webhookUrl: "https://b.example" },
+        ],
       })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
@@ -238,6 +269,41 @@ describe("citecheck: camelCase pairs send the 2.x bytes", () => {
     );
   });
 
+  it("equality is Object.is, arrays element by element at any depth", async () => {
+    const call = await pairsBody([
+      {
+        statement: "s",
+        doi: "10.1/x",
+        cited_year: NaN as unknown as string,
+        citedYear: NaN as unknown as string,
+        cited_authors: [["A"], ["B"]] as unknown as string[],
+        citedAuthors: [["A"], ["B"]] as unknown as string[],
+      },
+    ]);
+    expect(raw(call)).toBe(
+      '{"pairs":[{"statement":"s","doi":"10.1/x","cited_year":null,"cited_authors":[["A"],["B"]]}]}',
+    );
+  });
+
+  it("null on a pair is a value (it is sent), not an absence", async () => {
+    const { fetch, calls } = makeFetch([{ status: 202, body: CITECHECK_ACCEPTED }]);
+    const err = await new Lenz({ apiKey: "lenz_t", fetch })
+      .citecheck({
+        pairs: [
+          { statement: "s", doi: "d", cited_year: null as unknown as string, citedYear: "2015" },
+        ],
+      })
+      .catch((e: unknown) => e);
+    expect((err as Error).message).toBe(
+      "citecheck() pairs[0]: citedYear and cited_year differ; send one of them.",
+    );
+    expect(calls).toHaveLength(0);
+    const sent = await pairsBody([
+      { statement: "s", doi: "d", citedYear: null as unknown as string },
+    ]);
+    expect(raw(sent)).toBe('{"pairs":[{"statement":"s","doi":"d","cited_year":null}]}');
+  });
+
   it("an undefined spelling is absent", async () => {
     const call = await pairsBody([
       { cited_year: undefined, statement: "s", doi: "10.1/x", citedYear: "2015" },
@@ -257,6 +323,24 @@ describe("citecheck: camelCase pairs send the 2.x bytes", () => {
     [
       { statement: "s", doi: "d", cited_authors: ["A"], citedAuthors: ["A", "B"] },
       "citedAuthors and cited_authors",
+    ],
+    [
+      {
+        statement: "s",
+        doi: "d",
+        cited_authors: [["A"]] as unknown as string[],
+        citedAuthors: [["B"]] as unknown as string[],
+      },
+      "citedAuthors and cited_authors",
+    ],
+    [
+      {
+        statement: "s",
+        doi: "d",
+        cited_year: 0 as unknown as string,
+        citedYear: -0 as unknown as string,
+      },
+      "citedYear and cited_year",
     ],
   ] as Array<[CitationPair, string]>)(
     "both spellings, different: a plain Error naming both (%#)",

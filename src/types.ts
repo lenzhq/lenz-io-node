@@ -1063,7 +1063,8 @@ export interface VerifyInput {
  *
  * Fields are camelCase (`sourceUrl`, `webhookUrl`); the 2.x snake_case names
  * still work and are deprecated. Giving both spellings with different values
- * throws before anything is sent.
+ * throws before anything is sent. A value 2.x ignored counts as not given:
+ * `undefined` or `null`, an empty `sourceUrl`, an empty or blank `webhookUrl`.
  *
  * Precedence on conflicting language: per-item `language` overrides the
  * batch-wide `language` on `VerifyBatchInput`, which overrides the
@@ -2040,7 +2041,10 @@ export interface GetReviewOptions {
  *
  * Fields are camelCase (`citedTitle`, `citedAuthors`, `citedYear`,
  * `citedJournal`); the 2.x snake_case names still work and are deprecated.
- * Giving both spellings with different values throws before anything is sent.
+ * The pair's own enumerable keys are read, as when it is serialized.
+ * Giving both spellings with different values (compared with `Object.is`,
+ * arrays element by element) throws before anything is sent; `undefined`
+ * counts as not given, `null` is a value (it is sent).
  */
 export interface CitationPair {
   statement: string;

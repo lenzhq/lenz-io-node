@@ -162,7 +162,11 @@ differently:
   Inputs are camelCase; outputs keep the API's names. Each camelCase field is
   sent under its API name, so the request is the one the snake_case form
   sends. Giving both spellings of a field with different values throws an
-  `Error` naming both before anything is sent; equal values are fine.
+  `Error` naming both before anything is sent; equal values are fine
+  (`Object.is`, arrays element by element). On a batch item a value 2.x
+  ignored counts as not given (`undefined`, `null`, an empty `sourceUrl`, an
+  empty or blank `webhookUrl`); on a pair only `undefined` does.
+- **`VerifyBatchItem`** is exported from both entry points.
 - **`LenzNotFoundError`** (404), **`LenzConnectionError`** and
   **`LenzRequestTimeoutError`** (see Changed). `LenzRequestTimeoutError` is
   one HTTP attempt that took too long; `LenzTimeoutError` remains a wait that

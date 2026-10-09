@@ -544,34 +544,57 @@ const CITATION_PAIR_ALIASES: Readonly<Record<string, string>> = {
   citedJournal: "cited_journal",
 };
 
-/** Equal for an alias pair: the same value, or arrays equal element by element, in order. */
+/**
+ * Equal for an alias pair: `Object.is` (so `NaN` equals `NaN`), with arrays
+ * equal element by element, in order, at any depth.
+ */
 function sameAliasValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
-    return a.length === b.length && a.every((v, i) => v === b[i]);
+    return a.length === b.length && a.every((v, i) => sameAliasValue(v, b[i]));
   }
-  return a === b;
+  return Object.is(a, b);
 }
+
+/** Whether a value counts as not given. */
+type IsAbsent = (snake: string, value: unknown) => boolean;
+
+/** On a citation pair only `undefined` is absent: anything else is sent. */
+const undefinedIsAbsent: IsAbsent = (_snake, value) => value === undefined;
+
+/**
+ * On a batch item, a value 2.x ignored is absent: `undefined` or `null`, an
+ * empty `source_url` (sent as `""` either way), and a `webhook_url` it did
+ * not send (empty or blank).
+ */
+const batchItemAbsent: IsAbsent = (snake, value) => {
+  if (value === undefined || value === null) return true;
+  if (snake === "source_url") return value === "";
+  if (snake === "webhook_url") return !sendsWebhookUrl(value);
+  return false;
+};
 
 /**
  * Throws when an input gives both spellings of a field with different
- * values. `undefined` counts as absent. Only the alias pairs are checked.
+ * values. Only the alias pairs are checked.
  */
 function checkAliases(
   input: Record<string, unknown>,
   aliases: Readonly<Record<string, string>>,
   where: string,
+  isAbsent: IsAbsent,
 ): void {
   for (const [camel, snake] of Object.entries(aliases)) {
     const a = input[camel];
     const b = input[snake];
-    if (a !== undefined && b !== undefined && !sameAliasValue(a, b)) {
+    if (!isAbsent(snake, a) && !isAbsent(snake, b) && !sameAliasValue(a, b)) {
       throw new Error(`${where}: ${camel} and ${snake} differ; send one of them.`);
     }
   }
 }
 
 /**
- * Citation pairs as the API names their fields. Pairs with no camelCase key
+ * Citation pairs as the API names their fields. A pair's own enumerable keys
+ * are read (the ones it is serialized with). Pairs with no camelCase key
  * go as given (the same array when none has one), so a 2.x call sends the
  * same bytes; a pair with one is copied with the key renamed in place.
  */
@@ -581,7 +604,7 @@ function pairsToWire(pairs: unknown): unknown {
   const out = pairs.map((pair: unknown, i) => {
     if (pair === null || typeof pair !== "object" || Array.isArray(pair)) return pair;
     const fields = pair as Record<string, unknown>;
-    checkAliases(fields, CITATION_PAIR_ALIASES, `citecheck() pairs[${i}]`);
+    checkAliases(fields, CITATION_PAIR_ALIASES, `citecheck() pairs[${i}]`, undefinedIsAbsent);
     const wire = toWireNames(fields, CITATION_PAIR_ALIASES);
     if (wire !== fields) changed = true;
     return wire;
@@ -589,9 +612,14 @@ function pairsToWire(pairs: unknown): unknown {
   return changed ? out : pairs;
 }
 
-/** The value of an alias pair: the snake_case one when set, else the camelCase one. */
-function aliasValue(input: Record<string, unknown>, camel: string, snake: string): unknown {
-  return input[snake] !== undefined ? input[snake] : input[camel];
+/**
+ * A batch item's value for an alias pair: the snake_case one when given, else
+ * the camelCase one, else whatever (absent) value the snake_case name holds.
+ */
+function batchItemValue(input: Record<string, unknown>, camel: string, snake: string): unknown {
+  if (!batchItemAbsent(snake, input[snake])) return input[snake];
+  if (!batchItemAbsent(snake, input[camel])) return input[camel];
+  return input[snake];
 }
 
 /**
@@ -936,9 +964,9 @@ export class Lenz {
         // `sourceUrl` / `webhookUrl` are the camelCase names of `source_url` /
         // `webhook_url`; the body is built in a fixed key order either way.
         const fields = c as Record<string, unknown>;
-        checkAliases(fields, BATCH_ITEM_ALIASES, `verifyBatch() claims[${i}]`);
-        const sourceUrl = aliasValue(fields, "sourceUrl", "source_url");
-        const webhookUrl = aliasValue(fields, "webhookUrl", "webhook_url");
+        checkAliases(fields, BATCH_ITEM_ALIASES, `verifyBatch() claims[${i}]`, batchItemAbsent);
+        const sourceUrl = batchItemValue(fields, "sourceUrl", "source_url");
+        const webhookUrl = batchItemValue(fields, "webhookUrl", "webhook_url");
         const item: Record<string, unknown> = {
           text: c.claim || c.text,
           source_url: sourceUrl ?? "",

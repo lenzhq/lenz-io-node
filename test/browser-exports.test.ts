@@ -12,6 +12,7 @@ import type {
   ReviewEvent,
   ReviewEventBase,
   ReviewFailed,
+  VerifyBatchItem,
 } from "../src/index.browser.js";
 
 describe("index.browser type re-exports", () => {
@@ -24,6 +25,11 @@ describe("index.browser type re-exports", () => {
       | ReviewEventBase["event"]
     > = ["certificate.timestamped", "review.completed", "review.failed"];
     expect(names).toHaveLength(3);
+  });
+
+  it("names VerifyBatchItem", () => {
+    const item: VerifyBatchItem = { claim: "a", sourceUrl: "https://s.example/p" };
+    expect(item.claim).toBe("a");
   });
 });
 

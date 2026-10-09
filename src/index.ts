@@ -198,6 +198,7 @@ export type {
   VerifyAndWaitInput,
   VerifyBatchAndWaitInput,
   VerifyBatchInput,
+  VerifyBatchItem,
   VerifyInput,
   WaitOptions,
 } from "./types.js";

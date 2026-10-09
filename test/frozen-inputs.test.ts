@@ -10,9 +10,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Lenz, LenzTimeoutError } from "../src/index.js";
-import type { CitationPair, Progress, VerifyBatchInput } from "../src/index.js";
-
-type VerifyBatchItem = VerifyBatchInput["claims"][number];
+import type { CitationPair, Progress, VerifyBatchItem } from "../src/index.js";
 
 interface FetchCall {
   url: string;
