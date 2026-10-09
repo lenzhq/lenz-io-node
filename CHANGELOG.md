@@ -150,6 +150,21 @@ differently:
 
 ### Added
 
+- **A task cancelled elsewhere ends a wait with the failed error, failure class
+  `cancelled`; webhook events `*.cancelled` are typed.** In API version
+  2026-10-11 `cancelled` is its own terminal status (a task stopped from the
+  website, or by another process): `wait`, `verifyAndWait`,
+  `verifyBatchAndWait`, `reviewAndWait` and `citecheckAndWait` now stop on it
+  instead of polling to their deadline, with the error 2.x threw for the same
+  task (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`:
+  `failureClass` `"cancelled"`, `retryable` `false`; a batch item reads
+  `"failed"`), and `getStatus` / `getReview` / `getCitecheck` return the
+  cancelled status without throwing. `verification.cancelled`,
+  `review.cancelled` and `citecheck.cancelled` parse into `VerificationCancelled`,
+  `ReviewCancelled` and `CitecheckCancelled` (`isEvent` narrows on them); they
+  are sent only for work submitted under 2026-10-11, and a cancellation
+  submitted under the original version keeps arriving as `*.failed`. Methods
+  to cancel come in a later release.
 - **`verifyAndWait(input, opts)` and `verifyBatchAndWait(input, opts)`** take
   their wait options (`WaitOptions`: `timeoutMs`, `onProgress`) as a second
   argument, as `wait`, `reviewAndWait` and `citecheckAndWait` already did.

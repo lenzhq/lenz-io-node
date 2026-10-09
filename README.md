@@ -553,6 +553,12 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
 });
 ```
 
+`verification.cancelled`, `review.cancelled` and `citecheck.cancelled` (a task
+cancelled elsewhere) are typed the same way as the `*.failed` events and
+narrow with `isEvent`. They are sent only for work submitted under API version
+2026-10-11; a cancellation of older work keeps arriving as `*.failed` with
+failure class `cancelled`.
+
 `review.completed` and `review.failed` carry the whole review under `review`,
 as `client.getReview` returns it, and `citecheck.*` the whole check under
 `citecheck`; a review's own deep checks fire no `verification.*` events.
@@ -721,7 +727,11 @@ A failed _verification_ (as opposed to a failed HTTP call) throws
 `failureClass` (closed set: `upstream_unavailable` | `insufficient_evidence`
 | `invalid_input` | `cancelled` | `internal`) and `retryable` — `true` means
 a transient provider-side exhaustion where resubmitting the same claim is the
-right move; older servers leave it `null`.
+right move; older servers leave it `null`. A verification, review or citation
+check cancelled elsewhere (the website's Stop button, another process) ends a
+wait the same way: `failureClass` is `"cancelled"` and `retryable` is `false`.
+Reading it with `getStatus` / `getReview` / `getCitecheck` returns the status
+`"cancelled"` and does not throw.
 
 `LenzConnectionError` and `LenzUpstreamUnavailableError` are subclasses of
 `LenzAPIError`, so a 2.x handler for it still catches them. A
