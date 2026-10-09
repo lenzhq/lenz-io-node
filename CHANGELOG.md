@@ -169,7 +169,8 @@ undefined`), the timeout of a `*AndWait` included. A resend is safe only
   and the new classes were missing from it.
 - **`logger` option** on `new Lenz({ logger })` (`LenzLogger`: optional
   `debug`, `info`, `warn`; `console` fits): retries go to `debug`, the
-  `verifyAndWait` task id to `info`. Silent without one.
+  `verifyAndWait` task id to `info`. Silent without one. A logger method
+  that throws, or returns a promise that rejects, never breaks a call.
 - **`idempotency` option** on `verifyBatch`, `verifyBatchAndWait` and
   `ask.send`.
 - **`isEvent(event, kind)`** narrows a parsed webhook event without a cast,

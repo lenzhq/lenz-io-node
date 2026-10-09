@@ -537,4 +537,45 @@ describe("A5: no console output unless a logger is given", () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch, logger });
     expect((await client.verifyAndWait({ claim: "a" })).verification_id).toBe("v1");
   });
+  it("a logger whose method returns a rejected promise never crashes the process", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const { fetch } = makeFetch([
+        { status: 500, body: { detail: "boom" } },
+        { body: { task_id: "t9", claim: "a" } },
+        { body: COMPLETED },
+      ]);
+      vi.useFakeTimers();
+      const logger = {
+        debug: async () => {
+          throw new Error("async logger bug");
+        },
+        info: () => Promise.reject(new Error("async logger bug")) as unknown as void,
+      };
+      const client = new Lenz({ apiKey: "lenz_t", fetch, logger });
+      const pending = client.verifyAndWait({ claim: "a" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect((await pending).verification_id).toBe("v1");
+    } finally {
+      vi.useRealTimers();
+    }
+    // Let any rejection surface.
+    await new Promise((r) => setTimeout(r, 10));
+    process.off("unhandledRejection", onUnhandled);
+    expect(unhandled).toEqual([]);
+  });
+
+  it("a logger whose result has a throwing then is ignored", async () => {
+    const { fetch } = makeFetch([{ body: { task_id: "t9", claim: "a" } }, { body: COMPLETED }]);
+    const hostile = {
+      get then(): never {
+        throw new Error("then bug");
+      },
+    };
+    const logger = { info: () => hostile as unknown as void };
+    const client = new Lenz({ apiKey: "lenz_t", fetch, logger });
+    expect((await client.verifyAndWait({ claim: "a" })).verification_id).toBe("v1");
+  });
 });

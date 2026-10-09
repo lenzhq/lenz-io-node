@@ -1784,10 +1784,24 @@ export class Lenz {
     });
   }
 
-  /** A line to the caller's logger, if any; a logger that throws is ignored. */
+  /**
+   * A line to the caller's logger, if any. A logger that throws, or whose
+   * method returns a promise that rejects, is ignored.
+   */
   private log(level: keyof LenzLogger, message: string): void {
     try {
-      this.logger?.[level]?.(message);
+      const out: unknown = this.logger?.[level]?.(message);
+      // An async logger's rejection must not surface as an unhandled one.
+      if (out !== null && (typeof out === "object" || typeof out === "function")) {
+        const then = (out as { then?: unknown }).then;
+        if (typeof then === "function") {
+          (then as (ok: unknown, fail: (e: unknown) => void) => unknown).call(
+            out,
+            undefined,
+            () => {},
+          );
+        }
+      }
     } catch {
       // A logger's bug must never break the call.
     }
