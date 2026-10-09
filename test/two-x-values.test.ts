@@ -83,9 +83,6 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   // The server words the durable not-a-claim hint anew.
   verify__verification_failed_409_not_a_claim_durable: ["error.hint", "error.fix"],
   // A 4xx sentence the server words anew.
-  assess__422_blank_text: MESSAGE,
-  verify__blank_claim_422: MESSAGE,
-  verify__select_empty_422: MESSAGE,
   errors__validation_malformed_json: MESSAGE,
   // A failed review's hint the server words anew.
   review__get_failed_every_assessment_failed: [

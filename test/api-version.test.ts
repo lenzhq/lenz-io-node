@@ -89,6 +89,52 @@ describe("errors keep their 2.x fields", () => {
     expect((err as LenzValidationError).errors).toEqual([]);
   });
 
+  describe("a blank input reads with the sentence 2.x gave", () => {
+    const blank = (loc: unknown[], detail: string) => ({
+      detail,
+      code: "blank_input",
+      errors: [{ loc, msg: detail, type: "blank_input" }],
+    });
+
+    it.each([
+      ["verify", "Text is required.", (c: Lenz) => c.verify({ claim: " " })],
+      ["assess", "Text is required.", (c: Lenz) => c.assess({ claim: " " })],
+    ])("%s: the single blank claim", async (_name, sentence, call) => {
+      const body = blank(["body", "claim"], "claim is required.");
+      const err = await thrown(() => call(client(422, body)));
+      expect(err).toBeInstanceOf(LenzValidationError);
+      expect(err.message).toBe(sentence);
+      expect(err.cause_).toBe(sentence);
+      expect(err.code).toBe("");
+      expect(err.body).toEqual(body);
+    });
+
+    it("verifyBatch: a blank item names its item", async () => {
+      const body = blank(["body", "claims", 1, "claim"], "claims[1].claim is required.");
+      const err = await thrown(() =>
+        client(422, body).verifyBatch({ claims: [{ claim: "a" }, { claim: " " }] }),
+      );
+      expect(err.message).toBe("claims[1].text is required.");
+      expect(err.code).toBe("");
+      expect(err.body).toEqual(body);
+    });
+
+    it("select: a list of blanks asks for the 2.x name", async () => {
+      const body = blank(["body", "claims"], "claims is required.");
+      const err = await thrown(() => client(422, body).select("task1", { claims: [" "] }));
+      expect(err.message).toBe("texts is required and must be non-empty.");
+      expect(err.cause_).toBe("texts is required and must be non-empty.");
+      expect(err.code).toBe("");
+      expect(err.body).toEqual(body);
+    });
+
+    it("extract: its sentence was the same in both shapes", async () => {
+      const body = blank(["body", "text"], "Text is required.");
+      const err = await thrown(() => client(422, body).extract({ text: " " }));
+      expect(err.message).toBe("Text is required.");
+    });
+  });
+
   it("the daily /extract limit's wait reads as resetInSeconds", async () => {
     const err = await thrown(() =>
       client(429, {

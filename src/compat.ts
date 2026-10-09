@@ -566,6 +566,24 @@ export function legacyErrorBody(status: number, body: unknown, req: RequestConte
     legacyWaitAndLink(out, status);
     return out;
   }
+  // A blank input said "Text is required." (or its item, or `texts`), where
+  // the newer sentence names `claim` / `claims`. Found by endpoint and field.
+  if (status === 422 && code === "blank_input" && typeof out["detail"] === "string") {
+    const loc = isObj(errors?.[0]) ? (errors[0] as Obj)["loc"] : null;
+    if (Array.isArray(loc) && loc[0] === "body") {
+      if (req.method === "POST" && (path === "/verify" || path === "/assess")) {
+        if (loc.length === 2 && loc[1] === "claim") out["detail"] = "Text is required.";
+      } else if (req.method === "POST" && path === "/verify/batch") {
+        if (loc.length === 4 && loc[1] === "claims" && typeof loc[2] === "number") {
+          out["detail"] = `claims[${loc[2]}].text is required.`;
+        }
+      } else if (req.method === "POST" && /^\/verify\/[^/]+\/select$/.test(path)) {
+        if (loc.length === 2 && loc[1] === "claims") {
+          out["detail"] = "texts is required and must be non-empty.";
+        }
+      }
+    }
+  }
   if (status === 422 && code === "blank_input" && path === "/assess") {
     const loc = isObj(errors?.[0]) ? (errors[0] as Obj)["loc"] : null;
     if (Array.isArray(loc) && loc.includes("claims")) {
