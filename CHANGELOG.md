@@ -163,11 +163,13 @@ differently:
   `getStatus`, as in 2.x, so an override (a subclass, a test double) is used;
   an override may ignore the argument and the wait still ends at its
   deadline.
-- **`idempotencyKey` on every error of a call that sent one** (`string |
-undefined`), the timeout of a `*AndWait` included. A resend is safe only
-  with that key: pass `idempotencyKey: err.idempotencyKey` back. A plain new
-  call mints a new key and, if the first request reached the server, runs
-  (and charges) twice.
+- **`idempotencyKey` on every error of a call that sent one**
+  (`string | undefined`), the timeout of a `*AndWait` included. A resend is
+  safe only with that key: pass `idempotencyKey: err.idempotencyKey` back. A
+  plain new call mints a new key and, if the first request reached the
+  server, runs (and charges) twice. A response body that breaks off after the
+  headers still throws the runtime's own error, as in 2.x (its class is
+  unchanged); on a keyed call it carries `idempotencyKey` too.
 - **The underlying `fetch` error as the native `cause`** of a
   `LenzConnectionError`; the string `cause_` line is unchanged.
 - **Every error class from the browser entry**: `LenzUpstreamUnavailableError`

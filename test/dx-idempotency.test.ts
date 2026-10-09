@@ -15,6 +15,7 @@ import {
   LenzTimeoutError,
   LenzValidationError,
   mapResponseToError,
+  type TaskStatus,
 } from "../src/index.js";
 
 interface FetchCall {
@@ -261,5 +262,81 @@ describe("S6: retryable", () => {
     expect(new LenzRequestTimeoutError().retryable).toBe(true);
     expect(new LenzTimeoutError().retryable).toBeNull();
     expect(new LenzError().retryable).toBeNull();
+  });
+});
+
+describe("a body that breaks off after the headers keeps the key", () => {
+  function brokenBody(status: number) {
+    return vi.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"role":'));
+          controller.error(new TypeError("terminated"));
+        },
+      });
+      return new Response(stream, { status, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  it("a 2xx: the same error as 2.21 (not a LenzError), carrying the key", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(200) });
+    const err = (await settle(
+      client.ask.send("v", { message: "why?", idempotencyKey: "ask-1" }),
+    )) as Error & { idempotencyKey?: string };
+    expect(err).toBeInstanceOf(TypeError);
+    expect(err).not.toBeInstanceOf(LenzError);
+    expect(err.idempotencyKey).toBe("ask-1");
+  });
+
+  it("an error status: the same, carrying the key", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(422) });
+    const err = (await settle(client.verify({ claim: "a", idempotencyKey: "v-1" }))) as Error & {
+      idempotencyKey?: string;
+    };
+    expect(err).toBeInstanceOf(TypeError);
+    expect(err.idempotencyKey).toBe("v-1");
+  });
+
+  it("a GET's broken body carries none", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(200) });
+    const err = (await settle(client.getStatus("t"))) as Error & { idempotencyKey?: string };
+    expect(err).toBeInstanceOf(TypeError);
+    expect("idempotencyKey" in err).toBe(false);
+  });
+});
+
+describe("verifyBatchAndWait submits through the public verifyBatch, as 2.21 did", () => {
+  class Fake extends Lenz {
+    inputs: Array<Record<string, unknown>> = [];
+    override async verifyBatch(input: Parameters<Lenz["verifyBatch"]>[0]) {
+      this.inputs.push(input as unknown as Record<string, unknown>);
+      return { batch_id: "b", items: [{ task_id: "t1", claim: "a" }] } as Awaited<
+        ReturnType<Lenz["verifyBatch"]>
+      >;
+    }
+    override async getStatus(): Promise<TaskStatus> {
+      return { status: "completed", result: { verification_id: "v1" } } as TaskStatus;
+    }
+  }
+  const noFetch = (() => {
+    throw new Error("the network must not be used");
+  }) as unknown as typeof fetch;
+
+  it("the override is used, with the call's generated key forwarded", async () => {
+    const client = new Fake({ apiKey: "lenz_t", fetch: noFetch });
+    const out = await client.verifyBatchAndWait({ claims: [{ claim: "a" }] });
+    expect(out[0]!.status).toBe("completed");
+    expect(client.inputs).toHaveLength(1);
+    expect(client.inputs[0]!["idempotencyKey"]).toMatch(/^[0-9a-f]{32}$/);
+    expect(client.inputs[0]!["claims"]).toEqual([{ claim: "a" }]);
+  });
+
+  it("a caller key and the opt-out reach the override unchanged", async () => {
+    const client = new Fake({ apiKey: "lenz_t", fetch: noFetch });
+    await client.verifyBatchAndWait({ claims: [{ claim: "a" }], idempotencyKey: "mine" });
+    await client.verifyBatchAndWait({ claims: [{ claim: "a" }], idempotency: false });
+    expect(client.inputs[0]!["idempotencyKey"]).toBe("mine");
+    expect(client.inputs[1]!["idempotency"]).toBe(false);
+    expect(client.inputs[1]!["idempotencyKey"]).toBeUndefined();
   });
 });

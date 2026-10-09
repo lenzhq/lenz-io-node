@@ -335,12 +335,26 @@ function idempotencyKeyIn(headers: Record<string, string> | undefined): string |
 }
 
 /**
- * Stamp the call's `Idempotency-Key` on a LenzError it throws, so the caller
+ * Stamp the call's `Idempotency-Key` on an error it throws, so the caller
  * can resend with the same key. A key already stamped stays.
+ *
+ * Not only on a LenzError: a response body that breaks off after the headers
+ * (the server may well have done the work) throws the runtime's own error, as
+ * in 2.x, and it carries the key too. Its class is never changed, so a 2.x
+ * `catch` keeps matching it.
  */
 function stampIdempotencyKey(exc: unknown, key: string | undefined): void {
-  if (key && exc instanceof LenzError && exc.idempotencyKey === undefined) {
-    exc.idempotencyKey = key;
+  if (!key) return;
+  if (exc instanceof LenzError) {
+    if (exc.idempotencyKey === undefined) exc.idempotencyKey = key;
+    return;
+  }
+  if (exc instanceof Error && !("idempotencyKey" in exc)) {
+    try {
+      (exc as Error & { idempotencyKey?: string }).idempotencyKey = key;
+    } catch {
+      // A frozen error object keeps what it has.
+    }
   }
 }
 
@@ -1486,7 +1500,13 @@ export class Lenz {
     idempotencyKey: string | undefined,
     timeoutMs: number,
   ): Promise<BatchItemResult[]> {
-    const accepted = await this._verifyBatch(input, idempotencyKey);
+    // Through the public verifyBatch, as 2.x did, so an override (a subclass,
+    // a test double) is used. The call's key rides in the input, so the
+    // override and the default both send the key this call reports; with
+    // the opt-out there is none and the input goes as given.
+    const accepted = await this.verifyBatch(
+      idempotencyKey === undefined ? input : { ...input, idempotencyKey },
+    );
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
     const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       ids,
