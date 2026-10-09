@@ -518,6 +518,8 @@ class VerificationsNamespace {
       return true;
     } catch (exc) {
       // Idempotent DELETE: 404 after retry means the row was already gone.
+      // A 404 in another API version is not read as this one's.
+      if (exc instanceof LenzApiVersionError) throw exc;
       if (exc instanceof LenzError && exc.statusCode === 404) return true;
       throw exc;
     }
@@ -1385,6 +1387,9 @@ export class Lenz {
           }
         } else if (res.reason instanceof LenzGoneError) {
           gone.set(id, res.reason);
+        } else if (res.reason instanceof LenzApiVersionError) {
+          // Another API version answered: polling again reads the same.
+          throw res.reason;
         } else {
           // Poll errored this round (after _request exhausted its retries) —
           // keep pending and retry next round rather than aborting the batch.
@@ -1575,8 +1580,8 @@ export class Lenz {
         let rawBody = "";
         try {
           rawBody = await response.text();
-        } catch (exc) {
-          if (!controller.signal.aborted) throw exc;
+        } catch {
+          // The version is already known; an unreadable body leaves body null.
         } finally {
           clearTimeout(timer);
         }

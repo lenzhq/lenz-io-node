@@ -119,6 +119,42 @@ describe("a response from another API version is refused", () => {
     expect(err.body).toBeNull();
   });
 
+  it("throws the version error even when the body cannot be read", async () => {
+    const broken = new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError("terminated"));
+      },
+    });
+    const { fetch } = recorder(
+      () => new Response(broken, { status: 200, headers: { [SERVED]: "2026-05-13" } }),
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const err = await thrown(() => client.usage());
+    expect(err).toBeInstanceOf(LenzApiVersionError);
+    expect(err.body).toBeNull();
+  });
+
+  it("is not read as 'already deleted' on a 404 delete", async () => {
+    const { fetch } = recorder(() =>
+      json({ detail: "Not found." }, 404, { [SERVED]: "2026-05-13" }),
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const err = await thrown(() => client.verifications.delete("v1"));
+    expect(err).toBeInstanceOf(LenzApiVersionError);
+  });
+
+  it("ends a wait at once instead of polling to the deadline", async () => {
+    let calls = 0;
+    const { fetch } = recorder(() => {
+      calls += 1;
+      return json({ status: "processing" }, 200, { [SERVED]: "2026-05-13" });
+    });
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const err = await thrown(() => client.wait("t1", { timeoutMs: 5_000 }));
+    expect(err).toBeInstanceOf(LenzApiVersionError);
+    expect(calls).toBe(1);
+  });
+
   it("passes a response that names the version it asked for", async () => {
     const { fetch } = recorder(() => json({ ok: true }, 200, { [SERVED]: API_VERSION }));
     const client = new Lenz({ apiKey: "lenz_t", fetch });
