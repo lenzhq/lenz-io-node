@@ -197,6 +197,8 @@ describe("a transport failure that cannot be marked is still a failed poll", () 
   for (const [label, reason] of [
     ["a frozen error", Object.freeze(new TypeError("terminated"))],
     ["a primitive", "boom"],
+    ["null", null],
+    ["undefined", undefined],
   ] as const) {
     it(`wait: a body that rejects with ${label}`, async () => {
       const queue: Array<() => Response> = [

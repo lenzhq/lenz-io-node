@@ -2287,7 +2287,7 @@ export class Lenz {
         // A wait the server stated outranks the poll hint, capped like every
         // other stated wait in this client: a maintenance 503 can state an
         // hour.
-        const retryAfter = (exc as { retryAfter?: unknown }).retryAfter;
+        const retryAfter = (exc as { retryAfter?: unknown } | null | undefined)?.retryAfter;
         if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
           statedWaitMs = Math.min(retryAfter, MAX_RETRY_AFTER_SLEEP) * 1000;
         }
