@@ -370,12 +370,16 @@ async function bodyNames(response: Response, key: string): Promise<boolean> {
   }
 }
 
+/** The sentence a verification cancelled elsewhere ends a wait with. */
+const CANCELLED_SENTENCE = "Cancelled.";
+
 const REVIEW_STATUSES: readonly string[] = [
   "queued",
   "assessing",
   "verifying",
   "completed",
   "failed",
+  "cancelled",
 ];
 
 /**
@@ -426,7 +430,7 @@ function isCitecheckBody(body: unknown, citecheckId: string): body is Citecheck 
   return (
     b["citecheck_id"] === citecheckId &&
     typeof b["status"] === "string" &&
-    ["queued", "checking", "completed", "failed"].includes(b["status"]) &&
+    ["queued", "checking", "completed", "failed", "cancelled"].includes(b["status"]) &&
     Array.isArray(b["citations"]) &&
     Array.isArray(b["citation_issues"]) &&
     Array.isArray(b["citation_failures"]) &&
@@ -1389,7 +1393,7 @@ export class Lenz {
    * Start a citation check and poll it until it ends; returns the completed
    * check. Polls on its `poll_after_seconds` (never tighter than 5 s) and
    * calls `onUpdate` on every poll whose body changed. Throws
-   * {@link CitecheckFailedError} when the check ends `failed` and
+   * {@link CitecheckFailedError} when the check ends `failed` or `cancelled` and
    * {@link CitecheckTimeoutError} (carrying the last body seen) at the
    * deadline, which bounds the submit and every poll.
    */
@@ -1454,7 +1458,7 @@ export class Lenz {
    * Polls on the review's `poll_after_seconds` (never tighter than 5 s) and
    * calls `onUpdate` with the review on every poll whose body changed, so a
    * caller can show the quick verdicts as soon as they land. Throws
-   * {@link ReviewFailedError} when the review ends `failed` and
+   * {@link ReviewFailedError} when the review ends `failed` or `cancelled` and
    * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
    * a transient poll error is retried on the next poll, after the wait the
    * server stated when it stated one (at most 60 s). The deadline bounds the
@@ -1552,7 +1556,11 @@ export class Lenz {
           }
         }
         if (current.status === "completed") return current;
-        if (current.status === "failed") throw job.failed(current);
+        // `cancelled` (API version 2026-10-11) is the original shape's `failed`
+        // with failure class `cancelled`: the same error.
+        if (current.status === "failed" || current.status === "cancelled") {
+          throw job.failed(current);
+        }
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw job.timedOut(last);
@@ -1587,7 +1595,8 @@ export class Lenz {
    * `Verification`. `task` is a `task_id` string OR the `TaskAccepted` returned
    * by `verify` / `select` — so `client.wait(await client.verify({claim}))`
    * reads naturally. Throws for an empty id, `LenzNeedsInputError` /
-   * `LenzPipelineError` on terminal non-success, `LenzGoneError` when the
+   * `LenzPipelineError` on terminal non-success (a task cancelled elsewhere
+   * too, with `failureClass` `"cancelled"`), `LenzGoneError` when the
    * verification was removed under its account's retention period, and
    * `LenzTimeoutError` on deadline.
    */
@@ -1779,7 +1788,12 @@ export class Lenz {
         const id = pending[i]!;
         if (res.status === "fulfilled") {
           const s = res.value;
-          if (s.status === "completed" || s.status === "needs_input" || s.status === "failed") {
+          if (
+            s.status === "completed" ||
+            s.status === "needs_input" ||
+            s.status === "failed" ||
+            s.status === "cancelled"
+          ) {
             terminal.set(id, s);
           } else {
             stillPending.push(id);
@@ -1898,6 +1912,22 @@ export class Lenz {
       err.payload = status as unknown as Record<string, unknown>;
       err.hint = status.hint ?? "";
       throw err;
+    }
+    if (status.status === "cancelled") {
+      // Cancelled elsewhere: the original shape's `failed` with failure class
+      // `cancelled`, so the same error, with what that shape said.
+      const cancelled = new LenzPipelineError({
+        message: `Pipeline failed: ${CANCELLED_SENTENCE}`,
+        cause: CANCELLED_SENTENCE,
+        fix: "Retry with a different claim, or check status.error for the diagnostic.",
+        docUrl: "https://lenz.io/docs/errors",
+      });
+      cancelled.taskId = taskId;
+      cancelled.failureReason = "cancelled";
+      cancelled.failureClass = "cancelled";
+      cancelled.retryable = false;
+      cancelled.hint = "";
+      throw cancelled;
     }
     // failed. `getStatus` fills `error` from `failure.detail` on the newer
     // response shape; the other fields are older fallbacks.

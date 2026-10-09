@@ -17,6 +17,27 @@ import type * as New from "../../src/index.js";
 /** A value of type `T`, for assignment checks only (never evaluated). */
 declare function value<T>(): T;
 
+/**
+ * The one intentional widening of this release: API version 2026-10-11 ends a
+ * task cancelled elsewhere with the status `cancelled` (and the events
+ * `*.cancelled`), which 2.21.0's closed unions do not name. The reading
+ * direction (new value into an old type) is therefore checked with that one
+ * literal taken out; everything else must still fit exactly.
+ */
+type WithoutCancelled<T> = T extends "cancelled" | `${string}.cancelled`
+  ? never
+  : T extends string | number | boolean | bigint | null | undefined
+    ? T
+    : T extends (...args: infer A) => infer R
+      ? (...args: { [K in keyof A]: WithoutCancelled<A[K]> }) => WithoutCancelled<R>
+      : T extends Promise<infer U>
+        ? Promise<WithoutCancelled<U>>
+        : T extends readonly unknown[]
+          ? { [K in keyof T]: WithoutCancelled<T[K]> }
+          : T extends object
+            ? { [K in keyof T]: WithoutCancelled<T[K]> }
+            : T;
+
 export const new_LenzOptions: New.LenzOptions = value<Old.LenzOptions>();
 export const old_LenzOptions: Old.LenzOptions = value<New.LenzOptions>();
 export const new_LenzWebhooksOptions: New.LenzWebhooksOptions = value<Old.LenzWebhooksOptions>();
@@ -26,31 +47,39 @@ export const new_CertificateTimestamped: New.CertificateTimestamped =
 export const old_CertificateTimestamped: Old.CertificateTimestamped =
   value<New.CertificateTimestamped>();
 export const new_CitecheckCompleted: New.CitecheckCompleted = value<Old.CitecheckCompleted>();
-export const old_CitecheckCompleted: Old.CitecheckCompleted = value<New.CitecheckCompleted>();
+export const old_CitecheckCompleted: Old.CitecheckCompleted =
+  value<WithoutCancelled<New.CitecheckCompleted>>();
 export const new_CitecheckEvent: New.CitecheckEvent = value<Old.CitecheckEvent>();
-export const old_CitecheckEvent: Old.CitecheckEvent = value<New.CitecheckEvent>();
+export const old_CitecheckEvent: Old.CitecheckEvent = value<WithoutCancelled<New.CitecheckEvent>>();
 export const new_CitecheckEventBase: New.CitecheckEventBase = value<Old.CitecheckEventBase>();
-export const old_CitecheckEventBase: Old.CitecheckEventBase = value<New.CitecheckEventBase>();
+export const old_CitecheckEventBase: Old.CitecheckEventBase =
+  value<WithoutCancelled<New.CitecheckEventBase>>();
 export const new_CitecheckFailed: New.CitecheckFailed = value<Old.CitecheckFailed>();
-export const old_CitecheckFailed: Old.CitecheckFailed = value<New.CitecheckFailed>();
+export const old_CitecheckFailed: Old.CitecheckFailed =
+  value<WithoutCancelled<New.CitecheckFailed>>();
 export const new_ReviewCompleted: New.ReviewCompleted = value<Old.ReviewCompleted>();
-export const old_ReviewCompleted: Old.ReviewCompleted = value<New.ReviewCompleted>();
+export const old_ReviewCompleted: Old.ReviewCompleted =
+  value<WithoutCancelled<New.ReviewCompleted>>();
 export const new_ReviewEvent: New.ReviewEvent = value<Old.ReviewEvent>();
-export const old_ReviewEvent: Old.ReviewEvent = value<New.ReviewEvent>();
+export const old_ReviewEvent: Old.ReviewEvent = value<WithoutCancelled<New.ReviewEvent>>();
 export const new_ReviewEventBase: New.ReviewEventBase = value<Old.ReviewEventBase>();
-export const old_ReviewEventBase: Old.ReviewEventBase = value<New.ReviewEventBase>();
+export const old_ReviewEventBase: Old.ReviewEventBase =
+  value<WithoutCancelled<New.ReviewEventBase>>();
 export const new_ReviewFailed: New.ReviewFailed = value<Old.ReviewFailed>();
-export const old_ReviewFailed: Old.ReviewFailed = value<New.ReviewFailed>();
+export const old_ReviewFailed: Old.ReviewFailed = value<WithoutCancelled<New.ReviewFailed>>();
 export const new_VerificationCompleted: New.VerificationCompleted =
   value<Old.VerificationCompleted>();
 export const old_VerificationCompleted: Old.VerificationCompleted =
-  value<New.VerificationCompleted>();
+  value<WithoutCancelled<New.VerificationCompleted>>();
+
 export const new_VerificationFailed: New.VerificationFailed = value<Old.VerificationFailed>();
-export const old_VerificationFailed: Old.VerificationFailed = value<New.VerificationFailed>();
+export const old_VerificationFailed: Old.VerificationFailed =
+  value<WithoutCancelled<New.VerificationFailed>>();
 export const new_VerificationNeedsInput: New.VerificationNeedsInput =
   value<Old.VerificationNeedsInput>();
 export const old_VerificationNeedsInput: Old.VerificationNeedsInput =
-  value<New.VerificationNeedsInput>();
+  value<WithoutCancelled<New.VerificationNeedsInput>>();
+
 export const new_WebhookEvent: New.WebhookEvent = value<Old.WebhookEvent>();
 export const old_WebhookEvent: Old.WebhookEvent = value<New.WebhookEvent>();
 export const new_WebhookEventBase: New.WebhookEventBase = value<Old.WebhookEventBase>();
@@ -70,8 +99,8 @@ export const old_EscalationPolicy: Old.EscalationPolicy = value<New.EscalationPo
 export const new_CitationPair: New.CitationPair = value<Old.CitationPair>();
 export const old_CitationPair: Old.CitationPair = value<New.CitationPair>();
 export const new_Citecheck: New.Citecheck = value<Old.Citecheck>();
-export const old_Citecheck: Old.Citecheck = value<New.Citecheck>();
-export const new_CitecheckAndWaitOptions: New.CitecheckAndWaitOptions =
+export const old_Citecheck: Old.Citecheck = value<WithoutCancelled<New.Citecheck>>();
+export const new_CitecheckAndWaitOptions: WithoutCancelled<New.CitecheckAndWaitOptions> =
   value<Old.CitecheckAndWaitOptions>();
 export const old_CitecheckAndWaitOptions: Old.CitecheckAndWaitOptions =
   value<New.CitecheckAndWaitOptions>();
@@ -82,12 +111,14 @@ export const old_CitecheckPolicy: Old.CitecheckPolicy = value<New.CitecheckPolic
 export const new_CitecheckStarted: New.CitecheckStarted = value<Old.CitecheckStarted>();
 export const old_CitecheckStarted: Old.CitecheckStarted = value<New.CitecheckStarted>();
 export const new_CitecheckStatus: New.CitecheckStatus = value<Old.CitecheckStatus>();
-export const old_CitecheckStatus: Old.CitecheckStatus = value<New.CitecheckStatus>();
+export const old_CitecheckStatus: Old.CitecheckStatus =
+  value<WithoutCancelled<New.CitecheckStatus>>();
 export const new_CitecheckSummary: New.CitecheckSummary = value<Old.CitecheckSummary>();
 export const old_CitecheckSummary: Old.CitecheckSummary = value<New.CitecheckSummary>();
 export const new_GetReviewOptions: New.GetReviewOptions = value<Old.GetReviewOptions>();
 export const old_GetReviewOptions: Old.GetReviewOptions = value<New.GetReviewOptions>();
-export const new_ReviewAndWaitOptions: New.ReviewAndWaitOptions = value<Old.ReviewAndWaitOptions>();
+export const new_ReviewAndWaitOptions: WithoutCancelled<New.ReviewAndWaitOptions> =
+  value<Old.ReviewAndWaitOptions>();
 export const old_ReviewAndWaitOptions: Old.ReviewAndWaitOptions = value<New.ReviewAndWaitOptions>();
 export const new_ReviewAssessment: New.ReviewAssessment = value<Old.ReviewAssessment>();
 export const old_ReviewAssessment: Old.ReviewAssessment = value<New.ReviewAssessment>();
@@ -136,19 +167,19 @@ export const old_ReviewCredits: Old.ReviewCredits = value<New.ReviewCredits>();
 export const new_ReviewEntity: New.ReviewEntity = value<Old.ReviewEntity>();
 export const old_ReviewEntity: Old.ReviewEntity = value<New.ReviewEntity>();
 export const new_ReviewEnvelope: New.ReviewEnvelope = value<Old.ReviewEnvelope>();
-export const old_ReviewEnvelope: Old.ReviewEnvelope = value<New.ReviewEnvelope>();
+export const old_ReviewEnvelope: Old.ReviewEnvelope = value<WithoutCancelled<New.ReviewEnvelope>>();
 export const new_ReviewFailure: New.ReviewFailure = value<Old.ReviewFailure>();
 export const old_ReviewFailure: Old.ReviewFailure = value<New.ReviewFailure>();
 export const new_ReviewFailureBlock: New.ReviewFailureBlock = value<Old.ReviewFailureBlock>();
 export const old_ReviewFailureBlock: Old.ReviewFailureBlock = value<New.ReviewFailureBlock>();
 export const new_ReviewFull: New.ReviewFull = value<Old.ReviewFull>();
-export const old_ReviewFull: Old.ReviewFull = value<New.ReviewFull>();
+export const old_ReviewFull: Old.ReviewFull = value<WithoutCancelled<New.ReviewFull>>();
 export const new_ReviewInput: New.ReviewInput = value<Old.ReviewInput>();
 export const old_ReviewInput: Old.ReviewInput = value<New.ReviewInput>();
 export const new_ReviewIssue: New.ReviewIssue = value<Old.ReviewIssue>();
 export const old_ReviewIssue: Old.ReviewIssue = value<New.ReviewIssue>();
 export const new_ReviewIssues: New.ReviewIssues = value<Old.ReviewIssues>();
-export const old_ReviewIssues: Old.ReviewIssues = value<New.ReviewIssues>();
+export const old_ReviewIssues: Old.ReviewIssues = value<WithoutCancelled<New.ReviewIssues>>();
 export const new_ReviewOutcome: New.ReviewOutcome = value<Old.ReviewOutcome>();
 export const old_ReviewOutcome: Old.ReviewOutcome = value<New.ReviewOutcome>();
 export const new_ReviewResult: New.ReviewResult = value<Old.ReviewResult>();
@@ -156,7 +187,7 @@ export const old_ReviewResult: Old.ReviewResult = value<New.ReviewResult>();
 export const new_ReviewStarted: New.ReviewStarted = value<Old.ReviewStarted>();
 export const old_ReviewStarted: Old.ReviewStarted = value<New.ReviewStarted>();
 export const new_ReviewStatus: New.ReviewStatus = value<Old.ReviewStatus>();
-export const old_ReviewStatus: Old.ReviewStatus = value<New.ReviewStatus>();
+export const old_ReviewStatus: Old.ReviewStatus = value<WithoutCancelled<New.ReviewStatus>>();
 export const new_ReviewSummary: New.ReviewSummary = value<Old.ReviewSummary>();
 export const old_ReviewSummary: Old.ReviewSummary = value<New.ReviewSummary>();
 export const new_ReviewVerification: New.ReviewVerification = value<Old.ReviewVerification>();
@@ -186,7 +217,8 @@ export const old_Audit: Old.Audit = value<New.Audit>();
 export const new_BatchAccepted: New.BatchAccepted = value<Old.BatchAccepted>();
 export const old_BatchAccepted: Old.BatchAccepted = value<New.BatchAccepted>();
 export const new_BatchItemResult: New.BatchItemResult = value<Old.BatchItemResult>();
-export const old_BatchItemResult: Old.BatchItemResult = value<New.BatchItemResult>();
+export const old_BatchItemResult: Old.BatchItemResult =
+  value<WithoutCancelled<New.BatchItemResult>>();
 export const new_CandidateClaim: New.CandidateClaim = value<Old.CandidateClaim>();
 export const old_CandidateClaim: Old.CandidateClaim = value<New.CandidateClaim>();
 export const new_ClaimLocation: New.ClaimLocation = value<Old.ClaimLocation>();
@@ -242,7 +274,7 @@ export const old_Source: Old.Source = value<New.Source>();
 export const new_TaskAccepted: New.TaskAccepted = value<Old.TaskAccepted>();
 export const old_TaskAccepted: Old.TaskAccepted = value<New.TaskAccepted>();
 export const new_TaskStatus: New.TaskStatus = value<Old.TaskStatus>();
-export const old_TaskStatus: Old.TaskStatus = value<New.TaskStatus>();
+export const old_TaskStatus: Old.TaskStatus = value<WithoutCancelled<New.TaskStatus>>();
 export const new_Usage: New.Usage = value<Old.Usage>();
 export const old_Usage: Old.Usage = value<New.Usage>();
 export const new_UsageCapacity: New.UsageCapacity = value<Old.UsageCapacity>();
@@ -306,15 +338,19 @@ export const new_LenzWebhookSignatureError: New.LenzWebhookSignatureError =
 export const old_LenzWebhookSignatureError: Old.LenzWebhookSignatureError =
   value<New.LenzWebhookSignatureError>();
 export const new_CitecheckFailedError: New.CitecheckFailedError = value<Old.CitecheckFailedError>();
-export const old_CitecheckFailedError: Old.CitecheckFailedError = value<New.CitecheckFailedError>();
+export const old_CitecheckFailedError: Old.CitecheckFailedError =
+  value<WithoutCancelled<New.CitecheckFailedError>>();
 export const new_CitecheckTimeoutError: New.CitecheckTimeoutError =
   value<Old.CitecheckTimeoutError>();
 export const old_CitecheckTimeoutError: Old.CitecheckTimeoutError =
-  value<New.CitecheckTimeoutError>();
+  value<WithoutCancelled<New.CitecheckTimeoutError>>();
+
 export const new_ReviewFailedError: New.ReviewFailedError = value<Old.ReviewFailedError>();
-export const old_ReviewFailedError: Old.ReviewFailedError = value<New.ReviewFailedError>();
+export const old_ReviewFailedError: Old.ReviewFailedError =
+  value<WithoutCancelled<New.ReviewFailedError>>();
 export const new_ReviewTimeoutError: New.ReviewTimeoutError = value<Old.ReviewTimeoutError>();
-export const old_ReviewTimeoutError: Old.ReviewTimeoutError = value<New.ReviewTimeoutError>();
+export const old_ReviewTimeoutError: Old.ReviewTimeoutError =
+  value<WithoutCancelled<New.ReviewTimeoutError>>();
 
 // Every public method of the client, and of its namespaces: the new one fits where the old one was used.
 export const method_verify: Old.Lenz["verify"] = value<New.Lenz["verify"]>();
@@ -322,19 +358,28 @@ export const method_verifyBatch: Old.Lenz["verifyBatch"] = value<New.Lenz["verif
 export const method_extract: Old.Lenz["extract"] = value<New.Lenz["extract"]>();
 export const method_assess: Old.Lenz["assess"] = value<New.Lenz["assess"]>();
 export const method_select: Old.Lenz["select"] = value<New.Lenz["select"]>();
-export const method_getStatus: Old.Lenz["getStatus"] = value<New.Lenz["getStatus"]>();
+export const method_getStatus: Old.Lenz["getStatus"] =
+  value<WithoutCancelled<New.Lenz["getStatus"]>>();
 export const method_usage: Old.Lenz["usage"] = value<New.Lenz["usage"]>();
 export const method_review: Old.Lenz["review"] = value<New.Lenz["review"]>();
-export const method_getReview: Old.Lenz["getReview"] = value<New.Lenz["getReview"]>();
+// Overloaded, so `WithoutCancelled` cannot read it: the returns are checked by the
+// `old_ReviewFull` / `old_ReviewIssues` lines, the cast keeps the overload set.
+export const method_getReview: Old.Lenz["getReview"] = value<
+  New.Lenz["getReview"]
+>() as Old.Lenz["getReview"];
 export const method_citecheck: Old.Lenz["citecheck"] = value<New.Lenz["citecheck"]>();
-export const method_getCitecheck: Old.Lenz["getCitecheck"] = value<New.Lenz["getCitecheck"]>();
+export const method_getCitecheck: Old.Lenz["getCitecheck"] =
+  value<WithoutCancelled<New.Lenz["getCitecheck"]>>();
 export const method_citecheckAndWait: Old.Lenz["citecheckAndWait"] =
-  value<New.Lenz["citecheckAndWait"]>();
-export const method_reviewAndWait: Old.Lenz["reviewAndWait"] = value<New.Lenz["reviewAndWait"]>();
+  value<WithoutCancelled<New.Lenz["citecheckAndWait"]>>();
+
+export const method_reviewAndWait: Old.Lenz["reviewAndWait"] =
+  value<WithoutCancelled<New.Lenz["reviewAndWait"]>>();
 export const method_verifyAndWait: Old.Lenz["verifyAndWait"] = value<New.Lenz["verifyAndWait"]>();
 export const method_wait: Old.Lenz["wait"] = value<New.Lenz["wait"]>();
 export const method_verifyBatchAndWait: Old.Lenz["verifyBatchAndWait"] =
-  value<New.Lenz["verifyBatchAndWait"]>();
+  value<WithoutCancelled<New.Lenz["verifyBatchAndWait"]>>();
+
 export const method_request: Old.Lenz["request"] = value<New.Lenz["request"]>();
 export const verifications_list: Old.Lenz["verifications"]["list"] =
   value<New.Lenz["verifications"]["list"]>();

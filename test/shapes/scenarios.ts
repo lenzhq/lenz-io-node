@@ -184,7 +184,7 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
       getReview: await outcome(() => client.getReview("r")),
       getReviewIssues: await outcome(() => client.getReview("r", { view: "issues" })),
       reviewAndWait:
-        status === "completed" || status === "failed"
+        status === "completed" || status === "failed" || status === "cancelled"
           ? await outcome(() => client.reviewAndWait({ text: "x" }, { timeoutMs: 50 }))
           : null,
     };
@@ -193,7 +193,7 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
     return {
       getCitecheck: await outcome(() => client.getCitecheck("c")),
       citecheckAndWait:
-        status === "completed" || status === "failed"
+        status === "completed" || status === "failed" || status === "cancelled"
           ? await outcome(() => client.citecheckAndWait({ text: "x" }, { timeoutMs: 50 }))
           : null,
     };

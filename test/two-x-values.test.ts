@@ -70,6 +70,41 @@ const STATUS_SENTENCE = ["getStatus.value.error", "wait.error.message", "wait.er
 const CHAIN_ID = ["value.chain_id"];
 const TASK_ID = ["value.taskId"];
 const MESSAGE = ["error.message", "error.cause_"];
+/**
+ * A task cancelled elsewhere. The original shape says `failed` with failure
+ * class `cancelled`; the newer shape gives `cancelled` its own status and a
+ * failure block only on the nested rows. Waits end the same way (the error is
+ * the oracle's, field for field), so what differs is the status object a
+ * plain read returns (it states the status and nothing else) and the nested
+ * rows' own `failure.detail` sentence.
+ */
+const CANCELLED_TASK = [
+  "getStatus.value.status",
+  "getStatus.value.error",
+  "getStatus.value.failure_reason",
+  "getStatus.value.failure_class",
+  "getStatus.value.retryable",
+  "getStatus.value.docs_url",
+];
+const rows = (at: string, ...lists: string[]) => [
+  `${at}.status`,
+  `${at}.failure`,
+  ...lists.map((list) => `${at}.${list}`),
+];
+const REVIEW_ROWS = ["issues.*.failure.detail", "claims.*.verification.failure.detail"];
+const CITECHECK_ROWS = ["citations.*.check.failure.detail", "citation_failures.*.failure.detail"];
+const CANCELLED_REVIEW = [
+  ...rows("getReview.value", ...REVIEW_ROWS),
+  ...rows("getReviewIssues.value", ...REVIEW_ROWS),
+  ...rows("reviewAndWait.error.review", ...REVIEW_ROWS),
+];
+const CANCELLED_CITECHECK = [
+  ...rows("getCitecheck.value", ...CITECHECK_ROWS),
+  ...rows("citecheckAndWait.error.citecheck", ...CITECHECK_ROWS),
+];
+// The event is named `*.cancelled`; the original `*.failed` states `failed`.
+const CANCELLED_EVENT = ["value.event", "value.status"];
+
 const SERVER_DIFFERS: Record<string, string[]> = {
   // A failed check read back from storage said "Pipeline stopped: <code>."
   // (a running one said "Pipeline stopped at: <code>", which is what the SDK
@@ -110,6 +145,39 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   verify__submit_202_text_alias: CHAIN_ID,
   verify__idempotency_key_replay: CHAIN_ID,
   verify__implicit_repeat_replay: CHAIN_ID,
+  // Cancelled elsewhere: see CANCELLED_TASK above. The live one's wait also
+  // states the original shape's live sentence, which the newer shape no
+  // longer tells apart from the stored one.
+  verify__status_cancelled_durable: CANCELLED_TASK,
+  verify__status_cancelled_live: [
+    ...CANCELLED_TASK,
+    "getStatus.value.failure",
+    ...STATUS_SENTENCE.slice(1),
+  ],
+  review__get_cancelled: CANCELLED_REVIEW,
+  citecheck__get_cancelled: CANCELLED_CITECHECK,
+  webhook__verification_cancelled: [
+    ...CANCELLED_EVENT,
+    "value.error",
+    "value.failureClass",
+    "value.retryable",
+    "value.failure",
+    "value.verification.status",
+    "value.verification.failure_reason",
+    "value.verification.failure_class",
+    "value.verification.retryable",
+    "value.verification.failure",
+  ],
+  webhook__review_cancelled: [
+    ...CANCELLED_EVENT,
+    ...rows("value.review", "issues.*.failure.detail", "claims.*.verification.failure.detail"),
+    "value.taskId",
+  ],
+  webhook__citecheck_cancelled: [
+    ...CANCELLED_EVENT,
+    ...rows("value.citecheck", ...CITECHECK_ROWS),
+    "value.taskId",
+  ],
   // The delivery id the newer review / citation-check events no longer carry
   // (never pollable; dedupe on `eventId`): `taskId` reads the review /
   // citation-check id instead.

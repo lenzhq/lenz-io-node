@@ -53,14 +53,17 @@ export { isEvent } from "./events.js";
 export type { LenzWebhooksOptions } from "./webhooks.js";
 export type {
   CertificateTimestamped,
+  CitecheckCancelled,
   CitecheckCompleted,
   CitecheckEvent,
   CitecheckEventBase,
   CitecheckFailed,
+  ReviewCancelled,
   ReviewCompleted,
   ReviewEvent,
   ReviewEventBase,
   ReviewFailed,
+  VerificationCancelled,
   VerificationCompleted,
   VerificationFailed,
   VerificationNeedsInput,

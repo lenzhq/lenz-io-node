@@ -18,7 +18,7 @@
  */
 
 import { legacyErrorBody, type RequestContext } from "./compat.js";
-import type { Citecheck, ReviewFull } from "./types.js";
+import type { Citecheck, ReviewFailureBlock, ReviewFull } from "./types.js";
 
 export interface LenzErrorContext {
   message?: string;
@@ -476,9 +476,23 @@ export class CitecheckTimeoutError extends LenzTimeoutError {
 }
 
 /**
- * `citecheckAndWait` read a check that ended `failed`. `errorCode` is the
- * failure's `failure_reason` (an open set) and `citecheck` the failed check.
- * A subclass of {@link LenzPipelineError}.
+ * What a review or citation check cancelled elsewhere states (API version
+ * 2026-10-11 gives it no `failure` of its own; the original shape's `failed`
+ * said exactly this).
+ */
+const CANCELLED_FAILURE: ReviewFailureBlock = {
+  failure_reason: "cancelled",
+  failure_class: "cancelled",
+  retryable: false,
+  hint: null,
+  docs_url: "https://lenz.io/docs/errors#cancelled",
+};
+
+/**
+ * `citecheckAndWait` read a check that ended `failed`, or `cancelled` (failure
+ * class `cancelled`, `errorCode` `"cancelled"`). `errorCode` is the failure's
+ * `failure_reason` (an open set) and `citecheck` the ended check. A subclass
+ * of {@link LenzPipelineError}.
  */
 export class CitecheckFailedError extends LenzPipelineError {
   citecheckId: string;
@@ -487,7 +501,7 @@ export class CitecheckFailedError extends LenzPipelineError {
   citecheck: Citecheck;
 
   constructor(check: Citecheck) {
-    const failure = check.failure;
+    const failure = check.failure ?? (check.status === "cancelled" ? CANCELLED_FAILURE : undefined);
     const errorCode = failure?.failure_reason ?? "";
     const hint = failure?.hint ?? "";
     super({
@@ -513,7 +527,8 @@ export class CitecheckFailedError extends LenzPipelineError {
 }
 
 /**
- * `reviewAndWait` read a review that ended `failed`.
+ * `reviewAndWait` read a review that ended `failed`, or `cancelled` (failure
+ * class `cancelled`, `errorCode` `"cancelled"`).
  *
  * `errorCode` is the failure's `failure_reason` (`no_claim`,
  * `insufficient_credits`, `upstream_unavailable`, …: an open set), `hint`
@@ -528,7 +543,8 @@ export class ReviewFailedError extends LenzPipelineError {
   review: ReviewFull;
 
   constructor(review: ReviewFull) {
-    const failure = review.failure;
+    const failure =
+      review.failure ?? (review.status === "cancelled" ? CANCELLED_FAILURE : undefined);
     const errorCode = failure?.failure_reason ?? "";
     const hint = failure?.hint ?? "";
     super({

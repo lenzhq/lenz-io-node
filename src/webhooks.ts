@@ -79,14 +79,17 @@ export function verifySignature(rawBody: RawBody, signature: string, secret: str
 
 export type {
   CertificateTimestamped,
+  CitecheckCancelled,
   CitecheckCompleted,
   CitecheckEvent,
   CitecheckEventBase,
   CitecheckFailed,
+  ReviewCancelled,
   ReviewCompleted,
   ReviewEvent,
   ReviewEventBase,
   ReviewFailed,
+  VerificationCancelled,
   VerificationCompleted,
   VerificationFailed,
   VerificationNeedsInput,
@@ -196,6 +199,9 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       verification,
     };
   }
+  if (event === "verification.cancelled") {
+    return { ...base, event: "verification.cancelled", verification };
+  }
   if (event === "verification.needs_input") {
     let needsInput = (payload["needs_input"] as Record<string, unknown>) ?? null;
     if (needsInput === null && verification) {
@@ -227,7 +233,7 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       coverage: (payload["coverage"] as Coverage) ?? {},
     };
   }
-  if (event === "review.completed" || event === "review.failed") {
+  if (event === "review.completed" || event === "review.failed" || event === "review.cancelled") {
     const review = payload["review"];
     // A review event without its review is not one we can type; hand it
     // over as the base shape rather than as a half-built event.
@@ -241,7 +247,11 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       };
     }
   }
-  if (event === "citecheck.completed" || event === "citecheck.failed") {
+  if (
+    event === "citecheck.completed" ||
+    event === "citecheck.failed" ||
+    event === "citecheck.cancelled"
+  ) {
     const check = payload["citecheck"];
     if (check && typeof check === "object" && !Array.isArray(check)) {
       return {

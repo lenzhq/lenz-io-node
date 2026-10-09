@@ -8,10 +8,13 @@ import { describe, expect, it } from "vitest";
 
 import type {
   CertificateTimestamped,
+  CitecheckCancelled,
+  ReviewCancelled,
   ReviewCompleted,
   ReviewEvent,
   ReviewEventBase,
   ReviewFailed,
+  VerificationCancelled,
   VerifyBatchItem,
 } from "../src/index.browser.js";
 
@@ -24,6 +27,13 @@ describe("index.browser type re-exports", () => {
       | ReviewEvent["event"]
       | ReviewEventBase["event"]
     > = ["certificate.timestamped", "review.completed", "review.failed"];
+    expect(names).toHaveLength(3);
+  });
+
+  it("names the cancelled events", () => {
+    const names: Array<
+      VerificationCancelled["event"] | ReviewCancelled["event"] | CitecheckCancelled["event"]
+    > = ["verification.cancelled", "review.cancelled", "citecheck.cancelled"];
     expect(names).toHaveLength(3);
   });
 

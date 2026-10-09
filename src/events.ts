@@ -21,12 +21,15 @@ import type {
 export type WebhookEventKind =
   | "verification.completed"
   | "verification.failed"
+  | "verification.cancelled"
   | "verification.needs_input"
   | "certificate.timestamped"
   | "review.completed"
   | "review.failed"
+  | "review.cancelled"
   | "citecheck.completed"
   | "citecheck.failed"
+  | "citecheck.cancelled"
   // The `string & NonNullable<unknown>` trick preserves the autocomplete
   // hints from the literal union while still permitting any future
   // event-kind string the server adds. `(string & {})` reads cleaner but
@@ -93,6 +96,17 @@ export interface VerificationFailed extends WebhookEventBase, VerificationEventB
   retryable: boolean | null;
 }
 
+/**
+ * `event=verification.cancelled` — the run was cancelled elsewhere (the
+ * website's Stop button, another process). Sent only for work submitted under
+ * API version 2026-10-11; a cancellation submitted under the original version
+ * keeps arriving as `verification.failed` with failure class `cancelled`.
+ * `verification` is the cancelled status, as `client.getStatus` returns it.
+ */
+export interface VerificationCancelled extends WebhookEventBase, VerificationEventBody {
+  event: "verification.cancelled";
+}
+
 export interface VerificationNeedsInput extends WebhookEventBase, VerificationEventBody {
   event: "verification.needs_input";
   needsInput: Record<string, unknown>;
@@ -123,7 +137,7 @@ export interface CertificateTimestamped extends WebhookEventBase {
 }
 
 /**
- * `event=review.completed` / `review.failed` — a review ended.
+ * `event=review.completed` / `review.failed` / `review.cancelled` — a review ended.
  *
  * `review` is the whole review (`view: "full"`), exactly as
  * `client.getReview` returns it. **Dedupe on `eventId`**: it is stable for
@@ -135,7 +149,7 @@ export interface CertificateTimestamped extends WebhookEventBase {
  * API's newer payload shape, which sends no `task_id`, it is the `reviewId`.
  */
 export interface ReviewEventBase extends WebhookEventBase {
-  event: "review.completed" | "review.failed";
+  event: "review.completed" | "review.failed" | "review.cancelled";
   eventId: string;
   reviewId: string;
   review: ReviewFull;
@@ -150,18 +164,28 @@ export interface ReviewFailed extends ReviewEventBase {
   event: "review.failed";
 }
 
-/** Either review event. */
-export type ReviewEvent = ReviewCompleted | ReviewFailed;
+/**
+ * The review was cancelled elsewhere. Sent only for work submitted under API
+ * version 2026-10-11; under the original version it arrives as `review.failed`
+ * with failure class `cancelled`.
+ */
+export interface ReviewCancelled extends ReviewEventBase {
+  event: "review.cancelled";
+}
+
+/** Any review event. */
+export type ReviewEvent = ReviewCompleted | ReviewFailed | ReviewCancelled;
 
 /**
- * `event=citecheck.completed` / `citecheck.failed` — a citation check ended.
+ * `event=citecheck.completed` / `citecheck.failed` / `citecheck.cancelled` — a
+ * citation check ended.
  * `citecheck` is the whole check, as `client.getCitecheck` returns it.
  * **Dedupe on `eventId`**: it is stable across every retry, while `attempt`
  * changes. `taskId` is the delivery's identity, not pollable (the
  * `citecheckId` in the API's newer payload shape, which sends no `task_id`).
  */
 export interface CitecheckEventBase extends WebhookEventBase {
-  event: "citecheck.completed" | "citecheck.failed";
+  event: "citecheck.completed" | "citecheck.failed" | "citecheck.cancelled";
   eventId: string;
   citecheckId: string;
   citecheck: Citecheck;
@@ -176,8 +200,17 @@ export interface CitecheckFailed extends CitecheckEventBase {
   event: "citecheck.failed";
 }
 
-/** Either citation-check event. */
-export type CitecheckEvent = CitecheckCompleted | CitecheckFailed;
+/**
+ * The check was cancelled elsewhere. Sent only for work submitted under API
+ * version 2026-10-11; under the original version it arrives as
+ * `citecheck.failed` with failure class `cancelled`.
+ */
+export interface CitecheckCancelled extends CitecheckEventBase {
+  event: "citecheck.cancelled";
+}
+
+/** Any citation-check event. */
+export type CitecheckEvent = CitecheckCompleted | CitecheckFailed | CitecheckCancelled;
 
 /**
  * Every event `parse` returns, discriminated on `event`. Ignore an event you
@@ -187,10 +220,13 @@ export type CitecheckEvent = CitecheckCompleted | CitecheckFailed;
 export type WebhookEvent =
   | ReviewCompleted
   | ReviewFailed
+  | ReviewCancelled
   | CitecheckCompleted
   | CitecheckFailed
+  | CitecheckCancelled
   | VerificationCompleted
   | VerificationFailed
+  | VerificationCancelled
   | VerificationNeedsInput
   | CertificateTimestamped
   | WebhookEventBase; // catch-all for forward compatibility
@@ -213,17 +249,22 @@ export interface WebhookEventMap {
     verification: TaskStatus & { result: Verification };
   };
   "verification.failed": VerificationFailed & { verification: TaskStatus };
+  "verification.cancelled": VerificationCancelled & { verification: TaskStatus };
   "verification.needs_input": VerificationNeedsInput & { verification: TaskStatus };
   "certificate.timestamped": CertificateTimestamped;
   "review.completed": ReviewCompleted;
   "review.failed": ReviewFailed;
+  "review.cancelled": ReviewCancelled;
   "citecheck.completed": CitecheckCompleted;
   "citecheck.failed": CitecheckFailed;
+  "citecheck.cancelled": CitecheckCancelled;
 }
 
 /** Whether the payload carries a `verification.*` event's verification, in either shape. */
 function carriesVerification(raw: Record<string, unknown>, kind: string): boolean {
   if (has(raw, "verification")) return asObject(raw["verification"]) !== null;
+  // Only the 2026-10-11 payload has a cancelled event, and it nests.
+  if (kind === "verification.cancelled") return false;
   // The original shape: flat fields beside the task id.
   if (typeof raw["task_id"] !== "string" || raw["task_id"] === "") return false;
   if (kind === "verification.completed") return asObject(raw["result"]) !== null;
@@ -235,6 +276,7 @@ function carriesVerification(raw: Record<string, unknown>, kind: string): boolea
 const VERIFICATION_STATUS: Record<string, string> = {
   "verification.completed": "completed",
   "verification.failed": "failed",
+  "verification.cancelled": "cancelled",
   "verification.needs_input": "needs_input",
 };
 

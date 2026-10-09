@@ -1,0 +1,14 @@
+{
+  "payload": {
+    "event": "verification.cancelled",
+    "event_id": "evt_f5ff173a1070f5f33a1779df",
+    "task_id": "a67b6983ea444c4e0f8462b04a3a1001",
+    "status": "cancelled",
+    "verification": {
+      "status": "cancelled",
+      "task_id": "a67b6983ea444c4e0f8462b04a3a1001"
+    },
+    "attempt": 1,
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
+  }
+}

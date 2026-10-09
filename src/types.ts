@@ -649,7 +649,12 @@ export interface Progress {
 }
 
 export interface TaskStatus {
-  status: "processing" | "needs_input" | "completed" | "failed";
+  /**
+   * `cancelled` is terminal: the task was stopped elsewhere (the website's
+   * Stop button, another process). The original API shape reports the same as
+   * `failed` with failure class `cancelled`.
+   */
+  status: "processing" | "needs_input" | "completed" | "failed" | "cancelled";
   /**
    * Echoed on every status shape since 2026-09, so a caller polling several
    * verifications in one loop can tell the replies apart. Older servers
@@ -1373,9 +1378,17 @@ export type Depth = "standard" | "low";
 
 /**
  * Where a review stands. `verifying` is skipped when no deep check was
- * planned; `completed` and `failed` are terminal.
+ * planned; `completed`, `failed` and `cancelled` are terminal (`cancelled`: it
+ * was stopped elsewhere; the original API shape says `failed` with failure
+ * class `cancelled`).
  */
-export type ReviewStatus = "queued" | "assessing" | "verifying" | "completed" | "failed";
+export type ReviewStatus =
+  | "queued"
+  | "assessing"
+  | "verifying"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /**
  * The one field to branch on once a review is terminal (`null` before):
@@ -2126,9 +2139,11 @@ export interface CitecheckSummary {
 }
 
 /**
- * Where a citation check stands. `completed` and `failed` are terminal.
+ * Where a citation check stands. `completed`, `failed` and `cancelled` are
+ * terminal (`cancelled`: it was stopped elsewhere; the original API shape says
+ * `failed` with failure class `cancelled`).
  */
-export type CitecheckStatus = "queued" | "checking" | "completed" | "failed";
+export type CitecheckStatus = "queued" | "checking" | "completed" | "failed" | "cancelled";
 
 /** `GET /citechecks/{id}`: a citation check, with the review's citation rows. */
 export interface Citecheck {
