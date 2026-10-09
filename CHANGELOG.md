@@ -10,10 +10,12 @@ Major release (3.0.0). The SDK now speaks the API's `2026-10-11` response
 shape, in which every field, status and error code has one name. Code written
 against 2.x keeps compiling and reading the same fields with the same values
 (they are deprecated, see "Deprecated"), except for the breaking changes
-below. Some upgrades need a change first: see "Migrating".
+below (a status union gains `"cancelled"`, which an exhaustive `switch` over it
+must handle). Some upgrades need a change first: see "Migrating".
 
 > **Upgrading from 2.x.** Must: move webhook receivers to lenz-io 2.21.0 or
-> later before any sender moves to 3.0; update code that reads raw response
+> later before any sender moves to 3.0; treat the status `cancelled` as
+> terminal and handle the `*.cancelled` webhook events; update code that reads raw response
 > bodies; re-record recorded 2.x response fixtures; finish an idempotent
 > request first sent with 2.x with 2.x (its replay answers
 > `LenzApiVersionError` in 3.x; never change the key to get past it). May:
@@ -46,6 +48,24 @@ below. Some upgrades need a change first: see "Migrating".
   later (which reads both shapes and fills the 2.x names), or read both
   shapes yourself; a receiver on 2.20.0 or older, or one that reads the raw
   JSON, must be updated before its sender moves to 3.0.
+- **`cancelled` is a status of its own.** A task stopped elsewhere (the
+  website's Stop button, another process) reads `status: "cancelled"` in
+  `2026-10-11`; the earlier shape said `failed` with failure class
+  `cancelled`. Waits end on it instead of polling to their deadline: `wait`,
+  `verifyAndWait`, `reviewAndWait` and `citecheckAndWait` throw the same
+  error class with the same failure fields as 2.x for the same task
+  (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`:
+  `failureClass` `"cancelled"`, `retryable` `false`; a live verification's
+  message reads "Cancelled." where 2.x said "Pipeline stopped at:
+  cancelled"), and a batch item reads `"failed"`. `getStatus`, `getReview`
+  and `getCitecheck` return the cancelled status without throwing; a
+  cancelled task status carries the deprecated 2.x fields (`error`,
+  `failure_reason`, `failure_class` `"cancelled"`, `retryable` `false`,
+  `docs_url`). `TaskStatus.status`, `ReviewStatus` and `CitecheckStatus` gain
+  `"cancelled"`, so an exhaustive `switch` or a `Record<Status, …>` over them
+  needs the new case. The events `verification.cancelled`, `review.cancelled`
+  and `citecheck.cancelled` are sent only for work submitted under
+  `2026-10-11`; a cancellation of older work keeps arriving as `*.failed`.
 - **Node 20 is no longer supported** (it is end-of-life): `engines.node` is
   `>=22.12.0`, and CI runs Node 22 and 24.
 - **A webhook event's `raw` is the payload as delivered**, in whichever shape
@@ -90,8 +110,8 @@ below. Some upgrades need a change first: see "Migrating".
 
 ### Changed
 
-Intentional behaviour changes; nothing else that worked on 2.21 behaves
-differently:
+Intentional behaviour changes; apart from these and "Breaking", nothing that
+worked on 2.21 behaves differently:
 
 - **`verifyBatch` / `verifyBatchAndWait` and `ask.send` send an
   `Idempotency-Key` by default**, like `verify`, `assess`, `extract` and
@@ -150,21 +170,10 @@ differently:
 
 ### Added
 
-- **A task cancelled elsewhere ends a wait with the failed error, failure class
-  `cancelled`; webhook events `*.cancelled` are typed.** In API version
-  2026-10-11 `cancelled` is its own terminal status (a task stopped from the
-  website, or by another process): `wait`, `verifyAndWait`,
-  `verifyBatchAndWait`, `reviewAndWait` and `citecheckAndWait` now stop on it
-  instead of polling to their deadline, with the error 2.x threw for the same
-  task (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`:
-  `failureClass` `"cancelled"`, `retryable` `false`; a batch item reads
-  `"failed"`), and `getStatus` / `getReview` / `getCitecheck` return the
-  cancelled status without throwing. `verification.cancelled`,
-  `review.cancelled` and `citecheck.cancelled` parse into `VerificationCancelled`,
-  `ReviewCancelled` and `CitecheckCancelled` (`isEvent` narrows on them); they
-  are sent only for work submitted under 2026-10-11, and a cancellation
-  submitted under the original version keeps arriving as `*.failed`. Methods
-  to cancel come in a later release.
+- **`verification.cancelled`, `review.cancelled` and `citecheck.cancelled`
+  webhook events are typed** (`VerificationCancelled`, `ReviewCancelled`,
+  `CitecheckCancelled`; `isEvent` narrows on them). Each carries the cancelled
+  `verification` / `review` / `citecheck` and its `eventId`, nothing more.
 - **`verifyAndWait(input, opts)` and `verifyBatchAndWait(input, opts)`** take
   their wait options (`WaitOptions`: `timeoutMs`, `onProgress`) as a second
   argument, as `wait`, `reviewAndWait` and `citecheckAndWait` already did.
@@ -322,6 +331,16 @@ and `error_code`.
   get past it, which would run the call a second time. In practice none
   remain at release: replays last 24 hours, and the API has stored both
   shapes for every request since its versioning release on 2026-10-09.
+- **Treat `cancelled` as terminal** in your own loops over `getStatus`,
+  `getReview` and `getCitecheck`, and in `onUpdate` callbacks: it is the
+  status of a task cancelled elsewhere, and a loop that stops only on
+  `completed` and `failed` polls forever. Widen exhaustive `switch`es and
+  `Record<Status, …>` tables over `TaskStatus["status"]`, `ReviewStatus` and
+  `CitecheckStatus`.
+- **Handle `*.cancelled` in webhook receivers.** For work submitted with 3.x
+  the events arrive as `verification.cancelled`, `review.cancelled` and
+  `citecheck.cancelled`. A 2.21 receiver parses them only as the base event
+  (branch on `event.event` there); this release types them.
 - Node 22.12 or later.
 
 **Optional**

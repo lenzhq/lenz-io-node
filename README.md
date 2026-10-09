@@ -539,6 +539,11 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     } else {
       logPermanentFailure(event.taskId, event.failure?.code);
     }
+  } else if (isEvent(event, "verification.cancelled")) {
+    // Stopped elsewhere (the website's Stop button, another process): nothing
+    // to retry. Sent for work submitted under 2026-10-11; older work arrives
+    // as verification.failed with failure class "cancelled".
+    markCancelled(event.taskId);
   } else if (isEvent(event, "review.completed")) {
     // Dedupe on eventId: a retry of the same delivery keeps it.
     if (!alreadyHandled(event.eventId)) {
@@ -554,8 +559,8 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
 ```
 
 `verification.cancelled`, `review.cancelled` and `citecheck.cancelled` (a task
-cancelled elsewhere) are typed the same way as the `*.failed` events and
-narrow with `isEvent`. They are sent only for work submitted under API version
+cancelled elsewhere) narrow with `isEvent`; each carries the cancelled
+`verification` / `review` / `citecheck` and its `eventId`, nothing more. They are sent only for work submitted under API version
 2026-10-11; a cancellation of older work keeps arriving as `*.failed` with
 failure class `cancelled`.
 

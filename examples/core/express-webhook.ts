@@ -52,12 +52,23 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     // TODO: surface candidate claims; call client.select(taskId, ...) to resolve
   } else if (isEvent(event, "verification.failed")) {
     console.warn(`Verification failed: ${event.taskId} (${event.failure?.code})`);
-  } else if (isEvent(event, "review.completed") || isEvent(event, "review.failed")) {
+  } else if (isEvent(event, "verification.cancelled")) {
+    // Stopped elsewhere (the website's Stop button, another process).
+    console.warn(`Verification cancelled: ${event.taskId}`);
+  } else if (
+    isEvent(event, "review.completed") ||
+    isEvent(event, "review.failed") ||
+    isEvent(event, "review.cancelled")
+  ) {
     // Dedupe on eventId: every retry of one delivery carries the same one.
     console.log(
       `Review ${event.reviewId} ${event.review.status}: ${event.review.issues.length} issue(s) (event ${event.eventId})`,
     );
-  } else if (isEvent(event, "citecheck.completed") || isEvent(event, "citecheck.failed")) {
+  } else if (
+    isEvent(event, "citecheck.completed") ||
+    isEvent(event, "citecheck.failed") ||
+    isEvent(event, "citecheck.cancelled")
+  ) {
     console.log(
       `Citation check ${event.citecheckId} ${event.citecheck.status}: ${event.citecheck.citation_issues.length} issue(s)`,
     );
