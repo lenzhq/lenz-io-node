@@ -180,6 +180,25 @@ worked on 2.21 behaves differently:
 
 ### Added
 
+- **Webhooks on edge runtimes.** `await webhooks.unwrap(request)` takes a
+  standard `Request`, reads the raw body once and `X-Lenz-Signature`, and
+  verifies with WebCrypto. `await webhooks.parseAsync(rawBody, headers)` is the
+  same for a framework that hands you the body and headers. Both return the
+  same event as `parse` and throw the same `LenzWebhookSignatureError` for every
+  bad input (missing, malformed or wrong signature, a body that is not JSON or
+  not an object, a stale `delivered_at`). `verifySignatureAsync(rawBody,
+signature, secret)` is the low-level counterpart of `verifySignature`.
+- **The package loads with no Node built-ins.** The webhook code no longer
+  imports `node:crypto` or `node:buffer` when the module loads, and nothing
+  else in the package uses a Node built-in or `Buffer`. The synchronous
+  `parse` and `verifySignature` still work on Node, unchanged, and throw a clear
+  error pointing to `unwrap` on a runtime without Node's `crypto`.
+- **Export conditions `workerd`, `worker`, `edge-light` and `deno`** resolve to
+  an edge build (`dist/index.edge.js`) that exports the whole API, webhook
+  receiver included. `import`, `require` and `browser` resolve as before.
+- Examples for a Next.js route handler and a Hono app
+  (`examples/core/nextjs-webhook.ts`, `examples/core/hono-webhook.ts`).
+
 - **`cancel(taskId)`, `cancelReview(reviewId)` and `cancelCitecheck(citecheckId)`
   stop a run** (`POST /verify/{task_id}/cancel`, `/reviews/{review_id}/cancel`,
   `/citechecks/{citecheck_id}/cancel`). `cancel` returns the new exported

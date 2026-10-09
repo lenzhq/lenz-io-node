@@ -78,6 +78,7 @@ export {
   SIGNATURE_HEADER,
   DEFAULT_REPLAY_WINDOW_SECONDS,
   verifySignature,
+  verifySignatureAsync,
   isEvent,
 } from "./webhooks.js";
 export type {

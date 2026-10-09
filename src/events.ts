@@ -1,9 +1,8 @@
 /**
  * Typed webhook events and the `isEvent` guard.
  *
- * Kept apart from `webhooks.ts` (which verifies signatures with
- * `node:crypto`) so the browser entry can export `isEvent` and the event
- * types without pulling in a Node-only module.
+ * Kept apart from `webhooks.ts` (which verifies signatures) so the browser
+ * entry can export `isEvent` and the event types without the signature code.
  */
 
 import type {

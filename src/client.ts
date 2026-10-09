@@ -203,20 +203,12 @@ import {
 } from "./compat.js";
 
 /**
- * Cross-runtime UUID. Prefers the WebCrypto global (browsers, Node ≥20, Deno,
- * Workers); lazily falls back to node:crypto on Node 18 without global
- * WebCrypto. The computed specifier keeps browser bundlers from statically
- * resolving node:crypto — this branch is unreachable in a browser, which
- * always exposes globalThis.crypto.
+ * Cross-runtime UUID: the WebCrypto global, present in Node >= 20, browsers,
+ * Deno, Bun and Workers. It needs no Node built-in, so the package loads
+ * on every one of them.
  */
 async function generateUuid(): Promise<string> {
-  const webCrypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (webCrypto?.randomUUID) return webCrypto.randomUUID();
-  const nodeCryptoSpecifier: string = "node:crypto";
-  const mod = (await import(
-    /* @vite-ignore */ nodeCryptoSpecifier
-  )) as typeof import("node:crypto");
-  return mod.randomUUID();
+  return globalThis.crypto.randomUUID();
 }
 
 /**

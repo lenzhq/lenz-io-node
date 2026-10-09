@@ -2,17 +2,15 @@
  * Browser entry point for `lenz-io`.
  *
  * Identical to the main entry (`./index.ts`) EXCEPT it omits the webhook
- * signature *value* exports (`LenzWebhooks`, `verifySignature`, …); the
- * `isEvent` guard, which needs no crypto, is exported here too. Those live in
- * `./webhooks.ts`, which imports `node:crypto` / `node:buffer` — Node-only
- * modules that break a browser bundle. Webhook signature verification is a
- * server-only concern, so browser consumers never need it.
+ * signature *value* exports (`LenzWebhooks`, `verifySignature`, …): signature
+ * verification needs the account's webhook secret, which never belongs in a
+ * browser. The `isEvent` guard, which needs no secret, is exported here too.
  *
  * Bundlers targeting the browser (Vite, webpack, Rollup with the browser
  * condition) resolve `lenz-io` to this file via the `"browser"` export
- * condition in package.json. Node keeps the full `./index.ts`, so
- * `import { LenzWebhooks } from "lenz-io"` still works server-side — this is
- * additive, not a breaking change.
+ * condition in package.json. Edge runtimes (Workers, Deno, Vercel Edge) resolve
+ * `./index.edge.ts` instead, which has the webhook receiver. Node keeps the
+ * full `./index.ts`.
  *
  * Webhook *types* are still re-exported here (they erase at compile time and
  * carry no runtime `node:` imports), so `import type { WebhookEvent }` works

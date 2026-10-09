@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/index.browser.ts"],
+  entry: ["src/index.ts", "src/index.browser.ts", "src/index.edge.ts"],
   format: ["esm", "cjs"],
   dts: true,
   splitting: false,

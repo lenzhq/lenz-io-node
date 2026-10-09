@@ -16,9 +16,6 @@
  * Lenz repo; both sides MUST produce byte-identical signatures.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { Buffer } from "node:buffer";
-
 import { LenzWebhookSignatureError } from "./errors.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 import {
@@ -35,45 +32,137 @@ export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
 export const DEFAULT_REPLAY_WINDOW_SECONDS = 300;
 
-type RawBody = string | Buffer | Uint8Array;
+/**
+ * The raw request body: a string (encoded as UTF-8), or bytes. A Node
+ * `Buffer` is a `Uint8Array`.
+ */
+type RawBody = string | Uint8Array;
 
-function toBuffer(body: RawBody): Buffer {
-  if (Buffer.isBuffer(body)) return body;
-  if (body instanceof Uint8Array) return Buffer.from(body);
-  // String — encode as UTF-8 bytes. WARNING: only safe if the original
-  // body was ASCII / valid UTF-8 and no proxy mangled it. Prefer Buffer.
-  return Buffer.from(body, "utf-8");
+/** What the WebCrypto path also takes: the `ArrayBuffer` a `Request` reads. */
+type RawBodyAsync = RawBody | ArrayBuffer;
+
+const encoder = new TextEncoder();
+// `ignoreBOM: true` keeps a byte-order mark in the text, as Node's
+// `Buffer#toString("utf-8")` does, so both paths read the same body.
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+function toBytes(body: RawBodyAsync): Uint8Array {
+  if (typeof body === "string") {
+    // Encoded as UTF-8. WARNING: only safe if the original body was valid
+    // UTF-8 and no proxy mangled it. Prefer the bytes (or `unwrap(request)`).
+    return encoder.encode(body);
+  }
+  if (body instanceof Uint8Array) return body;
+  return new Uint8Array(body);
 }
 
-function sign(body: Buffer, secret: string): string {
-  const mac = createHmac("sha256", secret).update(body).digest("hex");
+function hex(bytes: Uint8Array): string {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+/** The two errors a bad signature raises, built once for both paths. */
+function missingSignature(): LenzWebhookSignatureError {
+  return new LenzWebhookSignatureError({
+    message: "Missing webhook signature",
+    cause: `No ${SIGNATURE_HEADER} header on the request.`,
+    fix: "Inspect the webhook delivery in /api-credentials to confirm the secret is set.",
+    docUrl: "https://lenz.io/docs/webhooks",
+  });
+}
+
+function signatureMismatch(): LenzWebhookSignatureError {
+  return new LenzWebhookSignatureError({
+    message: "Webhook signature mismatch",
+    cause: "HMAC of the raw body using your secret does not match X-Lenz-Signature.",
+    fix: "Verify the secret in /api-credentials matches the one you configured here.",
+    docUrl: "https://lenz.io/docs/webhooks",
+  });
+}
+
+/**
+ * Node's `crypto`, resolved when the synchronous path first needs it. The
+ * module is never imported at load, so the package loads on runtimes that have
+ * none (Workers without Node compatibility, Deno, edge bundlers).
+ * `process.getBuiltinModule` is in every Node the package supports.
+ */
+type NodeCrypto = Pick<typeof import("node:crypto"), "createHmac" | "timingSafeEqual">;
+
+let nodeCrypto: NodeCrypto | undefined;
+
+function loadNodeCrypto(): NodeCrypto {
+  if (nodeCrypto) return nodeCrypto;
+  const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+  const mod =
+    typeof proc?.getBuiltinModule === "function"
+      ? (proc.getBuiltinModule("crypto") as NodeCrypto | undefined)
+      : undefined;
+  if (!mod) {
+    throw new Error(
+      "LenzWebhooks.parse() is synchronous and needs Node's crypto module, which this " +
+        "runtime does not provide. Use `await webhooks.unwrap(request)` or " +
+        "`await webhooks.parseAsync(rawBody, headers)`, which verify with WebCrypto.",
+    );
+  }
+  nodeCrypto = mod;
+  return mod;
+}
+
+function sign(body: Uint8Array, secret: string): string {
+  const mac = loadNodeCrypto().createHmac("sha256", secret).update(body).digest("hex");
   return `${SIGNATURE_PREFIX}${mac}`;
 }
 
 export function verifySignature(rawBody: RawBody, signature: string, secret: string): true {
-  if (!signature) {
-    throw new LenzWebhookSignatureError({
-      message: "Missing webhook signature",
-      cause: `No ${SIGNATURE_HEADER} header on the request.`,
-      fix: "Inspect the webhook delivery in /api-credentials to confirm the secret is set.",
-      docUrl: "https://lenz.io/docs/webhooks",
-    });
-  }
+  if (!signature) throw missingSignature();
 
-  const buf = toBuffer(rawBody);
-  const expected = sign(buf, secret);
-
-  // timingSafeEqual requires equal-length buffers; pad if needed.
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signature);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    throw new LenzWebhookSignatureError({
-      message: "Webhook signature mismatch",
-      cause: "HMAC of the raw body using your secret does not match X-Lenz-Signature.",
-      fix: "Verify the secret in /api-credentials matches the one you configured here.",
-      docUrl: "https://lenz.io/docs/webhooks",
-    });
+  const expected = encoder.encode(sign(toBytes(rawBody), secret));
+  const given = encoder.encode(signature);
+  // timingSafeEqual requires equal-length buffers.
+  if (expected.length !== given.length || !loadNodeCrypto().timingSafeEqual(expected, given)) {
+    throw signatureMismatch();
   }
+  return true;
+}
+
+/** Equal-length byte strings, compared without stopping at the first difference. */
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
+}
+
+async function signAsync(body: Uint8Array, secret: string): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error("LenzWebhooks needs WebCrypto (globalThis.crypto.subtle), which is missing.");
+  }
+  const key = await subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = new Uint8Array(await subtle.sign("HMAC", key, new Uint8Array(body)));
+  return `${SIGNATURE_PREFIX}${hex(mac)}`;
+}
+
+/**
+ * `verifySignature` with WebCrypto: resolves `true` or rejects with the same
+ * `LenzWebhookSignatureError`. Works wherever `crypto.subtle` does.
+ */
+export async function verifySignatureAsync(
+  rawBody: RawBodyAsync,
+  signature: string,
+  secret: string,
+): Promise<true> {
+  if (!signature) throw missingSignature();
+
+  const expected = encoder.encode(await signAsync(toBytes(rawBody), secret));
+  if (!constantTimeEqual(expected, encoder.encode(signature))) throw signatureMismatch();
   return true;
 }
 
@@ -283,11 +372,47 @@ export class LenzWebhooks {
     this.replayWindow = opts.replayWindowSeconds ?? DEFAULT_REPLAY_WINDOW_SECONDS;
   }
 
+  /**
+   * Verify and parse a delivery, synchronously, with Node's `crypto`.
+   *
+   * For Node servers that hand you the raw body (Express with `express.raw`).
+   * It throws on a runtime without Node's `crypto` (Workers, Deno, edge
+   * runtimes): use {@link unwrap} or {@link parseAsync} there.
+   */
   parse(rawBody: RawBody, headers: Record<string, string> | Headers): WebhookEvent {
     const sig = this.lookupHeader(headers, SIGNATURE_HEADER);
     verifySignature(rawBody, sig, this.secret);
+    return this.finish(toBytes(rawBody));
+  }
 
-    const text = toBuffer(rawBody).toString("utf-8");
+  /**
+   * `parse` with WebCrypto, for any runtime: Workers, Deno, Bun, Node, edge
+   * bundles. Same checks, same events, same errors.
+   */
+  async parseAsync(
+    rawBody: RawBodyAsync,
+    headers: Record<string, string> | Headers,
+  ): Promise<WebhookEvent> {
+    const sig = this.lookupHeader(headers, SIGNATURE_HEADER);
+    await verifySignatureAsync(rawBody, sig, this.secret);
+    return this.finish(toBytes(rawBody));
+  }
+
+  /**
+   * Verify and parse a delivery from a standard `Request`: reads the raw body
+   * once and the `X-Lenz-Signature` header, then behaves as {@link parseAsync}.
+   * For Workers, Deno, Bun, Next.js route handlers, Hono and the like.
+   */
+  async unwrap(request: Request): Promise<WebhookEvent> {
+    const rawBody = await request.arrayBuffer();
+    return this.parseAsync(rawBody, request.headers);
+  }
+
+  // ── helpers ──
+
+  /** Everything after the signature: JSON, object check, replay window, event. */
+  private finish(bytes: Uint8Array): WebhookEvent {
+    const text = decoder.decode(bytes);
     let payload: unknown;
     try {
       payload = JSON.parse(text);
@@ -313,8 +438,6 @@ export class LenzWebhooks {
     this.checkReplay(obj);
     return buildEvent(obj);
   }
-
-  // ── helpers ──
 
   private lookupHeader(headers: Record<string, string> | Headers, name: string): string {
     if (typeof (headers as Headers).get === "function") {

@@ -559,6 +559,51 @@ if (rewrite) {
 
 ### Webhooks
 
+Lenz signs each delivery with HMAC-SHA256 over the raw body. `LenzWebhooks`
+verifies the signature, rejects a payload outside the replay window, and
+returns a typed event. Two ways to call it, by runtime:
+
+- **`await webhooks.unwrap(request)`** takes a standard `Request` and verifies
+  with WebCrypto. Use it on Cloudflare Workers, Deno, Bun, Vercel Edge,
+  Next.js route handlers, Hono, and any other framework that gives you a
+  `Request`. It needs no Node built-in. `await webhooks.parseAsync(rawBody,
+headers)` is the same for a framework that hands you the body (a string or
+  bytes) and the headers instead.
+- **`webhooks.parse(rawBody, headers)`** is synchronous and uses Node's
+  `crypto`. Use it on Node servers that give you the raw body (Express with
+  `express.raw`). On a runtime without Node's `crypto` it throws an error that
+  points you to `unwrap`.
+
+Both throw the same `LenzWebhookSignatureError` for a missing or wrong
+signature, a body that is not a JSON object, or a stale `delivered_at`.
+
+```ts
+// Next.js: app/api/lenz-webhook/route.ts
+import { LenzWebhooks } from "lenz-io";
+
+const webhooks = new LenzWebhooks({ secret: process.env.LENZ_WEBHOOK_SECRET! });
+
+export async function POST(request: Request) {
+  const event = await webhooks.unwrap(request); // throws LenzWebhookSignatureError
+  // ...handle the event (below)...
+  return Response.json({ received: "ok" });
+}
+```
+
+```ts
+// Hono, on Workers, Deno or Bun
+app.post("/webhook", async (c) => {
+  const event = await new LenzWebhooks({ secret: c.env.LENZ_WEBHOOK_SECRET }).unwrap(c.req.raw);
+  // ...
+  return c.json({ received: "ok" });
+});
+```
+
+Do not read the body (`request.json()`, `request.text()`) before `unwrap`: the
+signature covers the exact bytes sent, and a body can be read once.
+
+Handling the event, here on Node with Express:
+
 ```ts
 import { LenzWebhooks, isEvent } from "lenz-io";
 
@@ -615,11 +660,10 @@ changes. Every event carries `eventId` when its payload does (all of them,
 for work started with 3.x); the original shape of `verification.*` events
 has none.
 
-Signature verification is HMAC-SHA256 over the raw bytes; the SDK does it for
-you and rejects tampered or replayed payloads.
-
-See [`examples/core/express-webhook.ts`](examples/core/express-webhook.ts)
-for a runnable receiver and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
+See [`examples/core/nextjs-webhook.ts`](examples/core/nextjs-webhook.ts) (Next.js),
+[`examples/core/hono-webhook.ts`](examples/core/hono-webhook.ts) (Hono) and
+[`examples/core/express-webhook.ts`](examples/core/express-webhook.ts) (Express)
+for runnable receivers, and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
 for the headline assess-then-escalate pattern.
 
 ## Credits
@@ -1059,7 +1103,7 @@ An OAuth access token for the Lenz API works wherever the API key goes: pass it 
 - Node 22.12+ (22, 24)
 - ESM + CJS dual exports
 - TypeScript types included
-- Works in Cloudflare Workers / edge runtimes — pass a `fetch` polyfill if `globalThis.fetch` isn't available
+- Runs on Node 22.12+ and on edge runtimes with no Node built-ins: the `workerd`, `worker`, `edge-light` and `deno` export conditions resolve to a build that imports none (Cloudflare Workers without the Node compatibility flag, Deno, Vercel Edge). Verify webhooks there with `await webhooks.unwrap(request)`; the synchronous `parse` needs Node. Bun and Node use the main build. The client needs `globalThis.fetch` (every runtime above has it; pass `fetch` in the options otherwise)
 
 ## Contributing
 

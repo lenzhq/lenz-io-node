@@ -28,6 +28,22 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "workerd": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.edge.js"
+      },
+      "worker": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.edge.js"
+      },
+      "edge-light": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.edge.js"
+      },
+      "deno": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.edge.js"
+      },
       "browser": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.browser.js"
@@ -60,6 +76,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:smoke": "npm run --silent sync-version",
+    "test:edge": "npm run build && node scripts/edge-check.mjs",
     "test:smoke": "vitest run test/smoke.test.ts",
     "pretest:coverage": "npm run --silent sync-version",
     "test:coverage": "vitest run --coverage",
@@ -76,7 +93,10 @@
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vitest/coverage-v8": "5.0.3",
+    "esbuild": "^0.28.1",
     "eslint": "^8.57.0",
+    "hono": "4.13.13",
+    "miniflare": "4.20260730.0",
     "nock": "^13.5.0",
     "prettier": "^3.2.0",
     "tsup": "^8.0.0",
@@ -85,6 +105,6 @@
     "vitest": "5.0.3"
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "esbuild": "$esbuild"
   }
 }
