@@ -516,6 +516,20 @@ function sendsWebhookUrl(url: unknown): boolean {
   return typeof url === "string" ? url.trim() !== "" : Boolean(url);
 }
 
+/**
+ * The wait options of `verifyAndWait` / `verifyBatchAndWait`: the second
+ * argument's, field by field, else the ones 2.x read from the input.
+ */
+function waitOptions(
+  input: { timeoutMs?: number; onProgress?: OnProgress },
+  opts: WaitOptions,
+): { timeoutMs: number; onProgress: OnProgress | undefined } {
+  return {
+    timeoutMs: opts.timeoutMs ?? input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS,
+    onProgress: opts.onProgress ?? input.onProgress,
+  };
+}
+
 /** The camelCase names a batch item takes beside its 2.x snake_case ones. */
 const BATCH_ITEM_ALIASES: Readonly<Record<string, string>> = {
   sourceUrl: "source_url",
@@ -1525,14 +1539,18 @@ export class Lenz {
    * Verification, or throws LenzNeedsInputError / LenzPipelineError /
    * LenzTimeoutError. By default sends an auto-generated Idempotency-Key
    * so a network retry on submit doesn't spawn a duplicate task.
+   *
+   * `opts` takes `timeoutMs` (started after the submit) and `onProgress`,
+   * as `wait` does. The same fields inside `input` still work (deprecated);
+   * `opts` wins field by field.
    */
-  async verifyAndWait(input: VerifyAndWaitInput): Promise<Verification> {
-    const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
+  async verifyAndWait(input: VerifyAndWaitInput, opts: WaitOptions = {}): Promise<Verification> {
+    const { timeoutMs, onProgress } = waitOptions(input, opts);
     const idempotencyKey = await callIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const accepted = await this.submit(input, idempotencyKey);
       this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
-      return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
+      return this.wait(accepted, { timeoutMs, onProgress });
     });
   }
 
@@ -1585,12 +1603,19 @@ export class Lenz {
    * {@link LenzAuthError} from the wait, as do transport/auth errors on the
    * initial submit. Polls go through `getStatus` and none runs past the
    * deadline.
+   *
+   * `opts` takes `timeoutMs` (started after the submit) and `onProgress`,
+   * as `wait` does. The same fields inside `input` still work (deprecated);
+   * `opts` wins field by field.
    */
-  async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
-    const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
+  async verifyBatchAndWait(
+    input: VerifyBatchAndWaitInput,
+    opts: WaitOptions = {},
+  ): Promise<BatchItemResult[]> {
+    const { timeoutMs, onProgress } = waitOptions(input, opts);
     const idempotencyKey = await callIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, () =>
-      this._verifyBatchAndWait(input, idempotencyKey, timeoutMs),
+      this._verifyBatchAndWait(input, idempotencyKey, timeoutMs, onProgress),
     );
   }
 
@@ -1598,6 +1623,7 @@ export class Lenz {
     input: VerifyBatchAndWaitInput,
     idempotencyKey: string | undefined,
     timeoutMs: number,
+    onProgress: OnProgress | undefined,
   ): Promise<BatchItemResult[]> {
     // Through the public verifyBatch, as 2.x did, so an override (a subclass,
     // a test double) is used. The call's key rides in the input, so the
@@ -1610,7 +1636,7 @@ export class Lenz {
     const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       ids,
       timeoutMs,
-      input.onProgress,
+      onProgress,
     );
 
     return accepted.items.map((it): BatchItemResult => {

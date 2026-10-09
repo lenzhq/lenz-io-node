@@ -1307,24 +1307,44 @@ export interface LibraryListInput {
 export type OnProgress = (taskId: string, progress: Progress) => void;
 
 export interface VerifyAndWaitInput extends VerifyInput {
-  /** Deadline for polling to a terminal state. Default 300s. */
+  /**
+   * Deadline for polling to a terminal state. Default 300s.
+   * @deprecated Pass it in the second argument: `verifyAndWait(input, { timeoutMs })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   timeoutMs?: number;
-  /** See {@link OnProgress}. The only way to see the stage during the ~90s wait. */
+  /**
+   * See {@link OnProgress}. The only way to see the stage during the ~90s wait.
+   * @deprecated Pass it in the second argument: `verifyAndWait(input, { onProgress })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   onProgress?: OnProgress;
 }
 
 export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
-  /** Overall deadline for polling every item to a terminal state. Default 300s. */
+  /**
+   * Overall deadline for polling every item to a terminal state. Default 300s.
+   * @deprecated Pass it in the second argument: `verifyBatchAndWait(input, { timeoutMs })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   timeoutMs?: number;
-  /** See {@link OnProgress}. Fires per still-running item per round. */
+  /**
+   * See {@link OnProgress}. Fires per still-running item per round.
+   * @deprecated Pass it in the second argument: `verifyBatchAndWait(input, { onProgress })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   onProgress?: OnProgress;
 }
 
-/** Options for `wait()`. */
+/** Options for `wait()`, `verifyAndWait()` and `verifyBatchAndWait()`. */
 export interface WaitOptions {
-  /** Deadline before raising `LenzTimeoutError`. Default 300s. */
+  /**
+   * Deadline before raising `LenzTimeoutError` (a batch marks its unfinished
+   * items `timeout` instead). Default 300s. `verifyAndWait` and
+   * `verifyBatchAndWait` start it after the submit. `0` or less polls once.
+   */
   timeoutMs?: number;
-  /** See {@link OnProgress}. */
+  /** See {@link OnProgress}. Fires per still-running item per poll. */
   onProgress?: OnProgress;
 }
 
