@@ -170,6 +170,20 @@ worked on 2.21 behaves differently:
 
 ### Added
 
+- **`cancel(taskId)`, `cancelReview(reviewId)` and `cancelCitecheck(citecheckId)`
+  stop a run** (`POST /verify/{task_id}/cancel`, `/reviews/{review_id}/cancel`,
+  `/citechecks/{citecheck_id}/cancel`). `cancel` returns the new exported
+  `CancelResult` (`{ task_id, cancelled, status }`): `cancelled: true` when
+  the run was stopped, `cancelled: false` with its final status when it had
+  already ended. `cancelReview` and `cancelCitecheck` return the review and
+  the check as `getReview` and `getCitecheck` read them, `status: "cancelled"`
+  or unchanged when finished. A cancelled run is not charged. The calls send no
+  body and no `Idempotency-Key` (cancelling twice is harmless) and are
+  retried on 5xx, 429 and dropped connections like any request. `cancel` on a
+  review's deep check throws a `LenzError` with `statusCode` 409 and `code`
+  `"use_review_cancel"`, which is not retried: cancel the review. A 404 throws
+  `LenzNotFoundError` with `code` `"not_found"`. Requires the API version
+  `2026-10-11`.
 - **`verification.cancelled`, `review.cancelled` and `citecheck.cancelled`
   webhook events are typed** (`VerificationCancelled`, `ReviewCancelled`,
   `CitecheckCancelled`; `isEvent` narrows on them). Each carries the cancelled

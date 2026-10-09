@@ -446,6 +446,45 @@ prefer **polling** for scripts and request/response handlers where awaiting is
 fine. For full control over the loop, call `getStatus(taskId)` yourself — it's a
 single non-blocking poll.
 
+## Stopping a run
+
+Stop a run you no longer need: three calls, one per kind of work. None sends a
+body or an `Idempotency-Key`; cancelling is safe to repeat, so a failed attempt
+is retried like any other request.
+
+```ts
+const accepted = await client.verify({ claim: "..." });
+const out = await client.cancel(accepted.task_id); // { task_id, cancelled, status }
+
+const review = await client.cancelReview(reviewId); // the review, as getReview returns it
+const check = await client.cancelCitecheck(citecheckId); // the check, as getCitecheck returns it
+```
+
+- **`cancel(taskId)`** answers for every run of yours, whatever its state.
+  `cancelled: true` means the run is cancelled (`status: "cancelled"`).
+  `cancelled: false` means it had already ended and nothing changed: `status`
+  is the one it reached (`completed` or `failed`, and the verification
+  exists and was charged as usual). A cancelled run is not charged and saves
+  nothing. Reading it afterwards with `getStatus` returns the status
+  `"cancelled"`, and `wait` throws the error for a failed run with
+  `failureClass` `"cancelled"` and `retryable` `false`.
+- **`cancelReview(reviewId)`** stops the review and the deep checks it
+  started, and returns the full view with `status: "cancelled"`; a review that
+  had already finished is returned unchanged. A review's deep checks cannot be
+  cancelled on their own: `cancel` on one throws a `LenzError` with
+  `statusCode` 409 and `code` `"use_review_cancel"` (not retryable). Cancel
+  the review instead.
+- **`cancelCitecheck(citecheckId)`** does the same for a citation check.
+
+A review is charged only for what it delivered before the cancel (the quick
+checks it served, the deep checks that finished, the citations it checked); the
+rest is refunded or never charged. A citation check is charged only for the
+citations it checked; the rest are refunded.
+
+An unknown id, another account's, or (for `cancel`) the task of a run started
+on the website throws `LenzNotFoundError` (404). An empty id throws before any
+request is sent.
+
 ## Response shape — the unified vocabulary
 
 Every claim-shaped response shares these fields at top level:
@@ -855,6 +894,9 @@ running after that, it throws that `LenzError` (`statusCode` 409,
 `retryable: true`): send it again later with the same key
 (`idempotencyKey: err.idempotencyKey`), never with a new one, which would run
 the call a second time.
+
+`cancel`, `cancelReview` and `cancelCitecheck` send none: cancelling again
+returns the run as it stands, so a repeat is harmless.
 
 Every error of a call that sent a key carries it as `err.idempotencyKey`,
 including the timeout of a `*AndWait` (resending it with that key returns the
