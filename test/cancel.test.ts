@@ -47,11 +47,42 @@ function serving(...answers: Array<Response | (() => Response)>): {
 } {
   const calls: Call[] = [];
   const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
-    calls.push({ url: new URL(String(url)), init: init ?? {} });
+    const u = new URL(String(url));
+    calls.push({ url: u, init: init ?? {} });
     const next = answers[Math.min(calls.length - 1, answers.length - 1)]!;
-    return typeof next === "function" ? next() : next.clone();
+    return forTheIdAsked(u, typeof next === "function" ? next() : next.clone());
   }) as typeof fetch;
   return { fetch: fetchImpl, calls };
+}
+
+const ID_FIELD: Record<string, string> = {
+  verify: "task_id",
+  reviews: "review_id",
+  citechecks: "citecheck_id",
+};
+
+/**
+ * A recording answered for the id the call asked for: a cancel (and a read)
+ * must name the job asked for (3.0 checks it), so the recorded id is
+ * replaced with the requested one. Other bodies go as recorded.
+ */
+async function forTheIdAsked(url: URL, response: Response): Promise<Response> {
+  const m = /^\/api\/v1\/(verify|reviews|citechecks)\/([^/]+)(?:\/cancel)?$/.exec(url.pathname);
+  if (!m || response.status !== 200) return response;
+  let body: unknown;
+  try {
+    body = await response.clone().json();
+  } catch {
+    return response;
+  }
+  const field = ID_FIELD[m[1]!]!;
+  if (!body || typeof body !== "object" || Array.isArray(body) || !(field in body)) {
+    return response;
+  }
+  return new Response(JSON.stringify({ ...(body as object), [field]: decodeURIComponent(m[2]!) }), {
+    status: response.status,
+    headers: response.headers,
+  });
 }
 
 function reply(name: string, headers: Record<string, string> = {}): Response {
@@ -82,7 +113,9 @@ describe("cancel(taskId)", () => {
 
   it("a run it stopped: cancelled true, status cancelled", async () => {
     const { fetch } = serving(reply("verify__cancel_200_cancelled"));
-    const out = await make(fetch).cancel("t1");
+    const out = await make(fetch).cancel(
+      String(recorded("verify__cancel_200_cancelled").body["task_id"]),
+    );
     expect(out).toEqual(recorded("verify__cancel_200_cancelled").body);
     expect(out).toEqual({
       task_id: expect.stringMatching(/^[0-9a-f]{32}$/),
@@ -93,7 +126,9 @@ describe("cancel(taskId)", () => {
 
   it("a run that had already finished: cancelled false with its final status", async () => {
     const { fetch } = serving(reply("verify__cancel_200_completed"));
-    const out = await make(fetch).cancel("t1");
+    const out = await make(fetch).cancel(
+      String(recorded("verify__cancel_200_completed").body["task_id"]),
+    );
     expect(out.cancelled).toBe(false);
     expect(out.status).toBe("completed");
     expect(out.task_id).toBe(recorded("verify__cancel_200_completed").body["task_id"]);
@@ -196,7 +231,9 @@ describe("cancel(taskId)", () => {
         if (n === 2) throw new TypeError("fetch failed");
         return reply("verify__cancel_200_cancelled");
       }) as typeof fetch;
-      const pending = new Lenz({ apiKey: "lenz_test", fetch: fetchImpl }).cancel("t1");
+      const pending = new Lenz({ apiKey: "lenz_test", fetch: fetchImpl }).cancel(
+        String(recorded("verify__cancel_200_cancelled").body["task_id"]),
+      );
       await vi.advanceTimersByTimeAsync(10_000);
       const out = await pending;
       expect(out.cancelled).toBe(true);

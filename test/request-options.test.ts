@@ -828,29 +828,39 @@ describe("validation: one rule for every per-request setting", () => {
     });
   }
 
-  for (const value of ["a\r\nX-Evil: 1", "a\nb", "a\u0000b", "\u0100", " lead", "trail\t"]) {
+  for (const value of [
+    "a\r\nX-Evil: 1",
+    "a\nb",
+    "a\u0000b",
+    "\u0100",
+    "caf\u00e9",
+    "a\u0001b",
+    "a\u007fb",
+    " lead",
+    "trail\t",
+  ]) {
     it(`the header value ${JSON.stringify(value)} is refused before any key or request`, async () => {
       const fetch = noNetwork();
       const c = new Lenz({ apiKey: "lenz_t", fetch });
       const o = { headers: { "X-A": value } };
       expect((await refused(() => c.verify({ claim: "a" }, o), fetch)).message).toMatch(
-        /must be text without line breaks/,
+        /visible ASCII/,
       );
       await refused(() => c.reviewAndWait({ text: "a" }, o), fetch);
       await refused(() => c.withOptions(o), fetch);
     });
   }
 
-  it("empty values, inner whitespace and Latin-1 text are sent as given", async () => {
+  it("empty values and inner spaces and tabs are sent as given", async () => {
     const { fetch, sent } = recorder([{ body: {} }]);
     const c = new Lenz({ apiKey: "lenz_t", fetch });
-    await c.usage({ headers: { "X-A": "", "X-B": "a  b\tc", "X-C": "caf\u00e9" } });
+    await c.usage({ headers: { "X-A": "", "X-B": "a  b\tc", "X-C": "~!x" } });
     expect(
       sent[0]!.headers.filter(([n]) => n.startsWith("X-") && n !== "X-Lenz-API-Version"),
     ).toEqual([
       ["X-A", ""],
       ["X-B", "a  b\tc"],
-      ["X-C", "caf\u00e9"],
+      ["X-C", "~!x"],
     ]);
   });
 

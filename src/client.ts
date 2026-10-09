@@ -251,7 +251,9 @@ async function callIdempotencyKey(input: {
  * again later is a new job.
  */
 async function jobIdempotencyKey(input: { idempotencyKey?: string }): Promise<string> {
-  return input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
+  // `||`, not `??`: an empty key would send the job unkeyed, and a retry
+  // could then start (and charge for) a second one.
+  return input.idempotencyKey || (await generateUuid()).replace(/-/g, "");
 }
 
 /**
@@ -469,8 +471,8 @@ function checkHeaders(headers: unknown, where: string): void {
     }
     if (typeof value === "string" && !isHeaderValue(value)) {
       throw new Error(
-        `${where}: the value of header ${name} must be text without line breaks, NUL or ` +
-          "characters above U+00FF, and without leading or trailing spaces or tabs.",
+        `${where}: the value of header ${name} must be a string of visible ASCII characters, ` +
+          "with spaces and tabs only between them (not at either end), or null.",
       );
     }
   }
@@ -480,16 +482,13 @@ function checkHeaders(headers: unknown, where: string): void {
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
- * A header value fetch sends as given: a ByteString (every character at most
- * U+00FF) with no CR, LF or NUL, and no leading or trailing space or tab
- * (which fetch would strip). Empty, and inner whitespace, are fine.
+ * A header value: visible ASCII, with spaces and tabs only between visible
+ * characters (never at either end, which fetch would strip), or empty.
  */
+const HEADER_VALUE = /^(?:[\x21-\x7e](?:[\t\x20-\x7e]*[\x21-\x7e])?)?$/;
+
 function isHeaderValue(value: string): boolean {
-  for (let i = 0; i < value.length; i++) {
-    const c = value.charCodeAt(i);
-    if (c > 0xff || c === 0x0d || c === 0x0a || c === 0x00) return false;
-  }
-  return !/^[ \t]|[ \t]$/.test(value);
+  return HEADER_VALUE.test(value);
 }
 
 /** Checks the request options a method takes, before any key or request. */
@@ -815,6 +814,56 @@ function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
     Array.isArray(b["issues"]) &&
     Array.isArray(b["failures"]) &&
     Array.isArray(b["claims"])
+  );
+}
+
+const REVIEW_LISTS = ["issues", "failures", "claims"] as const;
+const CITECHECK_LISTS = ["citations", "citation_issues", "citation_failures"] as const;
+
+/**
+ * Whether a cancel answer is the job asked for: its id, a status and its
+ * three lists (any status: a cancel answers with whatever state the job is in).
+ */
+function isJobBody(body: unknown, idField: string, id: string, lists: readonly string[]): boolean {
+  if (!isPlainObject(body)) return false;
+  const b = body as Record<string, unknown>;
+  return (
+    b[idField] === id && typeof b["status"] === "string" && lists.every((k) => Array.isArray(b[k]))
+  );
+}
+
+/** A 200 whose body is not the thing asked for (a proxy page, another job's body). */
+function unexpectedAnswer(method: string, path: string): LenzAPIError {
+  return new LenzAPIError({
+    message: `${method} ${path} returned an unexpected response body.`,
+    cause: "The answer is not the shape the API documents for this call.",
+    fix: "Retry; if it persists, contact support (https://lenz.io/contact) with the request id.",
+    docUrl: "https://lenz.io/docs/errors",
+  });
+}
+
+/**
+ * Marks an error a request's transport raised (a body that broke off or did
+ * not decode), which the poll loops wait through like a Lenz error. Any other
+ * error that is not a `LenzError` is a programming error and ends a wait.
+ */
+const TRANSPORT_ERROR = Symbol("lenz-io.transport");
+
+function markTransport(exc: unknown): void {
+  if (exc && typeof exc === "object") {
+    try {
+      Object.defineProperty(exc, TRANSPORT_ERROR, { value: true });
+    } catch {
+      // A frozen error keeps what it has.
+    }
+  }
+}
+
+/** Whether a poll's error is worth polling again for: a Lenz answer or a transport failure. */
+function isPollableError(exc: unknown): boolean {
+  return (
+    exc instanceof LenzError ||
+    (!!exc && typeof exc === "object" && (exc as Record<symbol, unknown>)[TRANSPORT_ERROR] === true)
   );
 }
 
@@ -1803,12 +1852,13 @@ export class Lenz {
       !result ||
       typeof result !== "object" ||
       Array.isArray(result) ||
-      typeof result.task_id !== "string" ||
-      typeof result.cancelled !== "boolean"
+      result.task_id !== taskId ||
+      typeof result.cancelled !== "boolean" ||
+      typeof result.status !== "string"
     ) {
       throw new LenzAPIError({
         message: `POST ${path} answered without a cancel result.`,
-        cause: "The response carries no task_id and cancelled.",
+        cause: "The response carries no task_id (this task's), cancelled and status.",
         fix: "Read the run with getStatus(taskId); contact support with the request id if this persists.",
         docUrl: "https://lenz.io/docs/errors",
       });
@@ -2019,6 +2069,9 @@ export class Lenz {
       path: `/citechecks/${id}/cancel`,
       ...transportOf(call),
     });
+    if (!isJobBody(body, "citecheck_id", citecheckId, CITECHECK_LISTS)) {
+      throw unexpectedAnswer("POST", `/citechecks/${id}/cancel`);
+    }
     return withCitecheckDefaults(body) as Citecheck;
   }
 
@@ -2112,6 +2165,9 @@ export class Lenz {
       path: `/reviews/${id}/cancel`,
       ...transportOf(call),
     });
+    if (!isJobBody(body, "review_id", reviewId, REVIEW_LISTS)) {
+      throw unexpectedAnswer("POST", `/reviews/${id}/cancel`);
+    }
     return withReviewDefaults(body) as ReviewFull;
   }
 
@@ -2210,8 +2266,10 @@ export class Lenz {
         if (exc instanceof LenzError && !(exc instanceof LenzAPIError) && !isRateLimit(exc)) {
           throw exc;
         }
-        // The call's own refusal of an id: waiting does not change it.
-        if (exc instanceof InvalidIdError) throw exc;
+        // Anything else that is not a Lenz answer or a transport failure is a
+        // programming error (the call's refusal of an id included): waiting
+        // does not change it.
+        if (!isPollableError(exc)) throw exc;
         // A wait the server stated outranks the poll hint, capped like every
         // other stated wait in this client: a maintenance 503 can state an
         // hour.
@@ -2555,6 +2613,10 @@ export class Lenz {
           // This task's answer, which polling again will not change: another
           // API version, or no such task. Final for this task only.
           permanent.set(id, res.reason);
+        } else if (!isPollableError(res.reason)) {
+          // Not a Lenz answer or a transport failure: a programming error (an
+          // override's bug), which waiting does not change.
+          throw res.reason;
         } else {
           // Poll errored this round (after _request exhausted its retries) —
           // keep pending and retry next round rather than aborting the batch.
@@ -2936,6 +2998,7 @@ export class Lenz {
                 { cause: exc },
               );
             }
+            markTransport(exc);
             throw exc;
           } finally {
             clearTimeout(timer);
@@ -2960,7 +3023,7 @@ export class Lenz {
         //    the opposite of what the header asks (mapResponseToError types
         //    them LenzUpstreamUnavailableError, carrying the true retryAfter).
         //  * every other 5xx, including an UNTYPED 503 — keep retrying on our
-        //    own backoff. A Cloud Run / CDN / load-balancer
+        //    own backoff. A proxy / CDN / load-balancer
         //    maintenance-or-overload 503 states a long wait and carries no Lenz
         //    code; the server is down, not pacing us, so an hour-long
         //    Retry-After must become backoff — not an hour-long sleep, and not
@@ -3036,7 +3099,10 @@ export class Lenz {
           rethrowIfCallerAbort(signals);
           // A body that stalled until the timer fired: the status stands, the
           // body is lost.
-          if (!controller.signal.aborted) throw exc;
+          if (!controller.signal.aborted) {
+            markTransport(exc);
+            throw exc;
+          }
         } finally {
           clearTimeout(timer);
         }

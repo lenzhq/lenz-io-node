@@ -703,7 +703,7 @@ export const MAX_RETRY_AFTER_SLEEP = 60;
  * map to {@link LenzUpstreamUnavailableError} and both state an honest wait.
  *
  * The retry ladder in `client.ts` keys its immediate-abort decision on THIS,
- * not on the status number: an ordinary Cloud Run / CDN / load-balancer 503
+ * not on the status number: an ordinary proxy / CDN / load-balancer 503
  * carries no Lenz code, states a maintenance-window wait, and must keep being
  * retried exactly as it was before 2.8.0.
  */
