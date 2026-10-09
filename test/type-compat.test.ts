@@ -1,7 +1,9 @@
 /**
- * The previous release's types still fit (`types/compat.ts`), and code
- * written against it compiles unchanged (`types/user-code-2x.ts`), each
- * compiled on its own with `tsc --strict`, as a user's project would.
+ * The previous release's types still fit (`types/compat.ts`), code written
+ * against it compiles unchanged (`types/user-code-2x.ts`, and its subclass
+ * and instance overrides, `types/overrides-2x.ts`), and every 3.0
+ * request-options form compiles (`types/options-3x.ts`), each compiled on
+ * its own with `tsc --strict`, as a user's project would.
  */
 
 import { execFileSync } from "node:child_process";
@@ -12,8 +14,8 @@ import { expect, it } from "vitest";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-it.each(["compat.ts", "user-code-2x.ts"])(
-  "%s (code written against 2.21.0) compiles under tsc --strict",
+it.each(["compat.ts", "user-code-2x.ts", "overrides-2x.ts", "options-3x.ts"])(
+  "%s compiles under tsc --strict",
   (file) => {
     const tsc = join(ROOT, "node_modules", "typescript", "bin", "tsc");
     const args = [

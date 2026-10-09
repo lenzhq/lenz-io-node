@@ -11,7 +11,13 @@ import { createHmac } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { Lenz, LenzPipelineError, LenzWebhooks, verifySignature } from "../src/index.js";
+import {
+  Lenz,
+  LenzAbortError,
+  LenzPipelineError,
+  LenzWebhooks,
+  verifySignature,
+} from "../src/index.js";
 
 const LENZ_E2E_KEY = process.env["LENZ_E2E_KEY"] ?? "";
 const LENZ_BASE_URL = process.env["LENZ_BASE_URL"] ?? "";
@@ -73,6 +79,34 @@ maybe("smoke", () => {
     expect(typeof first.verdict).toBe("string");
     expect(["high", "medium", "low"]).toContain(first.confidence);
   }, 20_000);
+
+  it("assess takes a per-call timeout", async () => {
+    const client = makeClient();
+    const out = await client.assess({ claim: "Sharks don't get cancer" }, { timeoutMs: 100_000 });
+    expect(out.claims.length).toBeGreaterThan(0);
+  }, 110_000);
+
+  // A wait aborted after the receipt: the error carries the task id, and the
+  // run is cancelled through the client whose signal did not fire.
+  it("an aborted verifyAndWait carries its task id; the root client cancels it", async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    const err = await client
+      .verifyAndWait(
+        { claim: "Sharks don't get cancer", depth: "low" },
+        { signal: controller.signal, onProgress: () => controller.abort() },
+      )
+      .catch((e: unknown) => e);
+    if (!(err instanceof LenzAbortError)) {
+      // A verdict cache hit can answer before the first progress: nothing to abort.
+      expect((err as { verdict?: unknown }).verdict).toBeTruthy();
+      return;
+    }
+    expect(err.taskId).toBeTruthy();
+    expect(err.idempotencyKey).toBeTruthy();
+    const out = await client.cancel(err.taskId!);
+    expect(out.task_id).toBe(err.taskId);
+  }, 60_000);
 
   it("webhook signature roundtrip", () => {
     const secret = "whsec_smoke_fixed";
