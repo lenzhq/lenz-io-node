@@ -190,23 +190,34 @@ describe("review()", () => {
   });
 
   for (const reviewId of [null, "", 42]) {
-    it(`a 409 idempotency_conflict with review_id ${JSON.stringify(reviewId)} still throws`, async () => {
-      const { fetch } = makeFetch([
-        {
-          status: 409,
-          body: {
-            detail: "Still being created.",
-            code: "idempotency_conflict",
-            review_id: reviewId,
-          },
+    it(`a 409 idempotency_conflict with review_id ${JSON.stringify(reviewId)} is retried with the same key, then throws`, async () => {
+      const conflict = {
+        status: 409,
+        body: {
+          detail: "Still being created.",
+          code: "idempotency_conflict",
+          review_id: reviewId,
         },
-      ]);
-      const client = new Lenz({ apiKey: "lenz_t", fetch });
-      const err = (await client
-        .review({ text: DRAFT, idempotencyKey: "k" })
-        .catch((e: unknown) => e)) as LenzError;
+      };
+      const { fetch, calls } = makeFetch([conflict, conflict, conflict, conflict]);
+      vi.useFakeTimers();
+      let err: LenzError;
+      try {
+        const client = new Lenz({ apiKey: "lenz_t", fetch });
+        const pending = client
+          .review({ text: DRAFT, idempotencyKey: "k" })
+          .catch((e: unknown) => e);
+        await vi.advanceTimersByTimeAsync(20_000);
+        err = (await pending) as LenzError;
+      } finally {
+        vi.useRealTimers();
+      }
       expect(err).toBeInstanceOf(LenzError);
       expect(err.statusCode).toBe(409);
+      expect(err.retryable).toBe(true);
+      expect(err.idempotencyKey).toBe("k");
+      expect(calls).toHaveLength(4);
+      expect(calls.map((c) => sentHeaders(c)["Idempotency-Key"])).toEqual(["k", "k", "k", "k"]);
     });
   }
 

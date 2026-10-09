@@ -613,8 +613,15 @@ business plan a new warranty certificate, charged at the depth you requested.
 
 Every error subclass is typed and carries a `requestId` you can quote on
 support tickets, and `retryable`: `true` when sending the same request again
-later can succeed (a network failure, a transport timeout, a 429, a 5xx),
-`false` when it cannot (any other 4xx), `null` when unknown.
+later can succeed (a network failure, a transport timeout, a 429, a 5xx, a
+409 `idempotency_conflict` or `verification_not_ready`), `false` when it
+cannot (any other 4xx), `null` when unknown.
+
+An error from a call that sent an `Idempotency-Key` carries it as
+`idempotencyKey` (`undefined` otherwise). Sending the same request again is
+safe only with that key: pass `idempotencyKey: exc.idempotencyKey` back. A
+plain new call mints a new key, and if the first one reached the server, the
+work runs (and is charged) twice.
 
 ```ts
 import {
@@ -662,8 +669,9 @@ try {
   } else if (exc instanceof LenzConnectionError) {
     // No HTTP answer after the automatic retries: a network failure, or
     // (LenzRequestTimeoutError, a subclass) one attempt ran past timeoutMs.
-    // exc.cause is the underlying fetch error. Paid calls send an
-    // Idempotency-Key, so sending the same call again is safe.
+    // exc.cause is the underlying fetch error. The request may have reached
+    // the server: resend with the same key so it cannot run twice.
+    await client.verifyAndWait({ claim: "...", idempotencyKey: exc.idempotencyKey });
   } else if (exc instanceof LenzUpstreamUnavailableError) {
     // HTTP 503, code "upstream_unavailable" (model/search providers
     // exhausted) or "capacity" (submissions shed at the door). Nothing was
@@ -789,9 +797,17 @@ const reply = await client.ask.send(verificationId, {
 
 A resend with the same key within 24 hours replays the first answer (the same
 receipt, review or reply) instead of running the call again. A resend while
-the first call is still running gets a 409 (`LenzError`, `statusCode` 409,
-`body.code` `idempotency_conflict`): wait and send it again with the same key,
-never with a new one, which would run the call a second time. On `ask.send`,
+the first call is still running is answered 409 (`body.code`
+`idempotency_conflict`); the client waits and asks again with the same key
+and body, within the call's retries and timeout. If the first call is still
+running after that, it throws that `LenzError` (`statusCode` 409,
+`retryable: true`): send it again later with the same key
+(`idempotencyKey: err.idempotencyKey`), never with a new one, which would run
+the call a second time.
+
+Every error of a call that sent a key carries it as `err.idempotencyKey`,
+including the timeout of a `*AndWait` (resending it with that key returns the
+work already started). A plain new call mints a new key and can run twice. On `ask.send`,
 asking the same question again in a new call is a new turn.
 
 ## Steering extract

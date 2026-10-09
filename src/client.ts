@@ -241,6 +241,30 @@ async function callIdempotencyKey(input: {
   return (await generateUuid()).replace(/-/g, "");
 }
 
+/**
+ * The key of a review or citation check: the caller's, else a random one.
+ * Always keyed: this client retries a failed POST, and a retry without a key
+ * could start a second job. Never derived from the text: the same draft sent
+ * again later is a new job.
+ */
+async function jobIdempotencyKey(input: { idempotencyKey?: string }): Promise<string> {
+  return input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
+}
+
+/**
+ * Run a whole `*AndWait` call, stamping its submit's key on any LenzError it
+ * throws (a wait's timeout included): resending with that key replays the
+ * job already started rather than starting another.
+ */
+async function withIdempotencyKey<T>(key: string | undefined, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (exc) {
+    stampIdempotencyKey(exc, key);
+    throw exc;
+  }
+}
+
 /** Read an env var without assuming a Node `process` exists (browser-safe). */
 function envVar(name: string): string | undefined {
   return typeof process !== "undefined" ? process.env?.[name] : undefined;
@@ -299,6 +323,42 @@ interface RequestOptions {
    * key never reaches an endpoint that doesn't need it.
    */
   authOptional?: boolean;
+  /**
+   * A body key that makes an in-flight 409 (`idempotency_conflict`) the
+   * caller's answer rather than a reason to retry: when the 409 names it
+   * (e.g. `review_id`), it is thrown at once for the caller to read.
+   */
+  conflictReceipt?: string;
+}
+
+/** The `Idempotency-Key` among `headers`, in any casing, or `undefined`. */
+function idempotencyKeyIn(headers: Record<string, string> | undefined): string | undefined {
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (name.toLowerCase() === "idempotency-key" && value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Stamp the call's `Idempotency-Key` on a LenzError it throws, so the caller
+ * can resend with the same key. A key already stamped stays.
+ */
+function stampIdempotencyKey(exc: unknown, key: string | undefined): void {
+  if (key && exc instanceof LenzError && exc.idempotencyKey === undefined) {
+    exc.idempotencyKey = key;
+  }
+}
+
+/** Whether a 409 body names `key` with a non-empty string. */
+async function bodyNames(response: Response, key: string): Promise<boolean> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+    const value = (body as Record<string, unknown>)[key];
+    return typeof value === "string" && value !== "";
+  } catch {
+    return false;
+  }
 }
 
 const REVIEW_STATUSES: readonly string[] = [
@@ -728,10 +788,17 @@ export class Lenz {
   // ── Marquee verbs ──
 
   async verify(input: VerifyInput): Promise<TaskAccepted> {
-    return this.submit(input);
+    return this.submit(input, await callIdempotencyKey(input));
   }
 
   async verifyBatch(input: VerifyBatchInput): Promise<BatchAccepted> {
+    return this._verifyBatch(input, await callIdempotencyKey(input));
+  }
+
+  private async _verifyBatch(
+    input: VerifyBatchInput,
+    idempotencyKey: string | undefined,
+  ): Promise<BatchAccepted> {
     const body: Record<string, unknown> = {
       // Per-item shape passes through verbatim — `VerifyBatchItem` allows
       // any subset including a per-item `language` override.
@@ -757,7 +824,6 @@ export class Lenz {
     if (input.depth) body["depth"] = input.depth;
     // One key per call, reused across its own retries, so a retried batch
     // does not start (and charge for) its claims twice.
-    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     const accepted = await this.request<BatchAccepted>({
@@ -987,11 +1053,12 @@ export class Lenz {
    * review; a new key is a new review.
    */
   async review(input: ReviewInput): Promise<ReviewStarted> {
-    return this._submitReview(input);
+    return this._submitReview(input, await jobIdempotencyKey(input));
   }
 
   private async _submitReview(
     input: ReviewInput,
+    idempotencyKey: string,
     transport: Pick<RequestOptions, "deadlineAt"> = {},
   ): Promise<ReviewStarted> {
     const body: Record<string, unknown> = { text: input.text };
@@ -1014,16 +1081,13 @@ export class Lenz {
     // Sent only when asked, for the same reason.
     if (input.suggestEdits) escalate.suggest_edits = true;
     if (Object.keys(escalate).length > 0) body.escalate = escalate;
-    // Always keyed: this client retries a failed POST, and a retry without a
-    // key could start a second review. Random per call, never derived from
-    // the text: the same draft submitted again later is a new review.
-    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
     try {
       return await this.request<ReviewStarted>({
         method: "POST",
         path: "/review",
         json: body,
         headers: { "Idempotency-Key": idempotencyKey },
+        conflictReceipt: "review_id",
         ...transport,
       });
     } catch (exc) {
@@ -1068,11 +1132,12 @@ export class Lenz {
    * receive `citecheck.completed` at your webhook.
    */
   async citecheck(input: CitecheckInput): Promise<CitecheckStarted> {
-    return this._submitCitecheck(input);
+    return this._submitCitecheck(input, await jobIdempotencyKey(input));
   }
 
   private async _submitCitecheck(
     input: CitecheckInput,
+    idempotencyKey: string,
     transport: Pick<RequestOptions, "deadlineAt"> = {},
   ): Promise<CitecheckStarted> {
     const hasText = typeof input.text === "string" && input.text.trim() !== "";
@@ -1087,13 +1152,13 @@ export class Lenz {
     if (input.language) body.language = input.language;
     if (input.webhookUrl !== undefined && input.webhookUrl !== null)
       body.webhook_url = input.webhookUrl;
-    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
     try {
       return await this.request<CitecheckStarted>({
         method: "POST",
         path: "/citecheck",
         json: body,
         headers: { "Idempotency-Key": idempotencyKey },
+        conflictReceipt: "citecheck_id",
         ...transport,
       });
     } catch (exc) {
@@ -1157,9 +1222,21 @@ export class Lenz {
   ): Promise<Citecheck> {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
-    const { citecheck_id: citecheckId } = await this._submitCitecheck(input, {
-      deadlineAt: deadline,
+    const idempotencyKey = await jobIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, async () => {
+      const { citecheck_id: citecheckId } = await this._submitCitecheck(input, idempotencyKey, {
+        deadlineAt: deadline,
+      });
+      return this._waitCitecheck(citecheckId, deadline, timeoutMs, opts);
     });
+  }
+
+  private _waitCitecheck(
+    citecheckId: string,
+    deadline: number,
+    timeoutMs: number,
+    opts: CitecheckAndWaitOptions,
+  ): Promise<Citecheck> {
     return this._waitJob<Citecheck>({
       deadline,
       // The raw body, so the guard judges what the server sent: a default
@@ -1211,16 +1288,21 @@ export class Lenz {
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
-    // The submit is bounded by the same deadline: its attempts are cut to
-    // what is left and a retry that would pass it is not taken.
-    const { review_id: reviewId } = await this._submitReview(input, { deadlineAt: deadline });
-    return this._waitJob<ReviewFull>({
-      deadline,
-      read: (transport) => this._getReview(reviewId, {}, transport),
-      isBody: (body) => isReviewBody(body, reviewId),
-      failed: (review) => new ReviewFailedError(review),
-      timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
-      onUpdate: opts.onUpdate,
+    const idempotencyKey = await jobIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, async () => {
+      // The submit is bounded by the same deadline: its attempts are cut to
+      // what is left and a retry that would pass it is not taken.
+      const { review_id: reviewId } = await this._submitReview(input, idempotencyKey, {
+        deadlineAt: deadline,
+      });
+      return this._waitJob<ReviewFull>({
+        deadline,
+        read: (transport) => this._getReview(reviewId, {}, transport),
+        isBody: (body) => isReviewBody(body, reviewId),
+        failed: (review) => new ReviewFailedError(review),
+        timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
+        onUpdate: opts.onUpdate,
+      });
     });
   }
 
@@ -1311,9 +1393,12 @@ export class Lenz {
    */
   async verifyAndWait(input: VerifyAndWaitInput): Promise<Verification> {
     const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
-    const accepted = await this.submit(input);
-    this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
-    return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
+    const idempotencyKey = await callIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, async () => {
+      const accepted = await this.submit(input, idempotencyKey);
+      this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
+      return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
+    });
   }
 
   /**
@@ -1365,7 +1450,18 @@ export class Lenz {
    */
   async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
     const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
-    const accepted = await this.verifyBatch(input);
+    const idempotencyKey = await callIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, () =>
+      this._verifyBatchAndWait(input, idempotencyKey, timeoutMs),
+    );
+  }
+
+  private async _verifyBatchAndWait(
+    input: VerifyBatchAndWaitInput,
+    idempotencyKey: string | undefined,
+    timeoutMs: number,
+  ): Promise<BatchItemResult[]> {
+    const accepted = await this._verifyBatch(input, idempotencyKey);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
     const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       ids,
@@ -1587,7 +1683,10 @@ export class Lenz {
 
   // ── internal helpers ──
 
-  private async submit(input: VerifyInput): Promise<TaskAccepted> {
+  private async submit(
+    input: VerifyInput,
+    idempotencyKey: string | undefined,
+  ): Promise<TaskAccepted> {
     const body: Record<string, unknown> = {
       // `claim` is the documented name; `text` the alias. The wire key stays
       // `text`, which every server version accepts.
@@ -1606,7 +1705,6 @@ export class Lenz {
     if (input.depth) body.depth = input.depth;
     // One key per call, reused across its own retries, so a network retry
     // does not start (and charge for) a second verification.
-    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.request<TaskAccepted>({
@@ -1629,6 +1727,17 @@ export class Lenz {
   /** Internal: dispatch an HTTP call with auth + retry. Public so the
    *  namespace classes can use it; not part of the documented surface. */
   async request<T>(opts: RequestOptions): Promise<T> {
+    try {
+      return await this._send<T>(opts);
+    } catch (exc) {
+      // Every error of a keyed call carries its key: the one safe resend.
+      stampIdempotencyKey(exc, idempotencyKeyIn(opts.headers));
+      throw exc;
+    }
+  }
+
+  private async _send<T>(opts: RequestOptions): Promise<T> {
+    const idempotencyKey = idempotencyKeyIn(opts.headers);
     const authRequired = opts.authRequired !== false;
     if (authRequired && !this.apiKey) {
       throw new LenzAuthError({
@@ -1697,7 +1806,11 @@ export class Lenz {
                 message: `${opts.method} ${opts.path} timed out after ${attemptMs}ms (${attempts}).`,
                 cause: String(exc),
                 fix:
-                  "Retry; a call sent with an Idempotency-Key is safe to resend with the same key. " +
+                  (idempotencyKey
+                    ? "The request may have reached the server: resend it with the same key " +
+                      "(idempotencyKey: err.idempotencyKey) so it cannot run twice; a new call " +
+                      "without it mints a new key and can. "
+                    : "Retry. ") +
                   "If it persists, raise timeoutMs or check the network between you and baseUrl.",
                 docUrl: "https://lenz.io/docs/errors",
               },
@@ -1806,6 +1919,32 @@ export class Lenz {
       //    code; the server is down, not pacing us, so an hour-long
       //    Retry-After must become backoff — not an hour-long sleep, and not
       //    an abort of a request our ladder might still satisfy.
+      // A request with this key still in flight (the first attempt of this
+      // call, or of an earlier one with the caller's key): ask again with the
+      // SAME key and body, never a new key, until it answers or the retries
+      // or the deadline run out.
+      if (
+        response.status === 409 &&
+        idempotencyKey &&
+        attempt < maxRetries &&
+        (await bodyErrorCode(response)) === "idempotency_conflict" &&
+        !(opts.conflictReceipt && (await bodyNames(response, opts.conflictReceipt)))
+      ) {
+        const stated = await statedRetryAfterSeconds(response);
+        const waitMs =
+          stated !== null && stated <= MAX_RETRY_AFTER_SLEEP
+            ? stated * 1000
+            : retrySleepMs(attempt);
+        if (fits(waitMs)) {
+          clearTimeout(timer);
+          this.log(
+            "debug",
+            `[lenz-io] Retrying ${opts.method} ${opts.path} after HTTP 409 (still in flight) in ${waitMs}ms (attempt ${attempt + 2} of ${maxRetries + 1})`,
+          );
+          await sleep(waitMs);
+          continue;
+        }
+      }
       const throwAtOnce =
         response.status === 429 && THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
       if (

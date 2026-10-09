@@ -90,9 +90,15 @@ differently:
   `select` already did: a random key per call, reused across that call's own
   retries, so a retried batch or question is not run (and charged) twice. A
   key you pass wins; `idempotency: false` sends none. The request body is
-  unchanged. A resend while the first call is still running gets the 409 it
-  got before (`body.code` `idempotency_conflict`); send it again with the
-  same key.
+  unchanged.
+- **An in-flight 409 (`idempotency_conflict`) is retried inside the call**:
+  when a call that sent an `Idempotency-Key` (its own or yours) meets the
+  first request with that key still running, the client waits (the stated
+  `Retry-After`, else its usual backoff) and asks again with the same key and
+  body, within `maxRetries` and the call's timeout. 2.x threw the 409 at
+  once. If it still conflicts, the same error is thrown (class, `code` and
+  message as in 2.x), with `retryable: true`. A `review` or `citecheck` 409
+  that names the job is still returned as its receipt at once.
 - **`wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once on an error
   waiting cannot change** (401, 403, 404, `LenzApiVersionError`): `wait`
   throws it, where 2.x polled on to a `LenzTimeoutError` at the deadline; in
@@ -133,11 +139,17 @@ differently:
   one HTTP attempt that took too long; `LenzTimeoutError` remains a wait that
   reached its deadline while the job kept running.
 - **`retryable` on every error** (`boolean | null`, set when the error is
-  built): `true` for a network failure, a transport timeout, a 429 or a 5xx,
-  `false` for any other 4xx and for `LenzApiVersionError`, `null` when
+  built): `true` for a network failure, a transport timeout, a 429, a 5xx
+  or a 409 `idempotency_conflict` / `verification_not_ready`, `false` for
+  any other 4xx and for `LenzApiVersionError`, `null` when
   unknown; a boolean the response body states wins. A failed run
   (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`) keeps
   the server's value, `null` when it stated none, as in 2.x.
+- **`idempotencyKey` on every error of a call that sent one** (`string |
+undefined`), the timeout of a `*AndWait` included. A resend is safe only
+  with that key: pass `idempotencyKey: err.idempotencyKey` back. A plain new
+  call mints a new key and, if the first request reached the server, runs
+  (and charges) twice.
 - **The underlying `fetch` error as the native `cause`** of a
   `LenzConnectionError`; the string `cause_` line is unchanged.
 - **Every error class from the browser entry**: `LenzUpstreamUnavailableError`

@@ -38,13 +38,22 @@ export interface LenzErrorContext {
 }
 
 /**
+ * The 409 codes that mean "the same request, sent again later, can succeed":
+ * the run is still going (`verification_not_ready`) or the first request
+ * with this `Idempotency-Key` is still in flight (`idempotency_conflict`).
+ */
+const RETRYABLE_409_CODES: readonly string[] = ["verification_not_ready", "idempotency_conflict"];
+
+/**
  * `retryable` for an error built from a status and a body: a boolean the
- * body states (in its `failure` block, else at the top level) wins; else 429
- * and 5xx are retryable, any other 4xx is not, and no status is unknown.
+ * body states (in its `failure` block, else at the top level) wins; else 429,
+ * 5xx and the two in-progress 409s are retryable, any other 4xx is not, and
+ * no status is unknown.
  */
 function deriveRetryable(
   statusCode: number,
   body: Record<string, unknown> | null | undefined,
+  code: string,
 ): boolean | null {
   const failure = body?.["failure"];
   if (failure && typeof failure === "object" && !Array.isArray(failure)) {
@@ -54,6 +63,14 @@ function deriveRetryable(
   const stated = body?.["retryable"];
   if (typeof stated === "boolean") return stated;
   if (statusCode === 429 || (statusCode >= 500 && statusCode < 600)) return true;
+  // The code as sent too: on some endpoints the 2.x `code` reads "" here.
+  const sentCode = typeof body?.["code"] === "string" ? (body["code"] as string) : "";
+  if (
+    statusCode === 409 &&
+    (RETRYABLE_409_CODES.includes(code) || RETRYABLE_409_CODES.includes(sentCode))
+  ) {
+    return true;
+  }
   if (statusCode >= 400 && statusCode < 500) return false;
   return null;
 }
@@ -73,8 +90,9 @@ export class LenzError extends Error {
   body: Record<string, unknown> | null;
   /**
    * Whether sending the same request again later can succeed: `true` for a
-   * network failure, a transport timeout, a 429 and a 5xx (including
-   * `upstream_unavailable`); `false` for any other 4xx and for
+   * network failure, a transport timeout, a 429, a 5xx (including
+   * `upstream_unavailable`) and a 409 `verification_not_ready` or
+   * `idempotency_conflict`; `false` for any other 4xx and for
    * {@link LenzApiVersionError}; `null` when unknown. A boolean the response
    * body states wins. On a failed run ({@link LenzPipelineError} and its
    * review / citation-check subclasses) it is the server's own value, `null`
@@ -82,6 +100,14 @@ export class LenzError extends Error {
    * optional only so objects built against 2.x types still fit).
    */
   retryable?: boolean | null;
+  /**
+   * The `Idempotency-Key` the call sent, when it sent one (every paid call
+   * does by default); `undefined` otherwise. To resend after this error
+   * without running the work twice, pass it back:
+   * `client.verify({ claim, idempotencyKey: err.idempotencyKey })`. A plain
+   * new call mints a new key and can run (and charge) twice.
+   */
+  idempotencyKey?: string;
 
   /**
    * `options.cause` is the native `Error.cause` (the error this one wraps,
@@ -99,7 +125,9 @@ export class LenzError extends Error {
     this.code = ctx.code ?? "";
     this.body = ctx.body ?? null;
     this.retryable =
-      ctx.retryable !== undefined ? ctx.retryable : deriveRetryable(this.statusCode, this.body);
+      ctx.retryable !== undefined
+        ? ctx.retryable
+        : deriveRetryable(this.statusCode, this.body, this.code);
   }
 
   override toString(): string {
@@ -286,6 +314,10 @@ export class LenzUpstreamUnavailableError extends LenzAPIError {}
  * connection, TLS. Thrown after this client's own retries. Always
  * `retryable`; the original `fetch` rejection is the native `cause`.
  *
+ * The request may still have reached the server. Resend it with the same
+ * key, `idempotencyKey: err.idempotencyKey`, so it cannot run twice; a plain
+ * new call mints a new key and can run (and charge) twice.
+ *
  * Subclasses {@link LenzAPIError}, the class 2.x threw here, so existing
  * handlers keep catching it.
  */
@@ -301,8 +333,9 @@ export class LenzConnectionError extends LenzAPIError {
  *
  * Not {@link LenzTimeoutError}, which means a wait (`wait`, `*AndWait`)
  * reached its deadline while the job kept running. A request that timed out
- * may still have reached the server: a call sent with an `Idempotency-Key`
- * (the default on every paid call) is safe to send again with the same key.
+ * may still have reached the server: resend it only with the same key,
+ * `idempotencyKey: err.idempotencyKey` (every paid call sends one by
+ * default). A plain new call mints a new key and can run (and charge) twice.
  */
 export class LenzRequestTimeoutError extends LenzConnectionError {}
 

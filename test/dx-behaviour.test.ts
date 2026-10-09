@@ -129,27 +129,26 @@ describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () =
       expect(key(calls[2]!)).toBe(key(calls[0]!));
     });
 
-    it(`${c.name}: an in-flight 409 keeps the key (never a second one), then the same key succeeds`, async () => {
+    it(`${c.name}: an in-flight 409 is retried in the same call with the same key, which then succeeds`, async () => {
       const { fetch, calls } = makeFetch([
         { status: 500, body: { detail: "boom" } },
         IN_FLIGHT_409,
         { body: c.body },
       ]);
       vi.useFakeTimers();
-      let err: unknown;
+      let out: unknown;
       try {
         const client = new Lenz({ apiKey: "lenz_t", fetch });
         const pending = settle(c.call(client, { idempotencyKey: "caller-key" }));
         await vi.advanceTimersByTimeAsync(10_000);
-        err = await pending;
-        await c.call(client, { idempotencyKey: "caller-key" });
+        out = await pending;
       } finally {
         vi.useRealTimers();
       }
-      expect(err).toBeInstanceOf(LenzError);
-      expect((err as LenzError).statusCode).toBe(409);
-      expect((err as LenzError).body?.["code"]).toBe("idempotency_conflict");
+      expect(out).not.toBeInstanceOf(Error);
+      expect(out).toMatchObject(c.name === "ask.send" ? ASK_BODY : { batch_id: "b" });
       expect(calls.map(key)).toEqual(["caller-key", "caller-key", "caller-key"]);
+      expect(calls.map(sent)).toEqual([c.wire, c.wire, c.wire]);
     });
 
     it(`${c.name}: a caller key passes through; idempotency: false sends none`, async () => {
@@ -273,7 +272,9 @@ describe("A2: error classes", () => {
     [402, { code: "no_credits" }, false],
     [403, {}, false],
     [404, {}, false],
-    [409, { code: "idempotency_conflict" }, false],
+    [409, { code: "idempotency_conflict" }, true],
+    [409, { code: "verification_not_ready" }, true],
+    [409, { code: "something_else" }, false],
     [422, { detail: [] }, false],
   ])("retryable is derived from the status: %i → %s", (status, extra, expected) => {
     const err = mapResponseToError(status, JSON.stringify({ detail: "x", ...extra }), {});
