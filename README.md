@@ -461,13 +461,16 @@ const check = await client.cancelCitecheck(citecheckId); // the check, as getCit
 ```
 
 - **`cancel(taskId)`** answers for every run of yours, whatever its state.
-  `cancelled: true` means the run is cancelled (`status: "cancelled"`).
-  `cancelled: false` means it had already ended and nothing changed: `status`
-  is the one it reached (`completed` or `failed`, and the verification
-  exists and was charged as usual). A cancelled run is not charged and saves
-  nothing. Reading it afterwards with `getStatus` returns the status
-  `"cancelled"`, and `wait` throws the error for a failed run with
-  `failureClass` `"cancelled"` and `retryable` `false`.
+  `cancelled: true` means the run is cancelled (`status: "cancelled"`), by this
+  call or an earlier one, so a repeat, or a retry after a lost response,
+  answers `true` again. `cancelled: false` means it was not cancelled and
+  nothing changed: `status` is the run's status, normally `completed` (the
+  verification exists and was charged as usual) or `failed` (not charged). A
+  task that `select` already resolved answers `cancelled: false` with
+  `needs_input`: cancel the task ids `select` returned. A cancelled
+  verification is not charged and saves nothing. Reading it afterwards with
+  `getStatus` returns the status `"cancelled"`, and `wait` throws the error
+  for a failed run with `failureClass` `"cancelled"` and `retryable` `false`.
 - **`cancelReview(reviewId)`** stops the review and the deep checks it
   started, and returns the full view with `status: "cancelled"`; a review that
   had already finished is returned unchanged. A review's deep checks cannot be
@@ -482,8 +485,9 @@ rest is refunded or never charged. A citation check is charged only for the
 citations it checked; the rest are refunded.
 
 An unknown id, another account's, or (for `cancel`) the task of a run started
-on the website throws `LenzNotFoundError` (404). An empty id throws before any
-request is sent.
+on the website throws `LenzNotFoundError` (404); a purged review or check
+throws `LenzGoneError` (410). An empty id, `.` or `..` throws before any request
+is sent.
 
 ## Response shape — the unified vocabulary
 

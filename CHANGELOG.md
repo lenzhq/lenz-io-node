@@ -174,10 +174,11 @@ worked on 2.21 behaves differently:
   stop a run** (`POST /verify/{task_id}/cancel`, `/reviews/{review_id}/cancel`,
   `/citechecks/{citecheck_id}/cancel`). `cancel` returns the new exported
   `CancelResult` (`{ task_id, cancelled, status }`): `cancelled: true` when
-  the run was stopped, `cancelled: false` with its final status when it had
-  already ended. `cancelReview` and `cancelCitecheck` return the review and
+  the run is cancelled (by this call or an earlier one), `cancelled: false`
+  with the run's status (normally `completed` or `failed`) when it is not. `cancelReview` and `cancelCitecheck` return the review and
   the check as `getReview` and `getCitecheck` read them, `status: "cancelled"`
-  or unchanged when finished. A cancelled run is not charged. The calls send no
+  or unchanged when finished. A cancelled verification is not charged; a review
+  or citation check keeps charged what it delivered before the cancel. The calls send no
   body and no `Idempotency-Key` (cancelling twice is harmless) and are
   retried on 5xx, 429 and dropped connections like any request. `cancel` on a
   review's deep check throws a `LenzError` with `statusCode` 409 and `code`
