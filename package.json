@@ -101,6 +101,8 @@
     "vitest": "5.0.3"
   },
   "overrides": {
-    "esbuild": "$esbuild"
+    "esbuild": "$esbuild",
+    "sharp": "0.35.5",
+    "undici": "7.29.1"
   }
 }
