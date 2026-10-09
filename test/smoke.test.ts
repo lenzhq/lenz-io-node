@@ -4,14 +4,14 @@
  * Skipped unless LENZ_E2E_KEY is set; the release workflow runs this
  * file via `npm run test:smoke`.
  *
- * Exercises the four-primitive ladder + webhook signing + /me/usage.
+ * Exercises the four-primitive ladder + cancel + webhook signing + /me/usage.
  */
 
 import { createHmac } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { Lenz, LenzWebhooks, verifySignature } from "../src/index.js";
+import { Lenz, LenzPipelineError, LenzWebhooks, verifySignature } from "../src/index.js";
 
 const LENZ_E2E_KEY = process.env["LENZ_E2E_KEY"] ?? "";
 const LENZ_BASE_URL = process.env["LENZ_BASE_URL"] ?? "";
@@ -39,6 +39,27 @@ maybe("smoke", () => {
     });
     expect(v.verdict).toBeTruthy();
   }, 160_000);
+
+  // Stopping a run. The same cheap claim at low depth, cancelled at once: the
+  // run is either stopped (`cancelled: true`; nothing is saved or charged) or
+  // it had already finished, e.g. an answer the verdict cache served
+  // (`cancelled: false` with the final status). Both are a pass, so the step
+  // does not depend on how fast the run is.
+  it("cancel stops a run, or reports the status it had already reached", async () => {
+    const client = makeClient();
+    const accepted = await client.verify({ claim: "Sharks don't get cancer", depth: "low" });
+    const out = await client.cancel(accepted.task_id);
+    expect(out.task_id).toBe(accepted.task_id);
+    expect(typeof out.cancelled).toBe("boolean");
+    if (out.cancelled) {
+      expect(out.status).toBe("cancelled");
+      const err = await client.wait(accepted.task_id, { timeoutMs: 30_000 }).catch((e) => e);
+      expect(err).toBeInstanceOf(LenzPipelineError);
+      expect((err as LenzPipelineError).failureClass).toBe("cancelled");
+    } else {
+      expect(["completed", "failed", "cancelled"]).toContain(out.status);
+    }
+  }, 60_000);
 
   it("assess returns typed claims", async () => {
     const client = makeClient();

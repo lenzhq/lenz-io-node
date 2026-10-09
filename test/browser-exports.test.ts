@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  CancelResult,
   CertificateTimestamped,
   CitecheckCancelled,
   ReviewCancelled,
@@ -35,6 +36,11 @@ describe("index.browser type re-exports", () => {
       VerificationCancelled["event"] | ReviewCancelled["event"] | CitecheckCancelled["event"]
     > = ["verification.cancelled", "review.cancelled", "citecheck.cancelled"];
     expect(names).toHaveLength(3);
+  });
+
+  it("names CancelResult", () => {
+    const result: CancelResult = { task_id: "t", cancelled: false, status: "completed" };
+    expect(result.cancelled).toBe(false);
   });
 
   it("names VerifyBatchItem", () => {

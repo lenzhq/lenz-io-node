@@ -74,6 +74,7 @@ export type {
 } from "./events.js";
 
 export type {
+  CancelResult,
   ConfidenceBand,
   Confidence,
   Depth,

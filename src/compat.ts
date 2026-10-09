@@ -537,6 +537,11 @@ export function legacyErrorBody(status: number, body: unknown, req: RequestConte
   const code = typeof out["code"] === "string" ? (out["code"] as string) : "";
   const errors = Array.isArray(out["errors"]) ? (out["errors"] as unknown[]) : null;
   const path = req.path.split("?")[0] ?? "";
+  // The three cancel calls are new in 3.0: there is no 2.x reading of their
+  // errors, so the body is read as sent (a 404 keeps its `not_found`).
+  if (req.method === "POST" && /^\/(verify|reviews|citechecks)\/[^/]+\/cancel$/.test(path)) {
+    return out;
+  }
   if (isReviewFamily(path)) {
     // A missing or unknown credential is refused before the endpoint runs.
     if (code === "not_authenticated") delete out["code"];

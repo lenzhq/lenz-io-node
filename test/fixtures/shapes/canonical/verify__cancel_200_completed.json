@@ -1,0 +1,8 @@
+{
+  "status": 200,
+  "body": {
+    "task_id": "10feef3b1249c547bcd722a0fcffdfe9",
+    "cancelled": false,
+    "status": "completed"
+  }
+}

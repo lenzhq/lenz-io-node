@@ -648,6 +648,18 @@ export interface Progress {
   poll_after_seconds?: number;
 }
 
+/**
+ * What `cancel(taskId)` returns. `cancelled` is `true` when this call stopped
+ * the run, `false` when it had already ended (or been stopped) and nothing
+ * changed; `status` is the run's status afterwards, so a `false` carries the
+ * final one (`completed`, `failed`, `cancelled`).
+ */
+export interface CancelResult {
+  task_id: string;
+  cancelled: boolean;
+  status: TaskStatus["status"];
+}
+
 export interface TaskStatus {
   /**
    * `cancelled` is terminal: the task was stopped elsewhere (the website's

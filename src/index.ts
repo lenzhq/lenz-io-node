@@ -104,6 +104,7 @@ export type {
 } from "./webhooks.js";
 
 export type {
+  CancelResult,
   ConfidenceBand,
   Confidence,
   Depth,

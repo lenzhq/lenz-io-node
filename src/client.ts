@@ -92,6 +92,7 @@ import type {
   AssessInput,
   AssessResponse,
   BatchAccepted,
+  CancelResult,
   BatchItemResult,
   Certificate,
   ExtractInput,
@@ -1205,6 +1206,29 @@ export class Lenz {
     return normalizeTaskStatus(body) as TaskStatus;
   }
 
+  /**
+   * Stop a verification. Nothing is saved or charged for a run it stops.
+   *
+   * Resolves for every run of yours, whatever its state: `cancelled: true`
+   * when this call stopped it; `cancelled: false` when it had already ended
+   * (or been stopped), with its final `status`. Cancelling again is safe, so
+   * the call sends no Idempotency-Key and is retried like any other request.
+   *
+   * Throws {@link LenzNotFoundError} (404) for a task that does not exist or
+   * is not yours. A review's deep check cannot be cancelled on its own: the
+   * API answers 409 with code `use_review_cancel` (a {@link LenzError}); stop
+   * the review with {@link Lenz.cancelReview} instead.
+   */
+  async cancel(taskId: string): Promise<CancelResult> {
+    if (!taskId) {
+      throw new Error("cancel() requires a non-empty task_id.");
+    }
+    return this.request<CancelResult>({
+      method: "POST",
+      path: `/verify/${encodeURIComponent(taskId)}/cancel`,
+    });
+  }
+
   async usage(): Promise<Usage> {
     const usage = await this.request<Usage>({ method: "GET", path: "/me/usage" });
     // Both response shapes: `credits.extra` / `credits.bonus` (the same
@@ -1388,6 +1412,26 @@ export class Lenz {
   }
 
   /**
+   * Stop a citation check. Returns the check as it stands afterwards (as
+   * `getCitecheck` returns it): `status: "cancelled"`, or unchanged
+   * (`completed`, `failed`) when it had already ended. Cancelling again is
+   * safe, so the call sends no Idempotency-Key.
+   *
+   * Throws {@link LenzNotFoundError} (404) for a check that does not exist
+   * or is not yours.
+   */
+  async cancelCitecheck(citecheckId: string): Promise<Citecheck> {
+    if (!citecheckId) {
+      throw new Error("cancelCitecheck() requires a non-empty citecheck_id.");
+    }
+    const body = await this.request<unknown>({
+      method: "POST",
+      path: `/citechecks/${encodeURIComponent(citecheckId)}/cancel`,
+    });
+    return withCitecheckDefaults(body) as Citecheck;
+  }
+
+  /**
    * Start a citation check and poll it until it ends; returns the completed
    * check. Polls on its `poll_after_seconds` (never tighter than 5 s) and
    * calls `onUpdate` on every poll whose body changed. Throws
@@ -1448,6 +1492,27 @@ export class Lenz {
       ...transport,
     });
     return withReviewDefaults(body);
+  }
+
+  /**
+   * Stop a review, including the deep checks it started. Returns the review
+   * as it stands afterwards (the full view, as `getReview` returns it):
+   * `status: "cancelled"`, or unchanged (`completed`, `failed`) when it had
+   * already ended. Cancelling again is safe, so the call sends no
+   * Idempotency-Key.
+   *
+   * Throws {@link LenzNotFoundError} (404) for a review that does not exist
+   * or is not yours.
+   */
+  async cancelReview(reviewId: string): Promise<ReviewFull> {
+    if (!reviewId) {
+      throw new Error("cancelReview() requires a non-empty review_id.");
+    }
+    const body = await this.request<ReviewFull>({
+      method: "POST",
+      path: `/reviews/${encodeURIComponent(reviewId)}/cancel`,
+    });
+    return withReviewDefaults(body) as ReviewFull;
   }
 
   /**
