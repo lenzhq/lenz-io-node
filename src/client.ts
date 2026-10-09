@@ -334,12 +334,7 @@ interface SendOptions {
    * (e.g. `review_id`), it is thrown at once for the caller to read.
    */
   conflictReceipt?: string;
-  /**
-   * A wait's poll: a response body that breaks off or does not decode throws
-   * `LenzConnectionError` (its cause the runtime's error) instead of the
-   * runtime's own error, so the wait can tell it from a programming error.
-   */
-  wrapTransport?: boolean;
+
   /**
    * Signals that stop the call (a `withOptions` copy's and the call's own):
    * when one fires, the attempt is aborted, no retry is made and the call
@@ -849,38 +844,31 @@ function unexpectedAnswer(method: string, path: string): LenzAPIError {
 }
 
 /**
- * Whether a poll's error is worth polling again for: a Lenz answer. A poll's
- * own requests report a body that broke off or did not decode as a
- * `LenzConnectionError` (`wrapTransport`), so anything else that is not a
- * `LenzError` is a programming error, and ends a wait.
+ * The errors a request's transport raised (a body that broke off or did not
+ * decode), remembered without touching them (a frozen error included), so a
+ * poll loop can tell them from a programming error. The request still throws
+ * them as they are.
  */
-function isPollableError(exc: unknown): boolean {
-  return exc instanceof LenzError;
+const TRANSPORT_FAILURES = new WeakSet<object>();
+
+function recordTransportFailure(exc: unknown): void {
+  if ((typeof exc === "object" && exc !== null) || typeof exc === "function") {
+    TRANSPORT_FAILURES.add(exc as object);
+  }
 }
 
 /**
- * What a wait hands the default `getStatus` beside the public options, under
- * a symbol so no override or caller sees it: the round's own signal (so a
- * batch can stop its other polls at once) and that transport failures come
- * back as `LenzConnectionError`.
+ * Whether a poll's error is worth polling again for: a Lenz answer, or a
+ * transport failure. A thrown primitive is read as one too: a stream can
+ * reject with one and it cannot be remembered. Any other object that is not
+ * a `LenzError` is a programming error (an override's bug), and ends a wait.
  */
-const POLL_CONTEXT = Symbol("lenz-io.poll");
-
-interface PollContext {
-  signals: readonly AbortSignal[];
-}
-
-/** The `LenzConnectionError` a poll's request throws for a body it could not read. */
-function transportError(method: string, path: string, exc: unknown): LenzConnectionError {
-  return new LenzConnectionError(
-    {
-      message: `${method} ${path}: the response body could not be read: ${String(exc)}`,
-      cause: String(exc),
-      fix: "Check your network connection; verify baseUrl is reachable.",
-      docUrl: "https://lenz.io/docs/errors",
-    },
-    { cause: exc },
-  );
+function isPollableError(exc: unknown): boolean {
+  if (exc instanceof LenzError) return true;
+  if ((typeof exc === "object" && exc !== null) || typeof exc === "function") {
+    return TRANSPORT_FAILURES.has(exc as object);
+  }
+  return true;
 }
 
 /**
@@ -1839,14 +1827,11 @@ export class Lenz {
     const id = requirePathId("getStatus", "task_id", taskId);
     const call = resolveCall(this, options, "getStatus()");
     const deadlineAt = options?.deadlineAt;
-    const poll = (options as { [POLL_CONTEXT]?: PollContext } | undefined)?.[POLL_CONTEXT];
-    if (poll) call.signals = [...call.signals, ...poll.signals];
     const body = await this.request<TaskStatus>({
       method: "GET",
       path: `/verify/status/${id}`,
       ...transportOf(call),
       ...(deadlineAt !== undefined ? { deadlineAt } : {}),
-      ...(poll ? { wrapTransport: true } : {}),
     });
     return normalizeTaskStatus(body) as TaskStatus;
   }
@@ -2276,7 +2261,6 @@ export class Lenz {
           signals,
           optionHeaders,
           maxRetries: 0,
-          wrapTransport: true,
           // Cut at what is left. A first poll with no budget left (a
           // `timeoutMs` of 0 or less) gets the client's own timeout, so the
           // one read can fill `partial`.
@@ -2586,6 +2570,12 @@ export class Lenz {
       // refused, a refused key, a programming error) ends the wait at once,
       // and the round's own signal stops the polls still running.
       const roundCtl = new AbortController();
+      // The round's signal follows the wait's own (with its reason), and is
+      // released when the round ends.
+      const own = call.own.signal;
+      const follow = () => roundCtl.abort(own?.reason);
+      if (own?.aborted) follow();
+      else own?.addEventListener("abort", follow, { once: true });
       let onFatal: (exc: unknown) => void = () => {};
       const fatal = new Promise<never>((_res, rej) => {
         onFatal = rej;
@@ -2607,6 +2597,8 @@ export class Lenz {
         // The caller's abort, if it came first, still wins.
         throwIfAborted(call.signals);
         throw exc;
+      } finally {
+        own?.removeEventListener("abort", follow);
       }
       // The caller's abort, before any rejection is classified: never a
       // pending poll to try again.
@@ -2709,15 +2701,14 @@ export class Lenz {
     call: Call,
     roundSignal: AbortSignal,
   ): Promise<TaskStatus> {
-    // The wait's own signal and headers: getStatus adds the copy's itself.
-    // The round's signal rides under a symbol only the default getStatus
-    // reads. An override that ignores them still stops at either signal (the
-    // race). One race, so the listeners go when any of them wins, the
-    // deadline included (an override that never settles keeps none).
-    const options: GetStatusOptions = { ...budget, ...ownOptions(call) };
-    Object.defineProperty(options, POLL_CONTEXT, {
-      value: { signals: [roundSignal] } satisfies PollContext,
-    });
+    // The wait's own headers: getStatus adds the copy's itself. An override
+    // that ignores the signal still stops at it (the race). One race, so the
+    // listeners go when any of them wins, the deadline included (an override
+    // that never settles keeps none).
+    // The round's signal goes as the poll's own `signal`: a public field an
+    // override can copy along. It fires with the wait's own signal (same
+    // reason) and when the round ends on a fatal answer.
+    const options: GetStatusOptions = { ...budget, ...ownOptions(call), signal: roundSignal };
     const poll = this.getStatus(taskId, options);
     const signals = [...call.signals, roundSignal];
     const deadlineAt = budget.deadlineAt;
@@ -3058,7 +3049,7 @@ export class Lenz {
                 { cause: exc },
               );
             }
-            if (opts.wrapTransport) throw transportError(opts.method, opts.path, exc);
+            recordTransportFailure(exc);
             throw exc;
           } finally {
             clearTimeout(timer);
@@ -3160,7 +3151,7 @@ export class Lenz {
           // A body that stalled until the timer fired: the status stands, the
           // body is lost.
           if (!controller.signal.aborted) {
-            if (opts.wrapTransport) throw transportError(opts.method, opts.path, exc);
+            recordTransportFailure(exc);
             throw exc;
           }
         } finally {

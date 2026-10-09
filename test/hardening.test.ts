@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Lenz, LenzAPIError, type TaskStatus } from "../src/index.js";
+import { Lenz, LenzAPIError, type GetStatusOptions, type TaskStatus } from "../src/index.js";
 import { countedController, header, recorder, settle } from "./support/recorder.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -298,5 +298,75 @@ describe("a stated wait is capped at the longest a timer can hold", () => {
     const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     expect(((await settle(c.usage())) as { retryAfter: unknown }).retryAfter).toBeNull();
     expect(((await settle(c.usage())) as { retryAfter: unknown }).retryAfter).toBe(0);
+  });
+});
+
+describe("a wait's poll context reaches getStatus through overrides that copy options", () => {
+  const html = () => new Response("<html>502</html>", { status: 200 });
+  const done = () =>
+    new Response(JSON.stringify({ status: "completed", result: { verification_id: "v1" } }), {
+      status: 200,
+    });
+
+  class Forwarding extends Lenz {
+    seen: unknown[] = [];
+    override getStatus(taskId: string, options?: GetStatusOptions): Promise<TaskStatus> {
+      this.seen.push(Object.getOwnPropertySymbols(options ?? {}));
+      return super.getStatus(taskId, { ...options });
+    }
+  }
+
+  it("an override forwarding { ...options }: a malformed poll is still retried", async () => {
+    const queue = [html, done];
+    const fetch = vi.fn(async () => queue.shift()!()) as unknown as typeof globalThis.fetch;
+    const c = new Forwarding({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const pending = settle(c.wait("t1"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await pending).toMatchObject({ verification_id: "v1" });
+  });
+
+  it("an override finds no hidden symbol on the options", async () => {
+    const fetch = vi.fn(async () => done()) as unknown as typeof globalThis.fetch;
+    const c = new Forwarding({ apiKey: "lenz_t", fetch });
+    await c.wait("t1");
+    expect(c.seen).toEqual([[]]);
+  });
+
+  it("a plain getStatus during a wait still throws the runtime's own error", async () => {
+    let n = 0;
+    const fetch = vi.fn(async (u: string | URL | Request) => {
+      if (String(u).endsWith("/plain")) return html();
+      return n++ === 0 ? html() : done();
+    }) as unknown as typeof globalThis.fetch;
+    const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const waiting = settle(c.wait("t1"));
+    const plain = await settle(c.getStatus("plain"));
+    expect(plain).toBeInstanceOf(SyntaxError);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await waiting).toMatchObject({ verification_id: "v1" });
+  });
+
+  it("a batch's fatal poll stops the others through a copying override", async () => {
+    class Copying extends Lenz {
+      override getStatus(taskId: string, options?: GetStatusOptions): Promise<TaskStatus> {
+        if (taskId === "t1") return Promise.reject(new TypeError("a bug"));
+        return super.getStatus(taskId, { ...options });
+      }
+    }
+    const { fetch, aborts } = recorder([{ status: 202, body: BATCH }], { hang: true });
+    const c = new Copying({ apiKey: "lenz_t", fetch });
+    let settled: unknown = "pending";
+    const pending = c
+      .verifyBatchAndWait({ claims: [{ claim: "a" }, { claim: "b" }] }, { timeoutMs: 600_000 })
+      .then(
+        (v) => (settled = v),
+        (e: unknown) => (settled = e),
+      );
+    await vi.advanceTimersByTimeAsync(10);
+    expect(settled).toBeInstanceOf(TypeError);
+    await pending;
+    // t2's request was aborted, not left to its 30 s timer.
+    expect(aborts).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
