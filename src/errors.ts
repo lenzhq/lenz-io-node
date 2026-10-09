@@ -307,6 +307,23 @@ export class LenzGoneError extends LenzError {
 export class LenzWebhookSignatureError extends LenzError {}
 
 /**
+ * The API answered a call in a version this SDK does not read.
+ *
+ * Every response names the version that served it in `X-Lenz-API-Version`.
+ * lenz-io 3.x asks for `2026-10-11` and reads only that shape; when a
+ * response names another version (in practice `2026-05-13`, for example an
+ * older stored replay of an idempotent call), the body is not parsed into
+ * the 3.x shapes. It is thrown instead, as sent, in `body`.
+ *
+ * A response with no `X-Lenz-API-Version` header is not checked. Webhook
+ * events are not checked either: `LenzWebhooks` reads both shapes.
+ */
+export class LenzApiVersionError extends LenzError {
+  /** The version the response named, e.g. `"2026-05-13"`. */
+  apiVersion = "";
+}
+
+/**
  * `reviewAndWait` reached its deadline before the review finished.
  *
  * The review keeps running server-side: read it later with

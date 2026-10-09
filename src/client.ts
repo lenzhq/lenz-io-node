@@ -65,6 +65,7 @@
 
 import {
   LenzAPIError,
+  LenzApiVersionError,
   LenzAuthError,
   LenzError,
   LenzGoneError,
@@ -1518,10 +1519,15 @@ export class Lenz {
 
     const headers: Record<string, string> = {
       "User-Agent": `lenz-io-node/${SDK_VERSION}`,
-      "X-Lenz-API-Version": API_VERSION,
       Accept: "application/json",
       ...(opts.headers ?? {}),
     };
+    // The version is this release's, whatever a call's own headers say: set
+    // last, over any casing of the name, so a stale value cannot ride along.
+    for (const name of Object.keys(headers)) {
+      if (name.toLowerCase() === "x-lenz-api-version") delete headers[name];
+    }
+    headers["X-Lenz-API-Version"] = API_VERSION;
     if (this.apiKey && (authRequired || opts.authOptional)) {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
@@ -1561,6 +1567,41 @@ export class Lenz {
         }
         await sleep(retrySleepMs(attempt));
         continue;
+      }
+      const served = response.headers.get("X-Lenz-API-Version")?.trim();
+      if (served && served !== API_VERSION) {
+        // Another version's body is not read as this one's: no retry, no
+        // typed mapping. The body goes back as sent.
+        let rawBody = "";
+        try {
+          rawBody = await response.text();
+        } catch (exc) {
+          if (!controller.signal.aborted) throw exc;
+        } finally {
+          clearTimeout(timer);
+        }
+        let sentBody: Record<string, unknown> | null = null;
+        try {
+          const parsed: unknown = JSON.parse(rawBody);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            sentBody = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // not JSON: stays null
+        }
+        const err = new LenzApiVersionError({
+          message:
+            `The API answered in version ${served}; lenz-io 3.x reads ${API_VERSION} only. ` +
+            `Use lenz-io 2.x against that API, or move the API to ${API_VERSION}.`,
+          cause: `${opts.method} ${opts.path} was served in version ${served}.`,
+          fix: `Use lenz-io 2.x against that API, or move the API to ${API_VERSION}.`,
+          docUrl: "https://lenz.io/docs/errors",
+          requestId: response.headers.get("X-Request-ID") ?? "",
+          statusCode: response.status,
+          body: sentBody,
+        });
+        err.apiVersion = served;
+        throw err;
       }
       if (response.status < 400) {
         // The attempt's timer stays armed until the body is read: headers

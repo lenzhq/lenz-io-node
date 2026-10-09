@@ -45,6 +45,7 @@ export type { LenzOptions } from "./client.js";
 
 export {
   LenzAPIError,
+  LenzApiVersionError,
   LenzAuthError,
   LenzError,
   LenzGoneError,
