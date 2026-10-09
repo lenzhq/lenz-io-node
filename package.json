@@ -92,7 +92,7 @@
     "esbuild": "^0.28.1",
     "eslint": "^8.57.0",
     "hono": "4.13.13",
-    "miniflare": "4.20260730.0",
+    "miniflare": "5.20261006.1-alpha",
     "nock": "^13.5.0",
     "prettier": "^3.2.0",
     "tsup": "^8.0.0",
