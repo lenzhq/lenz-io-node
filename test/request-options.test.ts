@@ -418,6 +418,31 @@ describe("options never change the request bytes", () => {
   }
 });
 
+describe("options on a retried request", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("every attempt sends the same bytes and the asked header", async () => {
+    const { fetch, sent } = recorder([{ status: 503 }, { networkError: true }, { body: TASK }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const pending = settle(
+      c.verify(
+        { claim: "a", idempotencyKey: "k-retry" },
+        { headers: { "X-Marker": "m" }, maxRetries: 2, timeoutMs: 5_000 },
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await pending).toMatchObject({ task_id: "t1" });
+    expect(sent).toHaveLength(3);
+    for (const s of sent) expect(wire(s)).toEqual(wire(sent[0]!));
+    expect(header(sent[0]!, "X-Marker")).toBe("m");
+  });
+});
+
 // ── budgets and precedence ───────────────────────────────────────────────
 
 describe("what the per-call timeoutMs bounds, and precedence", () => {
