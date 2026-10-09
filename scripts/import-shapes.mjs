@@ -23,8 +23,9 @@
 // every other time falls on one day.
 //
 // Fixtures are written as `{status, headers?, body}` (only the headers a
-// client acts on) or `{payload}` for a webhook.
+// client acts on) or `{payload}` for a webhook, formatted with prettier.
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -273,4 +274,17 @@ for (const name of names) {
     written += 1;
   }
 }
+// The repo's formatter has the last word on the files, so a re-import changes
+// a fixture only where the recording changed.
+execFileSync(
+  process.execPath,
+  [
+    join(ROOT, "node_modules", "prettier", "bin", "prettier.cjs"),
+    "--write",
+    "--log-level",
+    "warn",
+    OUT,
+  ],
+  { stdio: "inherit" },
+);
 console.log(`import-shapes: wrote ${written} pairs`);
