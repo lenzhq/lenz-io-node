@@ -30,16 +30,6 @@ below.
   later (which reads both shapes and fills the 2.x names), or read both
   shapes yourself; a receiver on 2.20.0 or older, or one that reads the raw
   JSON, must be updated before its sender moves to 3.0.
-- **Errors carry what the API sends.** `code` is the API's code on every
-  error (2.x left it `""` on some), a schema error's message is the API's
-  sentence and its `errors` the field items, `LenzRateLimitError`'s
-  `resetInSeconds` and `retryAfter` read the body's `retry_after`, and
-  `LenzQuotaExceededError.creditBalance` is filled for a citation check.
-  `LenzError.body` is the body as sent: code that reads
-  `err.body.detail` as a list, `err.body.doc_url`, `err.body.error`,
-  `err.body.reset_in_seconds` or `err.body.retry_after_seconds` must read the
-  error's own fields (`errors`, `code`, `resetInSeconds`, `retryAfter`) or the
-  newer names (`docs_url`, `retry_after`).
 - **A webhook event's `raw` is the payload as delivered**, in whichever shape
   the API sent.
 - **What the API now words or sends differently**, which no client can
@@ -140,6 +130,15 @@ and `error_code`.
 
 Nothing is required. To move off the deprecated names, use the newer ones
 listed under "Newer field names" in the README.
+
+Error classes keep every field they had in 2.x (`code` is `""` where 2.x had
+none, a schema error's message is "Validation failed" and its `errors` the
+field items, `resetInSeconds` reads the daily limit's wait). Their `body` is
+the body as the API sent it, with the API's own `code` on every error and its
+`detail` sentence; code that reads `err.body.detail` as a list,
+`err.body.doc_url`, `err.body.error`, `err.body.reset_in_seconds` or
+`err.body.retry_after_seconds` must read the error's own fields or the newer
+names (`docs_url`, `retry_after`).
 
 ## [2.21.0] - 2026-10-09
 

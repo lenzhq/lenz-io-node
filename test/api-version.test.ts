@@ -33,25 +33,22 @@ async function thrown(call: () => Promise<unknown>): Promise<LenzError> {
   throw new Error("expected an error");
 }
 
-describe("errors read the 2026-10-11 error body", () => {
-  it("the code is the one the API sent, on every error", async () => {
+describe("errors keep their 2.x fields", () => {
+  it("a code the 2.x error did not carry reads as empty; the body is as sent", async () => {
     const body = { detail: "Not found.", code: "not_found" };
     const err = await thrown(() => client(404, body).verifications.get("v"));
+    expect(err.code).toBe("");
+    expect(err.body).toEqual(body);
+  });
+
+  it("the same code on /reviews/{id} is kept: 2.x had it there", async () => {
+    const err = await thrown(() =>
+      client(404, { detail: "Not found.", code: "not_found" }).getReview("r"),
+    );
     expect(err.code).toBe("not_found");
-    expect(err.body).toEqual(body);
   });
 
-  it.each([
-    [500, "internal_error"],
-    [400, "invalid_request"],
-  ])("a %s with the fallback code %s carries it", async (status, code) => {
-    const body = { detail: "Something went wrong.", code };
-    const err = await thrown(() => client(status, body).verify({ claim: "x" }));
-    expect(err.code).toBe(code);
-    expect(err.body).toEqual(body);
-  });
-
-  it("a schema error carries the API's sentence and its field items", async () => {
+  it("a schema error reads as 2.x did: the field items, 'Validation failed'", async () => {
     const item = { loc: ["body", "payload", "text"], msg: "Field required", type: "missing" };
     const err = await thrown(() =>
       client(422, {
@@ -61,12 +58,38 @@ describe("errors read the 2026-10-11 error body", () => {
       }).verify({ claim: "x" }),
     );
     expect(err).toBeInstanceOf(LenzValidationError);
-    expect(err.message).toBe("text: Field required");
-    expect(err.code).toBe("validation_error");
-    expect((err as LenzValidationError).errors).toEqual([item]);
+    expect(err.message).toBe("Validation failed");
+    expect(err.code).toBe("");
+    expect((err as LenzValidationError).errors).toEqual([
+      { type: "missing", loc: ["body", "payload", "text"], msg: "Field required" },
+    ]);
   });
 
-  it("the daily /extract limit's wait reads as resetInSeconds and retryAfter", async () => {
+  it.each([
+    [500, "internal_error"],
+    [400, "invalid_request"],
+  ])("a %s with the fallback code %s reads code '' (2.x had none)", async (status, code) => {
+    const body = { detail: "Something went wrong.", code };
+    const err = await thrown(() => client(status, body).verify({ claim: "x" }));
+    expect(err.code).toBe("");
+    expect(err.body).toEqual(body);
+  });
+
+  it("a batch item's unsupported language names its item, as 2.x did", async () => {
+    const msg = "Unsupported language 'xx'. Supported: en, es.";
+    const err = await thrown(() =>
+      client(422, {
+        detail: msg,
+        code: "unsupported_language",
+        errors: [{ loc: ["body", "claims", 1, "language"], msg, type: "unsupported_language" }],
+      }).verifyBatch({ claims: [{ claim: "a" }, { claim: "b", language: "xx" }] }),
+    );
+    expect(err.message).toBe(`claims[1].${msg}`);
+    expect(err.code).toBe("");
+    expect((err as LenzValidationError).errors).toEqual([]);
+  });
+
+  it("the daily /extract limit's wait reads as resetInSeconds", async () => {
     const err = await thrown(() =>
       client(429, {
         detail: "Daily limit.",
@@ -81,17 +104,7 @@ describe("errors read the 2026-10-11 error body", () => {
     expect((err as LenzRateLimitError).retryAfter).toBe(3600);
   });
 
-  it("an in-flight 429 has no resetInSeconds", async () => {
-    const err = await thrown(() =>
-      client(429, { detail: "Busy.", code: "review_in_flight", retry_after: 30 }).review({
-        text: "x",
-      }),
-    );
-    expect((err as LenzRateLimitError).resetInSeconds).toBeNull();
-    expect((err as LenzRateLimitError).retryAfter).toBe(30);
-  });
-
-  it("a body is read as sent", () => {
+  it("without the call it answered, a body is read as sent (as 2.x read it)", () => {
     const err = mapResponseToError(404, JSON.stringify({ detail: "x", code: "not_found" }));
     expect(err.code).toBe("not_found");
   });

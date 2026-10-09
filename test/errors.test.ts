@@ -229,15 +229,10 @@ describe("mapResponseToError", () => {
   it("422 → LenzValidationError with errors", () => {
     const e = mapResponseToError(
       422,
-      body({
-        detail: "text: required",
-        code: "validation_error",
-        errors: [{ loc: ["text"], msg: "required", type: "missing" }],
-      }),
+      body({ detail: [{ loc: ["text"], msg: "required", type: "missing" }] }),
       {},
     );
     expect(e).toBeInstanceOf(LenzValidationError);
-    expect(e.message).toBe("text: required");
     expect((e as LenzValidationError).errors).toHaveLength(1);
   });
 
@@ -253,14 +248,15 @@ describe("mapResponseToError", () => {
     expect((e as LenzRateLimitError).retryAfter).toBe(12);
   });
 
-  it("429 on the daily limit reads its wait from retry_after", () => {
+  it("429 reads reset_in_seconds — the key the server actually sends", () => {
+    // `retry_after` in the body was an SDK invention the server never emitted.
     const e = mapResponseToError(
       429,
       body({
         detail: "capped",
         code: "extract_daily_limit",
         limit: 1000,
-        retry_after: 7200,
+        reset_in_seconds: 7200,
       }),
       {},
     ) as LenzRateLimitError;
@@ -272,7 +268,7 @@ describe("mapResponseToError", () => {
 
   it("429 with an empty Retry-After does not coerce to 0", () => {
     // Number("") === 0 in JS, which would read as "retry immediately".
-    const e = mapResponseToError(429, body({ detail: "slow", retry_after: 42 }), {
+    const e = mapResponseToError(429, body({ detail: "slow", reset_in_seconds: 42 }), {
       "Retry-After": "",
     }) as LenzRateLimitError;
     expect(e.retryAfter).toBe(42);
@@ -376,20 +372,15 @@ describe("mapResponseToError", () => {
         status: "failed",
         task_id: TASK_ID,
         hint: "Send one checkable statement.",
-        failure: {
-          code: "no_checkable_claim",
-          detail: "No claim in the input could be checked.",
-          hint: "Send one checkable statement.",
-          failure_class: "invalid_input",
-          retryable: false,
-          docs_url: "https://lenz.io/docs/errors#invalid_input",
-        },
+        failure_reason: "not_a_claim",
+        failure_class: "invalid_input",
+        retryable: false,
+        docs_url: "https://lenz.io/docs/errors#invalid_input",
       }),
       {},
     ) as LenzPipelineError;
     expect(e).toBeInstanceOf(LenzPipelineError);
     expect(e.taskId).toBe(TASK_ID);
-    // The 2.x word for no_checkable_claim.
     expect(e.failureReason).toBe("not_a_claim");
     expect(e.failureClass).toBe("invalid_input");
     expect(e.retryable).toBe(false);
@@ -401,12 +392,12 @@ describe("mapResponseToError", () => {
   it("409 verification_failed without a hint follows retryable", () => {
     const retryable = mapResponseToError(
       409,
-      body({ code: "verification_failed", failure: { retryable: true } }),
+      body({ code: "verification_failed", retryable: true }),
       {},
     );
     const final = mapResponseToError(
       409,
-      body({ code: "verification_failed", failure: { retryable: false } }),
+      body({ code: "verification_failed", retryable: false }),
       {},
     );
     expect(retryable.fix).toContain("retry the same request");
@@ -416,7 +407,7 @@ describe("mapResponseToError", () => {
   it("409 verification_failed reads only a boolean retryable", () => {
     const e = mapResponseToError(
       409,
-      body({ code: "verification_failed", failure: { retryable: "true" } }),
+      body({ code: "verification_failed", retryable: "true" }),
       {},
     ) as LenzPipelineError;
     expect(e).toBeInstanceOf(LenzPipelineError);

@@ -1806,7 +1806,7 @@ describe("Auto-retry", () => {
     const { fetch, calls } = makeFetch([
       {
         status: 429,
-        body: { detail: "Daily /extract limit of 1000 reached.", retry_after: 86_400 },
+        body: { detail: "Daily /extract limit of 1000 reached.", reset_in_seconds: 86_400 },
         headers: { "Retry-After": "86400" },
       },
       { body: USAGE_BODY },
@@ -1862,7 +1862,7 @@ describe("Auto-retry", () => {
     // Python's client falls back to the body here. Node must too, or the same
     // server response produces 1 call in Python and 4 in Node.
     const { fetch, calls } = makeFetch([
-      { status: 429, body: { detail: "capped", retry_after: 86_400 } },
+      { status: 429, body: { detail: "capped", reset_in_seconds: 86_400 } },
       { body: USAGE_BODY },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
@@ -1969,7 +1969,7 @@ describe("Auto-retry", () => {
   }, 10_000);
 
   it("503 reads the wait from the body retry_after key — parity with Python", async () => {
-    // The 503 bodies carry `retry_after` (so does 429);
+    // The 503 bodies carry `retry_after` (429 carries `reset_in_seconds`);
     // a proxy that strips the header must not demote the stated wait to the
     // blind ladder.
     const { fetch, calls } = makeFetch([

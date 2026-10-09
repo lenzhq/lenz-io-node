@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 //
 // Imports the API's recorded responses (both versions) into
-// test/fixtures/shapes/{legacy,canonical}/.
+// test/fixtures/shapes/{legacy,canonical}/ (the original-shape `legacy/` copy
+// only for webhook recordings: client calls read the newer shape alone).
 //
 //   node scripts/import-shapes.mjs <goldens-dir>
 //
@@ -263,7 +264,11 @@ for (const name of names) {
     const lfix = lf.get(suffix);
     if (!lfix) continue;
     const file = `${name}${suffix}.json`;
-    writeFileSync(join(OUT, "legacy", file), JSON.stringify(lfix, null, 2) + "\n");
+    // Client calls read the newer shape only; the original shape is kept for
+    // webhooks, which are parsed in either.
+    if (name.startsWith("webhook__")) {
+      writeFileSync(join(OUT, "legacy", file), JSON.stringify(lfix, null, 2) + "\n");
+    }
     writeFileSync(join(OUT, "canonical", file), JSON.stringify(cf, null, 2) + "\n");
     written += 1;
   }

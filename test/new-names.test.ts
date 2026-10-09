@@ -305,10 +305,10 @@ describe("webhook_url in request bodies", () => {
 });
 
 describe("bodies keep what they had", () => {
-  it("a 429 that is not the daily limit keeps resetInSeconds null", () => {
+  it("a 429 with doc_url and retry_after keeps resetInSeconds null", () => {
     const err = mapResponseToError(
       429,
-      JSON.stringify({ code: "rate_limited", docs_url: "https://lenz.io/docs", retry_after: 30 }),
+      JSON.stringify({ code: "rate_limited", doc_url: "https://lenz.io/docs", retry_after: 30 }),
     ) as sdk.LenzRateLimitError;
     expect(err.resetInSeconds).toBeNull();
     expect(err.retryAfter).toBe(30);

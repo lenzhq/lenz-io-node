@@ -17,8 +17,7 @@
  *
  * The allowances are what the SERVER sends differently in the newer shape and
  * no client can rebuild (`SERVER_DIFFERS`, each with its reason): its own
- * wording, a value it no longer sends, and the error fields that now carry
- * the API's own values (`ERROR_FIELDS`).
+ * wording and a value it no longer sends.
  *
  * Webhooks are the one place the original shape is still read: a receiver is
  * sent events for work started by any client on the account, so each webhook
@@ -122,20 +121,12 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   webhook__citecheck_completed: TASK_ID,
 };
 
-/**
- * An error carries what the API's error body says (3.0 no longer rebuilds
- * the 2.x error fields from it): the code it sent, its sentence, the field
- * items of a schema error, the pool balance of a quota error. Skipped for
- * the newer shape in every recording.
- */
-const ERROR_FIELDS = /(^|\.)error\.(code|message|cause_|errors|creditBalance)(\.|$)/;
-
 function pattern(p: string): RegExp {
   return new RegExp("^" + p.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
 }
 
 function differs(name: string, path: string): boolean {
-  return ERROR_FIELDS.test(path) || (SERVER_DIFFERS[name] ?? []).some((p) => pattern(p).test(path));
+  return (SERVER_DIFFERS[name] ?? []).some((p) => pattern(p).test(path));
 }
 
 /** Every difference from the oracle, as `path: what` lines. */

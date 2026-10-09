@@ -14,6 +14,11 @@
  * (`normalizeWebhookStatus`, `normalizeOptions`, `webhookResultDefaults`)
  * read both the event shape of 3.0 and the original one.
  *
+ * The review and citation-check readers below also read both shapes,
+ * because the same code builds the bodies of `review.*` / `citecheck.*`
+ * webhook events. `legacyErrorBody` is not old-shape parsing: it turns the
+ * newer error body into the values 2.x error classes carried.
+ *
  * Nothing here throws: a value of an unexpected type is passed through.
  */
 
@@ -425,6 +430,183 @@ export function normalizeUsage(body: unknown): unknown {
       remaining: quotaRemaining,
     };
   }
+  return out;
+}
+
+// ── Error bodies ──
+
+/** The call an error answered: its method and path (below the base URL). */
+export interface RequestContext {
+  method: string;
+  path: string;
+}
+
+/** `/review`, `/citecheck` and their reads keep their own error envelope. */
+function isReviewFamily(path: string): boolean {
+  return (
+    path === "/review" ||
+    path.startsWith("/reviews/") ||
+    path === "/citecheck" ||
+    path.startsWith("/citechecks/")
+  );
+}
+
+/**
+ * Codes the newer shape sends where the original error carried no `code`
+ * (outside `/review` and `/citecheck`, which always sent one).
+ */
+const CODELESS = new Set([
+  "not_authenticated",
+  "not_found",
+  "idempotency_body_mismatch",
+  "idempotency_conflict",
+  "malformed_body",
+  "method_not_allowed",
+  "validation_error",
+  "blank_input",
+  "unsupported_language",
+  "too_many_items",
+  // The fallbacks for an error raised without its own code: an unhandled
+  // server error, and any other 4xx.
+  "internal_error",
+  "invalid_request",
+]);
+
+/** A field validation item in the original order: `type`, `loc`, `msg`, then the rest. */
+function validationItem(item: unknown): unknown {
+  if (!isObj(item)) return item;
+  const out: Obj = {};
+  for (const key of ["type", "loc", "msg"]) if (has(item, key)) out[key] = item[key];
+  for (const [key, value] of Object.entries(item)) if (!has(out, key)) out[key] = value;
+  return out;
+}
+
+/** `old` renamed to `new` when only the newer name is there. */
+function renameKey(o: Obj, from: string, to: string): void {
+  if (has(o, from) && !has(o, to)) {
+    o[to] = o[from];
+    delete o[from];
+  }
+}
+
+/** The original names of a wait and a docs link. */
+function legacyWaitAndLink(o: Obj, status: number): void {
+  const code = o["code"];
+  if (status === 429 && code === "extract_daily_limit")
+    renameKey(o, "retry_after", "reset_in_seconds");
+  if (status === 429 && (code === "review_in_flight" || code === "citecheck_in_flight")) {
+    renameKey(o, "retry_after", "retry_after_seconds");
+  }
+  if (status === 402 || status === 429 || status === 503) renameKey(o, "docs_url", "doc_url");
+}
+
+/**
+ * A 2026-10-11 error body turned into the one 2.x callers saw: what the error
+ * classes are built from, so every field they carry keeps its 2.x value and
+ * meaning. (`LenzError.body` stays the body as sent.)
+ *
+ * - outside `/review` and `/citecheck`: no `errors` list; no `code` where the
+ *   original had none; a schema error's `detail` is the list of field items;
+ *   `/assess`'s blank list item is `blank_item`;
+ * - `/review` and `/citecheck`: field items `{loc, msg}`, the schema error's
+ *   `detail` spelled from the field's path, a blank text or an unsupported
+ *   language on `/review` is `validation_error`;
+ * - waits and links by their original names (`reset_in_seconds`,
+ *   `retry_after_seconds`, `doc_url`); a citation check's 402 states its
+ *   pool balance (`credits_remaining`, one credit per citation).
+ */
+export function legacyErrorBody(status: number, body: unknown, req: RequestContext): unknown {
+  if (!isObj(body)) return body;
+  const out: Obj = { ...body };
+  const code = typeof out["code"] === "string" ? (out["code"] as string) : "";
+  const errors = Array.isArray(out["errors"]) ? (out["errors"] as unknown[]) : null;
+  const path = req.path.split("?")[0] ?? "";
+  if (isReviewFamily(path)) {
+    // A missing or unknown credential is refused before the endpoint runs.
+    if (code === "not_authenticated") delete out["code"];
+    if (status === 422) {
+      const detail = out["detail"];
+      if (req.method === "POST" && path === "/review" && typeof detail === "string") {
+        if (code === "blank_input" || code === "unsupported_language") {
+          out["code"] = "validation_error";
+          if (code === "unsupported_language" && !detail.startsWith("language: ")) {
+            out["detail"] = `language: ${detail}`;
+          }
+        }
+      }
+      if (errors) {
+        const first = errors.find(isObj);
+        const loc = first?.["loc"];
+        if (Array.isArray(loc) && loc[1] === "payload" && typeof first?.["msg"] === "string") {
+          out["detail"] = `${loc.slice(1).join(".")}: ${first["msg"]}`;
+        }
+        out["errors"] = errors.map((item) => {
+          if (!isObj(item)) return item;
+          const o: Obj = {};
+          if (has(item, "loc")) o["loc"] = item["loc"];
+          if (has(item, "msg")) {
+            o["msg"] =
+              item["msg"] === detail && out["detail"] !== detail ? out["detail"] : item["msg"];
+          }
+          return o;
+        });
+      } else if (code === "idempotency_body_mismatch") {
+        out["errors"] = [{ loc: ["header"], msg: out["detail"] }];
+      }
+    }
+    if (
+      status === 402 &&
+      req.method === "POST" &&
+      path === "/citecheck" &&
+      !has(out, "credits_remaining") &&
+      typeof out["remaining"] === "number"
+    ) {
+      out["credits_remaining"] = out["remaining"];
+    }
+    legacyWaitAndLink(out, status);
+    return out;
+  }
+  if (status === 422 && code === "blank_input" && path === "/assess") {
+    const loc = isObj(errors?.[0]) ? (errors[0] as Obj)["loc"] : null;
+    if (Array.isArray(loc) && loc.includes("claims")) {
+      out["code"] = "blank_item";
+      delete out["errors"];
+      return out;
+    }
+  }
+  // A batch item's unsupported language named its item in `detail`.
+  if (status === 422 && code === "unsupported_language" && path === "/verify/batch") {
+    const loc = isObj(errors?.[0]) ? (errors[0] as Obj)["loc"] : null;
+    const detail = out["detail"];
+    if (Array.isArray(loc) && loc[1] === "claims" && typeof loc[2] === "number") {
+      const prefix = `claims[${loc[2]}].`;
+      if (typeof detail === "string" && !detail.startsWith(prefix)) out["detail"] = prefix + detail;
+    }
+  }
+  const schemaItems =
+    status === 422 &&
+    code === "validation_error" &&
+    errors !== null &&
+    errors.length > 0 &&
+    errors.every((e) => isObj(e) && typeof e["type"] === "string" && e["type"] !== code);
+  if (schemaItems) {
+    const legacy: Obj = { detail: errors.map(validationItem) };
+    for (const [key, value] of Object.entries(out)) {
+      if (key === "detail" || key === "code" || key === "errors") continue;
+      legacy[key === "docs_url" ? "doc_url" : key] = value;
+    }
+    return legacy;
+  }
+  // `/assess` sent `too_many_items`; `/ask` sent no code for an unfinished
+  // verification (GET /verifications/{id} still sends `verification_not_ready`).
+  const codeless =
+    (CODELESS.has(code) && !(code === "too_many_items" && path === "/assess")) ||
+    (code === "verification_not_ready" && path.startsWith("/ask/"));
+  if (codeless) {
+    delete out["code"];
+  }
+  delete out["errors"];
+  legacyWaitAndLink(out, status);
   return out;
 }
 
