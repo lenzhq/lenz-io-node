@@ -110,6 +110,12 @@ describe("index.browser runtime exports", () => {
       for (const name of errorNames(browser)) {
         if (name === "LenzError") continue;
         const Ctor = browser[name] as { prototype: object };
+        // A caller's abort is not an API answer: deliberately not a LenzError.
+        if (name === "LenzAbortError") {
+          expect(Ctor.prototype instanceof Base, name).toBe(false);
+          expect(Ctor.prototype instanceof Error, name).toBe(true);
+          continue;
+        }
         expect(Ctor.prototype instanceof Base, name).toBe(true);
       }
       // isEvent, which needs no crypto, is in the browser entry too.

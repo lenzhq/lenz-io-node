@@ -49,6 +49,7 @@ export type { LenzLogger, LenzOptions } from "./client.js";
 
 export {
   LenzAPIError,
+  LenzAbortError,
   LenzApiVersionError,
   LenzAuthError,
   LenzConnectionError,
@@ -122,6 +123,7 @@ export type {
   CitecheckStatus,
   CitecheckSummary,
   GetReviewOptions,
+  GetStatusOptions,
   ReviewAndWaitOptions,
   ReviewAssessment,
   ReviewAssessmentCounts,
@@ -206,6 +208,8 @@ export type {
   VerifyBatchItem,
   VerifyInput,
   WaitOptions,
+  RequestOptions,
+  VerifyAndWaitOptions,
 } from "./types.js";
 
 // VERSION is generated at build time from package.json#version by

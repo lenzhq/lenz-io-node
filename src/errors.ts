@@ -436,6 +436,43 @@ export class LenzApiVersionError extends LenzError {
 }
 
 /**
+ * The caller's `signal` fired: the call stopped where it was.
+ *
+ * Not a {@link LenzError}: an abort is the caller's own decision, not an
+ * answer from the API, so code that retries every `LenzError` does not retry
+ * it. Its `name` is `"AbortError"`, so a check of `err.name === "AbortError"`
+ * still matches; `cause` is the signal's `reason` (a `TimeoutError` for
+ * `AbortSignal.timeout(ms)`).
+ *
+ * It carries what the call knew when it stopped: the `idempotencyKey` of a
+ * keyed request (resend with it to get the same answer back), and once the
+ * server had accepted the work, its `taskId` (or a batch's `batchId` and
+ * `taskIds`), `reviewId` or `citecheckId`. Nothing is cancelled on the
+ * server: the work keeps running and is charged if it completes; stop it
+ * with `cancel`, `cancelReview` or `cancelCitecheck` on a client whose signal
+ * has not fired.
+ */
+export class LenzAbortError extends Error {
+  /** The request's `Idempotency-Key`, when the call sent one. */
+  idempotencyKey?: string;
+  /** The verification run the call was waiting on. */
+  taskId?: string;
+  /** Every run a batch accepted, in input order. */
+  taskIds?: string[];
+  /** The batch the call submitted. */
+  batchId?: string;
+  /** The review the call was waiting on. */
+  reviewId?: string;
+  /** The citation check the call was waiting on. */
+  citecheckId?: string;
+
+  constructor(message = "The call was aborted.", options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "AbortError";
+  }
+}
+
+/**
  * `reviewAndWait` reached its deadline before the review finished.
  *
  * The review keeps running server-side: read it later with

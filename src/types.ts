@@ -1185,6 +1185,8 @@ export interface ExtractInput {
    * Per-call HTTP timeout. When omitted, `extract` waits at least 150s rather
    * than the client's default: a long input can take more than 30s to
    * extract.
+   * @deprecated Pass it in the options argument: `extract(input, { timeoutMs })`.
+   * Still honoured; the options argument wins when both are given.
    */
   timeoutMs?: number;
   /**
@@ -1251,6 +1253,8 @@ export interface AssessInput {
    * than the client's default: the server finds the claims and runs a
    * 3-model panel inside one request (typically ~15s; a long text can take
    * up to 90s).
+   * @deprecated Pass it in the options argument: `assess(input, { timeoutMs })`.
+   * Still honoured; the options argument wins when both are given.
    */
   timeoutMs?: number;
 }
@@ -1356,16 +1360,80 @@ export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
   onProgress?: OnProgress;
 }
 
+/**
+ * Per-call request options, taken by every method (in its options argument,
+ * or merged into the options object it already takes).
+ *
+ * Precedence, per field: the call's value, then a value the input still
+ * carries (`timeoutMs` on `extract` / `assess`, deprecated), then the
+ * `withOptions` copy's, then the client's, then the defaults. Headers merge;
+ * the others replace.
+ */
+export interface RequestOptions {
+  /**
+   * Stops the call: every request it makes, every retry sleep and every
+   * poll. The call then throws `LenzAbortError`. Nothing is cancelled on the
+   * server. `AbortSignal.timeout(ms)` bounds a whole call, retries included.
+   */
+  signal?: AbortSignal;
+  /**
+   * The timeout of ONE HTTP attempt, in ms (a finite number above 0): a
+   * retried request gets it again for each attempt. On `extract` / `assess`
+   * it replaces the 150 s / 100 s floor, even below it. On the waits
+   * (`wait`, `*AndWait`) `timeoutMs` stays the wait's whole budget; set the
+   * attempt timeout of their requests with `withOptions({ timeoutMs })`.
+   */
+  timeoutMs?: number;
+  /** How many times a failed request is retried (a whole number, 0 or more). */
+  maxRetries?: number;
+  /**
+   * Extra request headers. Merged without regard to case over the
+   * `withOptions` copy's; `null` removes one the copy set, `undefined` is
+   * ignored. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+   * `Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host`
+   * and `Transfer-Encoding` are refused.
+   */
+  headers?: Record<string, string | null | undefined>;
+}
+
+/** The options of `getStatus`: the request options, plus the waits' deadline. */
+export interface GetStatusOptions extends RequestOptions {
+  /**
+   * Absolute `Date.now()` bound for the call: each attempt's timeout is cut
+   * to what is left, and a retry that would pass it is not taken. Set by the
+   * waits, which poll through `getStatus`.
+   */
+  deadlineAt?: number;
+}
+
 /** Options for `wait()`, `verifyAndWait()` and `verifyBatchAndWait()`. */
 export interface WaitOptions {
   /**
    * Deadline before raising `LenzTimeoutError` (a batch marks its unfinished
    * items `timeout` instead). Default 300s. `verifyAndWait` and
    * `verifyBatchAndWait` start it after the submit. `0` or less polls once.
+   * The wait's whole budget, not one request's timeout (see
+   * {@link RequestOptions.timeoutMs}).
    */
   timeoutMs?: number;
   /** See {@link OnProgress}. Fires per still-running item per poll. */
   onProgress?: OnProgress;
+  /** See {@link RequestOptions.signal}: stops the submit, every poll and every sleep. */
+  signal?: AbortSignal;
+  /** See {@link RequestOptions.headers}: sent on every request of the call. */
+  headers?: Record<string, string | null | undefined>;
+}
+
+/**
+ * Options for `verifyAndWait()` and `verifyBatchAndWait()`: the wait options,
+ * plus the submit's retries.
+ */
+export interface VerifyAndWaitOptions extends WaitOptions {
+  /**
+   * Retries of the submit (a whole number, 0 or more). The polls keep the
+   * client's.
+   */
+  maxRetries?: number;
 }
 
 // ── Review (`POST /review`, `GET /reviews/{review_id}`) ──
@@ -2194,6 +2262,12 @@ export interface CitecheckAndWaitOptions {
   timeoutMs?: number;
   /** Called with the check on every poll whose body changed. A throw inside it is swallowed. */
   onUpdate?: (check: Citecheck) => void;
+  /** See {@link RequestOptions.signal}: stops the submit, every poll and every sleep. */
+  signal?: AbortSignal;
+  /** See {@link RequestOptions.headers}: sent on every request of the call. */
+  headers?: Record<string, string | null | undefined>;
+  /** Retries of the submit (a whole number, 0 or more). Each poll is one attempt. */
+  maxRetries?: number;
 }
 
 export interface ReviewAndWaitOptions {
@@ -2204,4 +2278,10 @@ export interface ReviewAndWaitOptions {
    * it is swallowed and never breaks the wait.
    */
   onUpdate?: (review: ReviewFull) => void;
+  /** See {@link RequestOptions.signal}: stops the submit, every poll and every sleep. */
+  signal?: AbortSignal;
+  /** See {@link RequestOptions.headers}: sent on every request of the call. */
+  headers?: Record<string, string | null | undefined>;
+  /** Retries of the submit (a whole number, 0 or more). Each poll is one attempt. */
+  maxRetries?: number;
 }
