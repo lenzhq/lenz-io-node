@@ -114,13 +114,17 @@ Intentional behaviour changes; apart from these and "Breaking", nothing that
 worked on 2.21 behaves differently:
 
 - **Per-request timeouts and retry counts are checked before any request.**
-  A `timeoutMs` must be a finite number of ms above 0 and a `maxRetries` a
-  whole number, 0 or more, wherever they are given: `new Lenz()`, the
-  deprecated `timeoutMs` inside an `extract` / `assess` input, and the new
-  request options and `withOptions`. Any other value (0, a negative number,
-  `NaN`, `Infinity`, a fraction of a retry) throws an `Error`; none of them
-  worked before. A wait's budget is not affected: `timeoutMs` of 0 or less on
-  a wait still polls once.
+  A `timeoutMs` must be a number of ms above 0 and at most 2,147,483,647 (the
+  longest a timer can hold), and a `maxRetries` a whole number, 0 or more,
+  wherever they are given: `new Lenz()`, the deprecated `timeoutMs` inside an
+  `extract` / `assess` input, and the new request options and `withOptions`.
+  Any other value throws an `Error`. Before, a timeout of 0 or less, `NaN`,
+  `Infinity` or above that limit ended every attempt at once; a negative or
+  `NaN` retry count sent no request; a fractional one was rounded down,
+  `Infinity` retried without end, and a numeric string was taken as its number.
+  `null` (or `undefined`) on the constructor or an input still means "not
+  given", as before. A wait's budget is not affected: `timeoutMs` of 0 or less
+  on a wait still polls once.
 - **`reviewAndWait` and `citecheckAndWait` start their `timeoutMs` after the
   submit**, as `verifyAndWait`, `verifyBatchAndWait` and the Python SDK's
   review and citation-check waits do. The submit is no longer cut at the
@@ -206,11 +210,16 @@ options)`, `usage(options)`, …), or merged into the options object a method
   100 s floor that still applies to an inherited timeout. On the waits
   `timeoutMs` stays the wait's budget, `signal` and `headers` reach the submit
   and every poll, and `maxRetries` is the submit's (`wait` takes none).
-  `headers` merge without regard to case; `null` removes one a copy set; the
-  headers the client sets itself (`X-Lenz-API-Version`, `Idempotency-Key`,
-  `Authorization`, `Content-Type`, `Content-Length`, `Host`,
-  `Transfer-Encoding`) are refused. A call made without options sends exactly
-  what it sent before. New types: `RequestOptions`, `GetStatusOptions`
+  `headers` merge without regard to case (a name set again keeps its place);
+  `null` removes one a copy set; a `User-Agent` or `Accept` replaces the
+  client's; the headers the client sets itself (`X-Lenz-API-Version`,
+  `Idempotency-Key`, `Authorization`, `Content-Type`, `Content-Length`, `Host`,
+  `Transfer-Encoding`) are refused, and so are a name that is not a valid token
+  and a value with a line break, a NUL, a character above U+00FF, or a leading
+  or trailing space or tab, before any request. A call reads its options once,
+  when it is made (every page of a `listAll` and every poll of a wait use that
+  copy). `wait` takes no `maxRetries` and throws when given one. A call made
+  without options sends exactly what it sent before. New types: `RequestOptions`, `GetStatusOptions`
   (`getStatus`'s options, with the waits' `deadlineAt`), `VerifyAndWaitOptions`
   (`verifyAndWait` / `verifyBatchAndWait`); `WaitOptions`,
   `ReviewAndWaitOptions` and `CitecheckAndWaitOptions` gain `signal` and

@@ -1148,22 +1148,22 @@ await client.verify({ claim }, { signal, headers: { "X-Trace-Id": traceId } });
 await client.getReview(reviewId, { view: "issues", signal });
 ```
 
-| Option       | What it does                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `signal`     | Stops the call: every request, retry sleep and poll it makes. Throws `LenzAbortError` (see [Aborting a call](#aborting-a-call)). |
-| `timeoutMs`  | The timeout of one HTTP attempt, in ms; each retry gets it again.                                                                |
-| `maxRetries` | How many times a failed request is retried.                                                                                      |
-| `headers`    | Extra request headers. `null` removes one a `withOptions` copy set; `undefined` is ignored.                                      |
+| Option       | What it does                                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `signal`     | Stops the call: every request, retry sleep and poll it makes. Throws `LenzAbortError` (see [Aborting a call](#aborting-a-call)).                   |
+| `timeoutMs`  | The timeout of one HTTP attempt, in ms; each retry gets it again.                                                                                  |
+| `maxRetries` | How many times a failed request is retried.                                                                                                        |
+| `headers`    | Extra request headers. A `User-Agent` or `Accept` here replaces the client's. `null` removes one a `withOptions` copy set; `undefined` is ignored. |
 
 What the options bound, per method:
 
-| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                  | `maxRetries`                                                     |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                   | each request's retries                                           |
-| `extract`, `assess`                                                                                                                                                              | each attempt; used as given, even below the 150 s / 100 s these wait at least when the timeout is inherited  | each request's retries                                           |
-| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left | the submit's; `wait` takes none, and the polls keep the client's |
-| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                 | each page request's retries                                      |
-| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                             | every call made through the copy                                 |
+| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                  | `maxRetries`                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                   | each request's retries                                                                                                                          |
+| `extract`, `assess`                                                                                                                                                              | each attempt; used as given, even below the 150 s / 100 s these wait at least when the timeout is inherited  | each request's retries                                                                                                                          |
+| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
+| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                 | each page request's retries                                                                                                                     |
+| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                             | every call made through the copy                                                                                                                |
 
 For one call, the call's value wins, then the deprecated `timeoutMs` inside an
 `extract` / `assess` input, then a `withOptions` copy's, then the client's.
@@ -1172,8 +1172,10 @@ replace. A per-call `timeoutMs` below the `extract` / `assess` floor can end a
 call the server is still running; a retry with the same idempotency key then
 replays it rather than running it twice. Invalid values (a `timeoutMs` that is
 not a finite number above 0, a `maxRetries` that is not a whole number from 0,
-a header value that is not a string or `null`) throw an `Error` before any
-request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+a timeout above 2,147,483,647 ms (the longest a timer can hold), a header name
+that is not a valid token, a header value that is not a string or `null`, or
+one with a line break, a NUL, a character above U+00FF, or a leading or
+trailing space or tab) throw an `Error` before any request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
 `Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host` and
 `Transfer-Encoding` cannot be set as options.
 
@@ -1181,7 +1183,11 @@ request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
 to every call made through it. The copy is cheap: it shares the `fetch`, key,
 base URL and logger, keeps your subclass and any method you replaced, and
 leaves the original untouched. A copy's `timeoutMs` is also the attempt timeout
-of its waits' polls.
+of its waits' polls. A copy of a copy starts from the first copy's options: its
+headers merge over them, its signal is added to the first copy's, and its
+`timeoutMs` / `maxRetries` replace them. A call reads its options once, when it
+is made: changing the objects you passed afterwards changes nothing, for every
+page of a `listAll` and every poll of a wait too.
 
 ```ts
 const quick = client.withOptions({ timeoutMs: 10_000, maxRetries: 1 });
