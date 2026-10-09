@@ -475,12 +475,17 @@ describe("reviewAndWait()", () => {
     expect(calls).toHaveLength(2); // the POST, then exactly one GET
   });
 
-  it("the submit's retry ladder stops at the deadline", async () => {
-    // An untyped 503 stating 3 s against a 500 ms budget: the submit gives
-    // up at once rather than sleeping past the deadline and retrying.
+  // D7 (3.0): the budget starts after the submit, as every other wait's
+  // does, so it no longer bounds the submit (re-baselined from "the submit's
+  // retry ladder stops at the deadline" and "a hung submit is aborted at the
+  // deadline, not at the client timeout").
+  it("the submit's retry ladder is not cut by the wait's budget", async () => {
+    // An untyped 503 stating 3 s against a 500 ms budget: the submit sleeps
+    // the 3 s and retries; the budget starts once the review is accepted.
     const { fetch, calls } = makeFetch([
       { status: 503, body: { detail: "down" }, headers: { "Retry-After": "3" } },
       { status: 202, body: ACCEPTED },
+      { body: COMPLETED },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     let settled: unknown = "pending";
@@ -488,26 +493,28 @@ describe("reviewAndWait()", () => {
       (r) => (settled = r),
       (e: unknown) => (settled = e),
     );
-    await vi.advanceTimersByTimeAsync(600);
-    expect(settled).toBeInstanceOf(LenzAPIError);
-    expect(calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect((settled as ReviewFull).status).toBe("completed");
+    expect(calls).toHaveLength(3);
     await pending;
   });
 
-  it("a hung submit is aborted at the deadline, not at the client timeout", async () => {
+  it("a hung submit is aborted at the client timeout, not at the wait's budget", async () => {
     const hanging = vi.fn(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((_res, rej) => {
           init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
         }),
     ) as unknown as typeof fetch;
-    const client = new Lenz({ apiKey: "lenz_t", fetch: hanging });
+    const client = new Lenz({ apiKey: "lenz_t", fetch: hanging, maxRetries: 0 });
     let settled: unknown = "pending";
     const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 10_000 }).then(
       (r) => (settled = r),
       (e: unknown) => (settled = e),
     );
     await vi.advanceTimersByTimeAsync(10_001);
+    expect(settled).toBe("pending");
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(settled).toBeInstanceOf(LenzAPIError);
     expect(hanging).toHaveBeenCalledTimes(1);
     await pending;

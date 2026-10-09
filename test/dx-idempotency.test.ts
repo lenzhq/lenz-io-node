@@ -127,17 +127,30 @@ describe("S1: an in-flight 409 is retried with the same key and body", () => {
     expect(err.statusCode).toBe(409);
   });
 
-  it("the call's deadline bounds it (reviewAndWait's submit)", async () => {
+  // D7 (3.0): reviewAndWait's budget starts after the submit, so it no
+  // longer cuts the submit's 409 retry (re-baselined from "the call's
+  // deadline bounds it").
+  it("reviewAndWait's submit is not cut by the wait's budget", async () => {
     const { fetch, calls } = makeFetch([
       { ...CONFLICT, headers: { "Retry-After": "30" } },
       { status: 202, body: { review_id: "r1", status: "queued" } },
+      {
+        body: {
+          review_id: "r1",
+          status: "completed",
+          issues: [],
+          failures: [],
+          claims: [],
+          poll_after_seconds: null,
+        },
+      },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const err = (await withFakeTimers(60_000, () =>
+    const out = (await withFakeTimers(60_000, () =>
       client.reviewAndWait({ text: "x" }, { timeoutMs: 10_000 }),
-    )) as LenzError;
-    expect(calls).toHaveLength(1);
-    expect(err.statusCode).toBe(409);
+    )) as { status: string };
+    expect(calls).toHaveLength(3);
+    expect(out.status).toBe("completed");
   });
 
   it("a call that sent no key is not retried on a 409", async () => {

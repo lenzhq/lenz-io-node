@@ -2258,7 +2258,11 @@ export interface Citecheck {
 }
 
 export interface CitecheckAndWaitOptions {
-  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  /**
+   * Deadline for the wait, started after the submit (since 3.0; before, it
+   * included the submit). Default 600,000 ms (10 min). `0` or less reads the
+   * check once.
+   */
   timeoutMs?: number;
   /** Called with the check on every poll whose body changed. A throw inside it is swallowed. */
   onUpdate?: (check: Citecheck) => void;
@@ -2271,7 +2275,11 @@ export interface CitecheckAndWaitOptions {
 }
 
 export interface ReviewAndWaitOptions {
-  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  /**
+   * Deadline for the wait, started after the submit (since 3.0; before, it
+   * included the submit). Default 600,000 ms (10 min). `0` or less reads the
+   * review once.
+   */
   timeoutMs?: number;
   /**
    * Called with the review on every poll whose body changed. A throw inside

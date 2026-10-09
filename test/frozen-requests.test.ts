@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Lenz,
+  CitecheckTimeoutError,
   LenzAPIError,
   LenzApiVersionError,
   LenzConnectionError,
@@ -872,7 +873,12 @@ describe("frozen: retry and sleep traces", () => {
 
 // ── the review / citation-check wait clock ───────────────────────────────
 
-describe("frozen: the review and citecheck wait clock", () => {
+// Re-baselined for D7 (3.0): reviewAndWait and citecheckAndWait start their
+// budget after the submit, as every other wait does. The submit makes its
+// attempts with the client's timeout and retries; `timeoutMs <= 0` submits
+// normally, then reads once. Before, the budget bounded the submit (its
+// attempt was cut at the budget, 0 ms for a budget of 0).
+describe("frozen: the review and citecheck wait clock (D7: started after the submit)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -887,23 +893,23 @@ describe("frozen: the review and citecheck wait clock", () => {
       (c: Lenz, o: { timeoutMs: number }) => c.citecheckAndWait({ text: "a" }, o),
     ],
   ] as const) {
-    it(`${name}: the submit's attempt is cut at the wait's budget`, async () => {
+    it(`${name}: the submit's attempt keeps the client's timeout, not the wait's budget`, async () => {
       const { fetch, aborts, sent } = recorder([], { hang: true });
       const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
       const pending = settle(run(client, { timeoutMs: 10_000 }));
       await vi.advanceTimersByTimeAsync(100_000);
       expect(await pending).toBeInstanceOf(LenzRequestTimeoutError);
-      expect(aborts).toEqual([10_000]);
+      expect(aborts).toEqual([30_000]);
       expect(sent).toHaveLength(1);
     });
 
-    it(`${name}: with timeoutMs 0 the submit gets a 0 ms timer`, async () => {
+    it(`${name}: with timeoutMs 0 the submit is made normally`, async () => {
       const { fetch, aborts } = recorder([], { hang: true });
       const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
       const pending = settle(run(client, { timeoutMs: 0 }));
       await vi.advanceTimersByTimeAsync(100_000);
       expect(await pending).toBeInstanceOf(LenzRequestTimeoutError);
-      expect(aborts).toEqual([0]);
+      expect(aborts).toEqual([30_000]);
     });
   }
 
@@ -917,5 +923,48 @@ describe("frozen: the review and citecheck wait clock", () => {
     await vi.advanceTimersByTimeAsync(100_000);
     expect(await pending).toMatchObject({ status: "completed" });
     expect(sent).toHaveLength(2);
+  });
+
+  it("reviewAndWait with timeoutMs 0 reads a running review once, then times out", async () => {
+    const { fetch, sent } = recorder([
+      { status: 202, body: REVIEW_ACCEPTED },
+      { body: REVIEW_VERIFYING },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const pending = settle(client.reviewAndWait({ text: "a" }, { timeoutMs: 0 }));
+    await vi.advanceTimersByTimeAsync(100_000);
+    const err = await pending;
+    expect(err).toBeInstanceOf(ReviewTimeoutError);
+    expect((err as ReviewTimeoutError).partial?.status).toBe("verifying");
+    expect(sent).toHaveLength(2);
+  });
+
+  it("citecheckAndWait with timeoutMs 0 reads a running check once, then times out", async () => {
+    const { fetch, sent } = recorder([
+      { status: 202, body: CITECHECK_ACCEPTED },
+      { body: { ...CITECHECK_COMPLETED, status: "checking" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const pending = settle(client.citecheckAndWait({ text: "a" }, { timeoutMs: 0 }));
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(await pending).toBeInstanceOf(CitecheckTimeoutError);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("the budget starts once the submit is accepted", async () => {
+    // A submit retried for 3 s against a 4 s budget: the polls still get the
+    // whole 4 s after it (first poll at 3 s, then the 4 s left, then the timeout).
+    const { fetch, sent } = recorder(
+      [
+        { status: 503, headers: { "Retry-After": "3" } },
+        { status: 202, body: REVIEW_ACCEPTED },
+      ],
+      { body: { ...REVIEW_VERIFYING, poll_after_seconds: 5 } },
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const pending = settle(client.reviewAndWait({ text: "a" }, { timeoutMs: 4_000 }));
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(await pending).toBeInstanceOf(ReviewTimeoutError);
+    expect(sent.map((s) => s.at)).toEqual([0, 3_000, 3_000]);
   });
 });

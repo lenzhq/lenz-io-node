@@ -1958,8 +1958,10 @@ export class Lenz {
    * calls `onUpdate` on every poll whose body changed. Throws
    * {@link CitecheckFailedError} when the check ends `failed` or `cancelled` and
    * {@link CitecheckTimeoutError} (carrying the last body seen) at the
-   * deadline, which bounds the submit and every poll. The submit makes the
-   * retries of `opts.maxRetries` (else the client's).
+   * deadline, which bounds every poll. The deadline starts after the submit
+   * (since 3.0), which makes its attempts with the client's timeout and the
+   * retries of `opts.maxRetries` (else the client's); `timeoutMs` of 0 or
+   * less reads the check once.
    */
   async citecheckAndWait(
     input: CitecheckInput,
@@ -1968,14 +1970,11 @@ export class Lenz {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const body = citecheckBody(input);
     const call = resolveCall(this, opts, "citecheckAndWait()", "submitWait");
-    const deadline = Date.now() + timeoutMs;
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
-      const started = await this._submitCitecheck(body, idempotencyKey, {
-        ...transportOf(call),
-        deadlineAt: deadline,
-      });
+      const started = await this._submitCitecheck(body, idempotencyKey, transportOf(call));
       const citecheckId = acceptedId("citecheck_id", started.citecheck_id);
+      const deadline = Date.now() + timeoutMs;
       return withAbortContext({ citecheckId }, () =>
         this._waitCitecheck(citecheckId, deadline, timeoutMs, opts, call),
       );
@@ -2053,25 +2052,23 @@ export class Lenz {
    * {@link ReviewFailedError} when the review ends `failed` or `cancelled` and
    * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
    * a transient poll error is retried on the next poll, after the wait the
-   * server stated when it stated one (at most 60 s). The deadline bounds the
-   * submit and every poll; when the submit used it up, one poll still runs so
-   * the timeout can carry `partial`, and a terminal review it reads is
-   * returned or thrown as usual. The submit makes the retries of
-   * `opts.maxRetries` (else the client's).
+   * server stated when it stated one (at most 60 s). The deadline starts
+   * after the submit (since 3.0; before, it bounded the submit too), and
+   * bounds every poll; the submit makes its attempts with the client's
+   * timeout and the retries of `opts.maxRetries` (else the client's). The
+   * first poll always runs, so a `timeoutMs` of 0 or less reads the review
+   * once, and a terminal review it reads is returned or thrown as usual.
    */
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const call = resolveCall(this, opts, "reviewAndWait()", "submitWait");
-    const deadline = Date.now() + timeoutMs;
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
-      // The submit is bounded by the same deadline: its attempts are cut to
-      // what is left and a retry that would pass it is not taken.
-      const started = await this._submitReview(input, idempotencyKey, {
-        ...transportOf(call),
-        deadlineAt: deadline,
-      });
+      const started = await this._submitReview(input, idempotencyKey, transportOf(call));
       const reviewId = acceptedId("review_id", started.review_id);
+      // The wait's clock starts once the review is accepted, as every other
+      // wait's does.
+      const deadline = Date.now() + timeoutMs;
       return withAbortContext({ reviewId }, () =>
         this._waitJob<ReviewFull>({
           deadline,

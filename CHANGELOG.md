@@ -113,6 +113,13 @@ must handle). Some upgrades need a change first: see "Migrating".
 Intentional behaviour changes; apart from these and "Breaking", nothing that
 worked on 2.21 behaves differently:
 
+- **`reviewAndWait` and `citecheckAndWait` start their `timeoutMs` after the
+  submit**, as `verifyAndWait`, `verifyBatchAndWait` and the Python SDK's
+  review and citation-check waits do. The submit is no longer cut at the
+  wait's budget: it makes its attempts with the client's `timeoutMs` and its
+  retries, and the budget covers the polls from the moment the job is
+  accepted. A `timeoutMs` of 0 or less now submits normally and reads the job
+  once (it used to give the submit a 0 ms timer).
 - **Every id in a request path is sent as one encoded path segment**, and an
   empty id, `.` or `..` is refused locally with a plain `Error` before any
   request (`getStatus`, `select`, `verifications.*` and `ask.*` used to send an
