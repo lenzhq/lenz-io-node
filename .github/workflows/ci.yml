@@ -55,6 +55,44 @@ jobs:
       # anything locally.
       - run: npm run test:coverage
 
+  edge:
+    # The package on the runtimes that have no Node built-ins. `npm pack`s the
+    # build, installs the tarball into a scratch project and runs a signed
+    # webhook through `unwrap` in workerd (Miniflare, Node compatibility off),
+    # then in Bun and Node. One cell: the result does not vary by OS.
+    name: edge (workerd, bun, node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+      - run: npm ci
+      - run: npm run build
+      - run: EDGE_REQUIRE=workerd,node,bun node scripts/edge-check.mjs
+
+  edge-deno:
+    # Deno resolves the package through the `deno` export condition. Same check,
+    # run by a pinned Deno against the packed tarball.
+    name: edge (deno)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.6"
+      - run: npm ci
+      - run: npm run build
+      - run: EDGE_REQUIRE=deno node scripts/edge-check.mjs --only deno
+
   ci-ok:
     # Aggregate gate. Branch protection requires THIS check and nothing else, so
     # the matrix above can gain or drop a cell without anyone touching the
@@ -68,11 +106,13 @@ jobs:
     # present as a stuck PR rather than a red gate.
     name: ci-ok
     if: always()
-    needs: [test, coverage]
+    needs: [test, coverage, edge, edge-deno]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to have succeeded
         run: |
-          echo "test=${{ needs.test.result }} coverage=${{ needs.coverage.result }}"
+          echo "test=${{ needs.test.result }} coverage=${{ needs.coverage.result }} edge=${{ needs.edge.result }} edge-deno=${{ needs.edge-deno.result }}"
           [ "${{ needs.test.result }}" = "success" ] || exit 1
           [ "${{ needs.coverage.result }}" = "success" ] || exit 1
+          [ "${{ needs.edge.result }}" = "success" ] || exit 1
+          [ "${{ needs.edge-deno.result }}" = "success" ] || exit 1
