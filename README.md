@@ -408,7 +408,11 @@ the response shape with one name for each field, and reads only that shape
 for its own calls (webhooks of both shapes are still parsed). Responses carry
 the newer names beside the 2.x ones, which keep their 2.x values and are
 deprecated (struck through in editors) but still there, so code written
-against 2.x keeps working unchanged. The raw bodies (`LenzError.body`, a
+against 2.x keeps compiling and reading the same fields, except for the
+differences listed under Breaking in the [changelog](CHANGELOG.md) and the
+steps under its Migrating section (the API must answer `2026-10-11`; code
+that reads raw bodies, and webhook receivers on lenz-io older than 2.21.0,
+need updating first). The raw bodies (`LenzError.body`, a
 webhook event's `raw`) show the response as sent.
 
 | Read this                                          | Instead of (deprecated)                             |
@@ -661,6 +665,14 @@ A read of a verification removed under its account's retention period throws
 `verifyAndWait` stop on it instead of polling to the deadline. See
 [Retention](#retention).
 
+A response that names an API version other than `2026-10-11` in its
+`X-Lenz-API-Version` header (for example `2026-05-13`, as an older stored
+replay of an idempotent call can) is not parsed: the call throws
+`LenzApiVersionError` with `apiVersion` (the version named), `statusCode` and
+`body` (as sent). lenz-io 3.x reads `2026-10-11` only, so use lenz-io 2.x
+against an API that does not serve it. A response with no such header is not
+checked, and neither are webhook events.
+
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
 checking `LenzAuthError` to handle an empty balance, that branch stops firing;
@@ -897,7 +909,7 @@ An OAuth access token for the Lenz API works wherever the API key goes: pass it 
 
 ## Compatibility
 
-- Node 20.19+, 22, 24
+- Node 22.12+ (22, 24)
 - ESM + CJS dual exports
 - TypeScript types included
 - Works in Cloudflare Workers / edge runtimes — pass a `fetch` polyfill if `globalThis.fetch` isn't available

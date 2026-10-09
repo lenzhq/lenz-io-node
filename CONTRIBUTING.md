@@ -70,7 +70,7 @@ clients keep working against the API version they shipped against.
 
 A release that asks for a newer API version keeps every field, type and
 error of the release before it: each old name stays, computed from the newer
-response with its old meaning (`src/compat.ts`). `test/read-both-shapes.test.ts`
+response with its old meaning (`src/compat.ts`). `test/two-x-values.test.ts`
 checks this against what the previous release returned for every recorded
 response (`test/fixtures/shapes/`, refreshed with `scripts/import-shapes.mjs`
 and `test/shapes/make-oracles.test.ts`), and `test/type-compat.test.ts`

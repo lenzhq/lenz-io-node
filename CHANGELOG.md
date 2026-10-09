@@ -10,15 +10,21 @@ Major release (3.0.0). The SDK now speaks the API's `2026-10-11` response
 shape, in which every field, status and error code has one name. Code written
 against 2.x keeps compiling and reading the same fields with the same values
 (they are deprecated, see "Deprecated"), except for the breaking changes
-below.
+below. Some upgrades need a change first: see "Migrating".
 
 ### Breaking
 
 - **3.0 reads only the API's `2026-10-11` response shape for its own calls**
   (lenz.io serves it from 2026-10-11). Every request sends
   `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`, typed `string`); 2.x sent
-  `2026-05-13`. A response in the earlier shape is not supported. Webhooks are the
-  exception: `LenzWebhooks` still parses events of both shapes, because a
+  `2026-05-13`. The header is always this release's: a value a call's own
+  headers carry for it is replaced. A response in the earlier shape is not
+  read: when a response (success or error) names a version other than
+  `2026-10-11` in its `X-Lenz-API-Version` header, the call throws the new
+  `LenzApiVersionError` (extends `LenzError`; `apiVersion` is the version
+  named, `statusCode` the status, `body` the body as sent) instead of
+  parsing it. A response with no such header is not checked, and neither is
+  a webhook. Webhooks are the exception: `LenzWebhooks` still parses events of both shapes, because a
   receiver is sent events for work started by any client on the account,
   including older ones.
 - **Webhooks of calls made with 3.0 arrive in the newer shape.** The API
@@ -30,6 +36,8 @@ below.
   later (which reads both shapes and fills the 2.x names), or read both
   shapes yourself; a receiver on 2.20.0 or older, or one that reads the raw
   JSON, must be updated before its sender moves to 3.0.
+- **Node 20 is no longer supported** (it is end-of-life): `engines.node` is
+  `>=22.12.0`, and CI runs Node 22 and 24.
 - **A webhook event's `raw` is the payload as delivered**, in whichever shape
   the API sent.
 - **What the API now words or sends differently**, which no client can
@@ -43,8 +51,12 @@ below.
   - the 409 `verification_failed` from `verifications.get` carries the run's
     own `hint` (and so `fix`), where 2.x sometimes carried a generic one; a
     failed poll read back from storage can carry a `hint` 2.x left out;
-  - some other hints and 4xx messages are worded anew (a blank input, an
-    unparseable body, a failed review's hint);
+  - some other hints and 4xx messages are worded anew (an unparseable body,
+    a failed review's hint);
+  - `AssessResponse.status` on a list in which every row failed is the
+    value the API sends (the recorded all-failed list says
+    `no_checkable_claim`), not one computed from the rows; read each row's
+    `status` and `failure`;
   - a review row's `hint` is the fixed compound-claim sentence (or `null`),
     not the hint stored with the review;
   - a review row stored without a failure block reads one, where 2.x read
@@ -68,12 +80,17 @@ below.
   `citation_limit_exceeded`, `credits` with `costs`, `failure.code`. See
   "Newer field names" in the README.
 - No exported type was narrowed, removed or made required, and every 2.x
-  field reads the value it had in 2.x, computed from the newer response with
+  field reads the value it had in 2.x (apart from the differences listed
+  under Breaking), computed from the newer response with
   its 2.x meaning: a failed `assess` row still reads `verdict: "Error"` and
   `confidence: "low"`, `extract`'s `status` reads `not_a_claim`, and a
   failure's `failure_reason` / `error_code` say `not_a_claim` (`verify`,
   `extract`) or `no_claim` (`assess`, `review`) where `failure.code` says
   `no_checkable_claim`.
+
+- On a `verification.completed` event, `verification.result` has the same
+  defaults as `result` (a field the payload leaves out reads as `result`
+  reads it); `raw` stays as delivered.
 
 ### Deprecated
 
@@ -90,7 +107,7 @@ replacement).
 |                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
 | `assess` row                                                                       | `verdict: "Error"`, `confidence: "low"` on a failed row            | `status === "failed"`                                                            |
 |                                                                                    | `error_code`                                                       | `failure.code`                                                                   |
-|                                                                                    | `hint`                                                             | `failure.hint`                                                                   |
+|                                                                                    | `hint`                                                             | `failure.hint` on a failed row; `more_claims` on a completed compound row        |
 |                                                                                    | `identified_claims`                                                | `more_claims`                                                                    |
 |                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
 | `assess` body                                                                      | `error`                                                            | `failure.detail`                                                                 |
@@ -128,17 +145,34 @@ and `error_code`.
 
 ### Migrating
 
-Nothing is required. To move off the deprecated names, use the newer ones
-listed under "Newer field names" in the README.
+**Required**
+
+- **The API must answer `2026-10-11`.** 3.0 asks for it and reads only that
+  shape; a response naming another version throws `LenzApiVersionError`.
+  Stay on 2.x against an API that does not serve it yet.
+- **Webhook receivers on lenz-io older than 2.21.0, or that read the raw
+  JSON, upgrade before any sender moves to 3.0.** Calls made with 3.0 are
+  delivered in the newer shape (see Breaking).
+- **Code that reads raw bodies** (`err.body`, or the JSON of a response you
+  fetched yourself) reads the API's own shape: `err.body.detail` is a
+  sentence, not a list, so read the error's own `errors`; `doc_url` is
+  `docs_url`, `reset_in_seconds` and `retry_after_seconds` are
+  `retry_after`, and there is no `error` key (read `code`).
+- **Tests with recorded 2.x response bodies** are re-recorded against the
+  newer shape: a recorded body in the earlier shape is refused
+  (`LenzApiVersionError`) when it carries its version header, and is not
+  guaranteed to read correctly when it does not.
+- Node 22.12 or later.
+
+**Optional**
+
+- Move off the deprecated names, using the newer ones listed under "Newer
+  field names" in the README. They keep working and compiling.
 
 Error classes keep every field they had in 2.x (`code` is `""` where 2.x had
 none, a schema error's message is "Validation failed" and its `errors` the
 field items, `resetInSeconds` reads the daily limit's wait). Their `body` is
-the body as the API sent it, with the API's own `code` on every error and its
-`detail` sentence; code that reads `err.body.detail` as a list,
-`err.body.doc_url`, `err.body.error`, `err.body.reset_in_seconds` or
-`err.body.retry_after_seconds` must read the error's own fields or the newer
-names (`docs_url`, `retry_after`).
+the body as the API sent it.
 
 ## [2.21.0] - 2026-10-09
 

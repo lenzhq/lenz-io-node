@@ -448,9 +448,10 @@ export interface ExtractedClaims {
    * Optional only so a response from an API that predates the field still
    * fits; read it as `out.locations ?? null`.
    *
-   * @deprecated Read `claims[i].positions`. Computed from `claims` when the
-   * server sends only that; it then reads `null`, not `[]`, when every claim
-   * was left out.
+   * @deprecated Read `claims[i].positions`. When the server sends only
+   * `claims`, this is built from them: one entry per claim, in order, if
+   * every claim has `positions`; `[]` if the call set `locate: true` and no
+   * claim came back; otherwise `null`.
    */
   locations?: ClaimLocation[] | null;
 }
@@ -551,8 +552,11 @@ export interface AssessClaim {
    * One sentence on what to send next. Set on every Error row and on a
    * row with non-empty `identified_claims`; `null` on a plain verdict row.
    *
-   * @deprecated Read `failure.hint`. Computed from it when the server sends
-   * only `failure`; a row with a verdict then reads `null`.
+   * @deprecated On a failed row read `failure.hint`; on a completed row that
+   * assessed only the main claim of a compound item, read `more_claims`
+   * (the claims left unassessed). When the server sends neither this field
+   * nor the old one, it is built from those: the failure's hint, a fixed
+   * sentence for a row with `more_claims`, else `null`.
    */
   hint?: string | null;
 }
@@ -689,6 +693,10 @@ export interface TaskStatus {
    * (`not_a_claim` where `failure.code` says `no_checkable_claim`).
    */
   failure_reason?: string;
+  /**
+   * @deprecated Read `failure.detail`. The diagnostic sentence on a `failed`
+   * status.
+   */
   failure_detail?: string;
   /**
    * WHY it failed — closed set (`upstream_unavailable` |
@@ -709,9 +717,11 @@ export interface TaskStatus {
   docs_url?: string;
   /**
    * One sentence on how to resolve the interrupt: what was unclear and that
-   * `select` resolves it. Sent on a `multi_claim` `needs_input`; on a `failed`
-   * status it repeats `failure.hint` (read that one there). Older servers
-   * omit it.
+   * `select` resolves it. This is the field to read on a `multi_claim`
+   * `needs_input`; older servers omit it.
+   *
+   * On a `failed` status the same field repeats `failure.hint`, and in that
+   * role it is deprecated: read `failure.hint` there.
    */
   hint?: string;
 }
