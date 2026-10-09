@@ -638,3 +638,138 @@ describe("copies and listeners", () => {
     expect(sent).toHaveLength(1);
   });
 });
+
+describe("an abort from a callback wins over the wait's own result", () => {
+  const REVIEW_COMPLETED = fixture("review_completed.json");
+  const REVIEW_FAILED = fixture("review_failed_no_claim.json");
+  const CITECHECK_COMPLETED = fixture("citecheck_completed.json");
+
+  for (const [label, body] of [
+    ["completed", REVIEW_COMPLETED],
+    ["failed", REVIEW_FAILED],
+  ] as const) {
+    it(`reviewAndWait: onUpdate aborting on a ${label} review`, async () => {
+      const { fetch } = recorder([
+        { status: 202, body: { ...REVIEW_ACCEPTED, review_id: body["review_id"] } },
+        { body },
+      ]);
+      const c = new Lenz({ apiKey: "lenz_t", fetch });
+      const controller = new AbortController();
+      const err = await settle(
+        c.reviewAndWait(
+          { text: "a", idempotencyKey: "k1" },
+          { signal: controller.signal, onUpdate: () => controller.abort() },
+        ),
+      );
+      expectAbort(err);
+      expect(err.reviewId).toBe(body["review_id"]);
+      expect(err.idempotencyKey).toBe("k1");
+    });
+  }
+
+  it("citecheckAndWait: onUpdate aborting on a completed check", async () => {
+    const { fetch } = recorder([
+      { status: 202, body: CITECHECK_ACCEPTED },
+      { body: CITECHECK_COMPLETED },
+    ]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const controller = new AbortController();
+    const err = await settle(
+      c.citecheckAndWait(
+        { text: "a" },
+        { signal: controller.signal, onUpdate: () => controller.abort() },
+      ),
+    );
+    expectAbort(err);
+    expect(err.citecheckId).toBe(CITECHECK_ID);
+  });
+
+  it("wait: onProgress aborting while the run is still going", async () => {
+    const { fetch } = recorder([{ body: PROCESSING }, { body: COMPLETED }]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const controller = new AbortController();
+    const err = await settle(
+      c.wait("t1", { signal: controller.signal, onProgress: () => controller.abort() }),
+    );
+    expectAbort(err);
+    expect(err.taskId).toBe("t1");
+  });
+
+  it("batch: onProgress aborting in a round where another item finished", async () => {
+    const { fetch } = recorder([
+      { status: 202, body: BATCH },
+      { body: COMPLETED },
+      { body: PROCESSING },
+    ]);
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const controller = new AbortController();
+    const err = await settle(
+      c.verifyBatchAndWait(
+        { claims: [{ claim: "a" }, { claim: "b" }] },
+        { signal: controller.signal, onProgress: () => controller.abort() },
+      ),
+    );
+    expectAbort(err);
+    expect(err.taskIds).toEqual(["t1", "t2"]);
+  });
+});
+
+describe("callbacks are captured when the call is made", () => {
+  for (const name of ["reviewAndWait", "citecheckAndWait"] as const) {
+    it(`${name}: swapping onUpdate on the options object while the submit runs changes nothing`, async () => {
+      const accepted = name === "reviewAndWait" ? REVIEW_ACCEPTED : CITECHECK_ACCEPTED;
+      const done =
+        name === "reviewAndWait"
+          ? fixture("review_completed.json")
+          : fixture("citecheck_completed.json");
+      let release: () => void = () => {};
+      const gate = new Promise<void>((res) => (release = res));
+      const { fetch: inner } = recorder([{ status: 202, body: accepted }, { body: done }]);
+      let n = 0;
+      const fetch = (async (u: string | URL | Request, i?: RequestInit) => {
+        if (n++ === 0) await gate;
+        return inner(u, i);
+      }) as typeof globalThis.fetch;
+      const c = new Lenz({ apiKey: "lenz_t", fetch });
+      const original: string[] = [];
+      const other: string[] = [];
+      const opts: { onUpdate?: (b: { status: string }) => void } = {
+        onUpdate: (b) => original.push(b.status),
+      };
+      const pending =
+        name === "reviewAndWait"
+          ? c.reviewAndWait({ text: "a" }, opts)
+          : c.citecheckAndWait({ text: "a" }, opts);
+      opts.onUpdate = (b) => other.push(b.status);
+      release();
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(original).toEqual(["completed"]);
+      expect(other).toEqual([]);
+    });
+  }
+
+  it("verifyAndWait: swapping onProgress while the submit runs changes nothing", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((res) => (release = res));
+    const { fetch: inner } = recorder([
+      { status: 202, body: TASK },
+      { body: PROCESSING },
+      { body: COMPLETED },
+    ]);
+    let n = 0;
+    const fetch = (async (u: string | URL | Request, i?: RequestInit) => {
+      if (n++ === 0) await gate;
+      return inner(u, i);
+    }) as typeof globalThis.fetch;
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const original: string[] = [];
+    const opts: { onProgress?: (id: string) => void } = { onProgress: (id) => original.push(id) };
+    const pending = c.verifyAndWait({ claim: "a" }, opts);
+    opts.onProgress = () => original.push("other");
+    release();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+    expect(original).toEqual(["t1"]);
+  });
+});

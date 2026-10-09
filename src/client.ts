@@ -2037,7 +2037,9 @@ export class Lenz {
     input: CitecheckInput,
     opts: CitecheckAndWaitOptions = {},
   ): Promise<Citecheck> {
+    // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const onUpdate = opts.onUpdate;
     const body = citecheckBody(input);
     const call = resolveCall(this, opts, "citecheckAndWait()", "submitWait");
     const idempotencyKey = await jobIdempotencyKey(input);
@@ -2046,7 +2048,7 @@ export class Lenz {
       const citecheckId = acceptedId("citecheck_id", started.citecheck_id);
       const deadline = Date.now() + timeoutMs;
       return withAbortContext({ citecheckId }, () =>
-        this._waitCitecheck(citecheckId, deadline, timeoutMs, opts, call),
+        this._waitCitecheck(citecheckId, deadline, timeoutMs, onUpdate, call),
       );
     });
   }
@@ -2055,7 +2057,7 @@ export class Lenz {
     citecheckId: string,
     deadline: number,
     timeoutMs: number,
-    opts: CitecheckAndWaitOptions,
+    onUpdate: CitecheckAndWaitOptions["onUpdate"],
     call: Call,
   ): Promise<Citecheck> {
     return this._waitJob<Citecheck>({
@@ -2072,7 +2074,7 @@ export class Lenz {
       isBody: (body) => isCitecheckBody(body, citecheckId),
       failed: (check) => new CitecheckFailedError(check),
       timedOut: (last) => new CitecheckTimeoutError(citecheckId, last, timeoutMs),
-      onUpdate: opts.onUpdate,
+      onUpdate,
     });
   }
 
@@ -2130,7 +2132,9 @@ export class Lenz {
    * once, and a terminal review it reads is returned or thrown as usual.
    */
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
+    // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const onUpdate = opts.onUpdate;
     const call = resolveCall(this, opts, "reviewAndWait()", "submitWait");
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
@@ -2147,7 +2151,7 @@ export class Lenz {
           isBody: (body) => isReviewBody(body, reviewId),
           failed: (review) => new ReviewFailedError(review),
           timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
-          onUpdate: opts.onUpdate,
+          onUpdate,
         }),
       );
     });
@@ -2229,6 +2233,9 @@ export class Lenz {
             }
           }
         }
+        // The callback may have aborted: the abort wins over the job's own
+        // result, terminal or not.
+        throwIfAborted(signals);
         if (current.status === "completed") return current;
         // `cancelled` (API version 2026-10-11) is the original shape's `failed`
         // with failure class `cancelled`: the same error.
@@ -2299,9 +2306,10 @@ export class Lenz {
     }
     requirePathId("wait", "task_id", taskId);
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
+    const onProgress = opts.onProgress;
     const call = resolveCall(this, opts, "wait()", "wait");
     const { terminal, timedOut, gone, permanent } = await withAbortContext({ taskId }, () =>
-      this._pollToTerminal([taskId], timeoutMs, opts.onProgress, call),
+      this._pollToTerminal([taskId], timeoutMs, onProgress, call),
     );
     const goneErr = gone.get(taskId);
     if (goneErr) throw goneErr;
@@ -2554,9 +2562,10 @@ export class Lenz {
         }
       });
       pending = stillPending;
-      if (pending.length === 0) break;
-      // A callback may have aborted: that is the abort, not the deadline.
+      // A callback may have aborted: that is the abort, whatever this round
+      // read (a finished item, the deadline).
       throwIfAborted(call.signals);
+      if (pending.length === 0) break;
       const left = deadline - Date.now();
       if (left <= 0) {
         pending.forEach((id) => timedOut.add(id));
