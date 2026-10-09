@@ -13,9 +13,13 @@ against 2.x keeps compiling and reading the same fields with the same values
 below (a status union gains `"cancelled"`, which an exhaustive `switch` over it
 must handle). Some upgrades need a change first: see "Migrating".
 
-> **Upgrading from 2.x.** Must: move webhook receivers to lenz-io 2.21.0 or
-> later before any sender moves to 3.0; treat the status `cancelled` as
-> terminal and handle the `*.cancelled` webhook events; update code that reads raw response
+> **Upgrading from 2.x.** Must: run Node 22.12 or later; move webhook
+> receivers to lenz-io 2.21.0 or later before any sender moves to 3.0 (a 2.21
+> receiver parses a `review.cancelled` or `citecheck.cancelled` event without
+> its `review` / `reviewId` or `citecheck` / `citecheckId`: branch on
+> `event.event` for every `*.cancelled` event until the receiver is on 3.0);
+> treat the status `cancelled` as terminal and handle the `*.cancelled` webhook
+> events; update code that reads raw response
 > bodies; re-record recorded 2.x response fixtures; finish an idempotent
 > request first sent with 2.x with 2.x (its replay answers
 > `LenzApiVersionError` in 3.x; never change the key to get past it). May:
@@ -118,13 +122,52 @@ worked on 2.21 behaves differently:
   longest a timer can hold), and a `maxRetries` a whole number, 0 or more,
   wherever they are given: `new Lenz()`, the deprecated `timeoutMs` inside an
   `extract` / `assess` input, and the new request options and `withOptions`.
-  Any other value throws an `Error`. Before, a timeout of 0 or less, `NaN`,
-  `Infinity` or above that limit ended every attempt at once; a negative or
-  `NaN` retry count sent no request; a fractional one was rounded down,
-  `Infinity` retried without end, and a numeric string was taken as its number.
+  Any other value throws an `Error`, including some that worked in 2.21: a
+  numeric string (`timeoutMs: "30000"`, `maxRetries: "3"`, taken as its
+  number) and a fractional retry count (`maxRetries: 1.5`, rounded down).
+  The rest did not work before: a timeout of 0 or less, `NaN`, `Infinity` or
+  above that limit ended every attempt at once; a negative or `NaN` retry
+  count sent no request, and `Infinity` retried without end.
   `null` (or `undefined`) on the constructor or an input still means "not
   given", as before. A wait's budget is not affected: `timeoutMs` of 0 or less
   on a wait still polls once.
+- **A wait ends at once on an error that is neither a Lenz error nor a
+  transport failure** (a body that broke off or did not decode): an
+  override's `TypeError`, say. 2.x waited through it to the deadline and
+  threw a timeout. 5xx, 429 and network failures are polled through as
+  before.
+- **Cancel answers are checked**: `cancel` throws `LenzAPIError` when the
+  answer names another task or carries no `status`; `cancelReview` and
+  `cancelCitecheck` when it is not the job asked for (its id, a status and its
+  three lists).
+- **An empty `idempotencyKey` on `review`, `citecheck`, `reviewAndWait` or
+  `citecheckAndWait` mints a key**, as an omitted one does; 2.x sent an empty
+  `Idempotency-Key`, which left the job unkeyed so a retry could start a
+  second one.
+- **A cancelled task status carries a `failure` block** (`code` and
+  `failure_class` `"cancelled"`, `retryable` `false`, the cancelled docs
+  link), on `getStatus`, a batch item's `status_detail` and a
+  `verification.cancelled` event's `verification`, as 2.21 built it for a run
+  cancelled while it was running (2.21 had none for one read back from
+  storage).
+- **Webhook verification**: `verifySignature` refuses an empty secret, and a
+  signature header that arrives as an array (Node's `req.headers` for a
+  header sent twice) now reads as its first element on `parse` and
+  `parseAsync` alike (2.21 always failed it as a mismatch).
+- **A transport timeout's `fix` text** reads "The request may have reached
+  the server: resend it with the same key …" for a keyed call, else "Retry. If
+  it persists, raise timeoutMs or check the network …", so `String(err)`
+  differs from 2.21's.
+- **Header order**: `X-Lenz-API-Version` is now sent after the method's own
+  headers (set last, over any spelling a call's headers carry); 2.21 sent it
+  second, after `User-Agent`. Values are unchanged.
+- **The browser export condition has its own declarations**
+  (`dist/index.browser.d.ts`), which name only what the browser build
+  exports: code that imports `LenzWebhooks`, `verifySignature` or
+  `verifySignatureAsync` under the `browser` condition now fails to type-check
+  instead of failing in the bundler.
+- **Error class names survive bundling**: `LenzQuotaExceededError`'s `name`
+  was `_LenzQuotaExceededError` in the built package (2.21 too).
 - **`reviewAndWait` and `citecheckAndWait` start their `timeoutMs` after the
   submit**, as `verifyAndWait`, `verifyBatchAndWait` and the Python SDK's
   review and citation-check waits do. The submit is no longer cut at the
@@ -186,8 +229,8 @@ worked on 2.21 behaves differently:
   "Newer field names" in the README.
 - No exported type was narrowed, removed or made required, and every 2.x
   field reads the value it had in 2.x (apart from the differences listed
-  under Breaking), computed from the newer response with
-  its 2.x meaning: a failed `assess` row still reads `verdict: "Error"` and
+  under Breaking and the `failure` values below), computed from the newer
+  response with its 2.x meaning: a failed `assess` row still reads `verdict: "Error"` and
   `confidence: "low"`, `extract`'s `status` reads `not_a_claim`, and a
   failure's `failure_reason` / `error_code` say `not_a_claim` (`verify`,
   `extract`) or `no_claim` (`assess`, `review`) where `failure.code` says
@@ -196,6 +239,16 @@ worked on 2.21 behaves differently:
 - On a `verification.completed` event, `verification.result` has the same
   defaults as `result` (a field the payload leaves out reads as `result`
   reads it); `raw` stays as delivered.
+- **`failure` values on the newer `*.failed` events come from the server.**
+  2.21 built a failed event's `failure` block (and a verification event's
+  `verification.failure`) from the original flat payload, which carries no
+  sentence, docs link or hint, so `failure.detail`, `failure.docs_url` and
+  `failure.hint` read `null`. On an event in the newer shape they are the
+  server's own (`detail` its sentence, `docs_url` the error page, `hint` when it
+  has one), and a run that stopped with no failure code reads `failure.code`
+  `""` (and `failure_reason` `""`) where 2.21 read `null`. A verification
+  event's `verification` also carries the flat fields a `getStatus` read
+  derives from that block (`error`, `docs_url`, `hint`).
 
 ### Added
 
@@ -215,10 +268,11 @@ options)`, `usage(options)`, …), or merged into the options object a method
   client's; the headers the client sets itself (`X-Lenz-API-Version`,
   `Idempotency-Key`, `Authorization`, `Content-Type`, `Content-Length`, `Host`,
   `Transfer-Encoding`) are refused, and so are a name that is not a valid token
-  and a value with a line break, a NUL, a character above U+00FF, or a leading
-  or trailing space or tab, before any request. A call reads its options once,
+  and a value that is not visible ASCII with spaces and tabs only between
+  visible characters, before any request. A call reads its options once,
   when it is made (every page of a `listAll` and every poll of a wait use that
-  copy). `wait` takes no `maxRetries` and throws when given one. A call made
+  copy). `wait` takes no `maxRetries` and throws when given one (TypeScript
+  already refused it). A call made
   without options sends exactly what it sent before. New types: `RequestOptions`, `GetStatusOptions`
   (`getStatus`'s options, with the waits' `deadlineAt`), `VerifyAndWaitOptions`
   (`verifyAndWait` / `verifyBatchAndWait`); `WaitOptions`,
@@ -249,10 +303,8 @@ signature, secret)` is the low-level counterpart of `verifySignature`.
   else in the package uses a Node built-in or `Buffer`. The synchronous
   `parse` and `verifySignature` still work on Node, and throw a clear error
   pointing to `unwrap` on a runtime without Node's `crypto`. Their results are
-  unchanged, with two corrections: a header value that arrives as an array
-  (Node's `req.headers` for a header sent twice) now reads as its first element
-  on `parse` and `parseAsync` alike (it always failed as a mismatch before), and
-  `verifySignature` refuses an empty secret.
+  unchanged, with the two corrections listed under "Changed" (an empty secret,
+  an array signature header).
 - **Export conditions `workerd`, `edge-light` and `deno`**, listed before
   `browser`, resolve to the main build (`dist/index.js`), which exports the
   whole API, webhook receiver included, so these runtimes skip the `browser`
@@ -263,8 +315,8 @@ signature, secret)` is the low-level counterpart of `verifySignature`.
 - `parse` / `parseAsync` copy the body once before verifying, so a caller
   that reuses its buffer cannot change what is parsed after the signature
   checked. A body that is not a string or bytes (an object left by a body
-  parser, `null`, `undefined`) is a `TypeError` that says so, not a signature
-  mismatch.
+  parser, `null`, `undefined`) still throws a `TypeError`, as in 2.21; its
+  message now says what was expected.
 - `unwrap` throws a clear error when the request's body was already read.
 - The generated `Idempotency-Key` falls back to `getRandomValues` where
   `crypto.randomUUID` is missing (insecure browser origins, Hermes).

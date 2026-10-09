@@ -46,7 +46,7 @@ maybe("smoke", () => {
     expect(v.verdict).toBeTruthy();
   }, 160_000);
 
-  // Stopping a run. The same cheap claim at low depth, cancelled at once. If
+  // Stopping a run. A cheap claim at low depth, cancelled at once. If
   // the call cancelled it (`cancelled: true`), cancelling again answers true
   // again and a wait ends on the cancelled status. Otherwise the run had
   // already finished (e.g. an answer the verdict cache served): `completed` or
@@ -54,7 +54,12 @@ maybe("smoke", () => {
   // depend on how fast the run is.
   it("cancel stops a run, or reports the status it had already reached", async () => {
     const client = makeClient();
-    const accepted = await client.verify({ claim: "Sharks don't get cancer", depth: "low" });
+    // A claim no other test checks, so the verdict cache rarely answers it
+    // before the cancel lands.
+    const accepted = await client.verify({
+      claim: "The Great Wall of China is visible from the Moon with the naked eye",
+      depth: "low",
+    });
     const out = await client.cancel(accepted.task_id);
     expect(out.task_id).toBe(accepted.task_id);
     if (out.cancelled) {
@@ -93,7 +98,8 @@ maybe("smoke", () => {
     const controller = new AbortController();
     const err = await client
       .verifyAndWait(
-        { claim: "Sharks don't get cancer", depth: "low" },
+        // Its own claim, for the same reason as the cancel test's.
+        { claim: "Honey found in ancient Egyptian tombs was still edible", depth: "low" },
         { signal: controller.signal, onProgress: () => controller.abort() },
       )
       .catch((e: unknown) => e);

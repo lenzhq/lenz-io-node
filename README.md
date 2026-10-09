@@ -181,7 +181,8 @@ default); the review keeps running, so read it later with
 `{ review_id }`, and `client.getReview(reviewId, { view: "issues" })` returns
 the review without its `claims`.
 
-Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check;
+Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check,
+plus 1 per checked citation;
 `review.credits.charged` says what the review cost. A resend with the same
 `idempotencyKey` within 24 hours returns the same review; a new key is a new
 review.
@@ -397,9 +398,11 @@ for (const r of results) {
 }
 ```
 
-A `failed` item with no `status_detail` is a verification its account's
-retention period has removed (HTTP 410, see [Retention](#retention)); every
-other failure carries a `status_detail`.
+A `failed` item with no `status_detail` is one whose poll answered something
+waiting will not change for that claim: the verification was removed under its
+account's retention period (HTTP 410, see [Retention](#retention)), the task
+was not found (404), or the answer came in another API version. Every other
+failure carries a `status_detail`.
 
 A verify takes ~90 seconds, so show your users where it is. `onProgress` fires
 once per poll while the run is going — it takes the `taskId` as well, because
@@ -1174,8 +1177,8 @@ replays it rather than running it twice. Invalid values (a `timeoutMs` that is
 not a finite number above 0, a `maxRetries` that is not a whole number from 0,
 a timeout above 2,147,483,647 ms (the longest a timer can hold), a header name
 that is not a valid token, a header value that is not a string or `null`, or
-one with a line break, a NUL, a character above U+00FF, or a leading or
-trailing space or tab) throw an `Error` before any request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+one that is not visible ASCII with spaces and tabs only between visible
+characters) throw an `Error` before any request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
 `Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host` and
 `Transfer-Encoding` cannot be set as options.
 
@@ -1188,6 +1191,12 @@ headers merge over them, its signal is added to the first copy's, and its
 `timeoutMs` / `maxRetries` replace them. A call reads its options once, when it
 is made: changing the objects you passed afterwards changes nothing, for every
 page of a `listAll` and every poll of a wait too.
+
+A copy is made without running your constructor, so it cannot carry
+JavaScript `#private` fields: a subclass method that reads one throws a
+`TypeError` on a copy (a wait then ends with that error). A subclass that
+keeps state in `#private` fields should not be copied with `withOptions`;
+pass the options per call instead, or keep that state in ordinary properties.
 
 ```ts
 const quick = client.withOptions({ timeoutMs: 10_000, maxRetries: 1 });
