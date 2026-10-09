@@ -471,15 +471,37 @@ function pathId(id: string): string | null {
   }
 }
 
+/**
+ * The local error of a call given an id that cannot name one thing. A class of
+ * its own so the poll loops can tell it from a failed poll: waiting does not
+ * change it.
+ */
+class InvalidIdError extends Error {}
+
 /** `pathId`, or the local error a call throws instead of sending a request. */
 function requirePathId(method: string, field: string, id: string): string {
   const encoded = pathId(id);
   if (encoded !== null) return encoded;
-  throw new Error(
+  throw new InvalidIdError(
     id
       ? `${method}() was given an invalid ${field}.`
       : `${method}() requires a non-empty ${field}.`,
   );
+}
+
+/**
+ * An id the API handed back in an acceptance body, checked before any poll
+ * uses it. One it cannot be polled by is a bad answer from the server (not a
+ * mistake of the caller's), so a LenzAPIError, raised at once.
+ */
+function acceptedId(field: string, id: unknown): string {
+  if (typeof id === "string" && pathId(id) !== null) return id;
+  throw new LenzAPIError({
+    message: `The API accepted the request with an invalid ${field}.`,
+    cause: `The acceptance body carries no usable ${field}.`,
+    fix: "Retry the request; contact support with the request id if this persists.",
+    docUrl: "https://lenz.io/docs/errors",
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1498,9 +1520,10 @@ export class Lenz {
     const deadline = Date.now() + timeoutMs;
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
-      const { citecheck_id: citecheckId } = await this._submitCitecheck(input, idempotencyKey, {
+      const started = await this._submitCitecheck(input, idempotencyKey, {
         deadlineAt: deadline,
       });
+      const citecheckId = acceptedId("citecheck_id", started.citecheck_id);
       return this._waitCitecheck(citecheckId, deadline, timeoutMs, opts);
     });
   }
@@ -1584,9 +1607,10 @@ export class Lenz {
     return withIdempotencyKey(idempotencyKey, async () => {
       // The submit is bounded by the same deadline: its attempts are cut to
       // what is left and a retry that would pass it is not taken.
-      const { review_id: reviewId } = await this._submitReview(input, idempotencyKey, {
+      const started = await this._submitReview(input, idempotencyKey, {
         deadlineAt: deadline,
       });
+      const reviewId = acceptedId("review_id", started.review_id);
       return this._waitJob<ReviewFull>({
         deadline,
         read: (transport) => this._getReview(reviewId, {}, transport),
@@ -1645,6 +1669,8 @@ export class Lenz {
         if (exc instanceof LenzError && !(exc instanceof LenzAPIError) && !isRateLimit(exc)) {
           throw exc;
         }
+        // The call's own refusal of an id: waiting does not change it.
+        if (exc instanceof InvalidIdError) throw exc;
         // A wait the server stated outranks the poll hint, capped like every
         // other stated wait in this client: a maintenance 503 can state an
         // hour.
@@ -1696,6 +1722,7 @@ export class Lenz {
     const idempotencyKey = await callIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const accepted = await this.submit(input, idempotencyKey);
+      acceptedId("task_id", accepted.task_id);
       this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
       return this.wait(accepted, { timeoutMs, onProgress });
     });
@@ -1781,6 +1808,7 @@ export class Lenz {
     const accepted = await this.verifyBatch(
       idempotencyKey === undefined ? input : { ...input, idempotencyKey },
     );
+    for (const it of accepted.items) acceptedId("task_id", it.task_id);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
     const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       ids,
@@ -1927,6 +1955,9 @@ export class Lenz {
               }
             }
           }
+        } else if (res.reason instanceof InvalidIdError) {
+          // The call's own refusal of an id: waiting does not change it.
+          throw res.reason;
         } else if (res.reason instanceof LenzGoneError) {
           gone.set(id, res.reason);
         } else if (res.reason instanceof LenzAuthError) {

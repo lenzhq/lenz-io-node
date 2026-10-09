@@ -119,7 +119,10 @@ worked on 2.21 behaves differently:
   empty id to the server and get an API error back). Ordinary ids are sent
   exactly as before. `verifications.getCertificate`, `verifications.related`
   and `ask.history` now reject their promise on a bad id instead of throwing
-  synchronously.
+  synchronously. A `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait` or
+  `citecheckAndWait` whose acceptance body carries such an id (empty, `.` or
+  `..`) throws `LenzAPIError` at once, after the submit alone, instead of
+  polling to its deadline.
 - **`verifyBatch` / `verifyBatchAndWait` and `ask.send` send an
   `Idempotency-Key` by default**, like `verify`, `assess`, `extract` and
   `select` already did: a random key per call, reused across that call's own
