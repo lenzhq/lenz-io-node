@@ -1,0 +1,39 @@
+{
+  "value": {
+    "event": "verification.failed",
+    "taskId": "a67b6983ea444c4e0f8462b04a3a1001",
+    "attempt": 1,
+    "deliveredAt": "2026-03-14T09:02:02.000456+00:00",
+    "verificationId": null,
+    "batchId": null,
+    "status": "failed",
+    "error": "cancelled",
+    "failureClass": "cancelled",
+    "retryable": false,
+    "failure": {
+      "code": "cancelled",
+      "detail": null,
+      "hint": null,
+      "failure_class": "cancelled",
+      "retryable": false,
+      "docs_url": null,
+      "failure_reason": "cancelled"
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "a67b6983ea444c4e0f8462b04a3a1001",
+      "failure_reason": "cancelled",
+      "failure_class": "cancelled",
+      "retryable": false,
+      "failure": {
+        "code": "cancelled",
+        "detail": null,
+        "hint": null,
+        "failure_class": "cancelled",
+        "retryable": false,
+        "docs_url": null,
+        "failure_reason": "cancelled"
+      }
+    }
+  }
+}

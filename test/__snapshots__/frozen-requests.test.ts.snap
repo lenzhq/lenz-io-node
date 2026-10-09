@@ -1,0 +1,676 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`frozen: the request of every call form > ask.history 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/ask/v1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > ask.reset 1`] = `
+[
+  [
+    "DELETE https://lenz.io/api/v1/ask/v1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > ask.send 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/ask/v1",
+    "body: {"message":"why?","language":"de"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-q",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > ask.send, random key 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/ask/v1",
+    "body: {"message":"why?"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > assess, list + suggestRewrite + language 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/assess",
+    "body: {"claims":["a","b"],"language":"auto","suggest_rewrite":true}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > assess, single 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/assess",
+    "body: {"text":"a"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-a",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > cancel 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify/t1/cancel",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > cancelCitecheck 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/citechecks/12bbbf65/cancel",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > cancelReview 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/reviews/442b6aa9/cancel",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > citecheck, pairs 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/citecheck",
+    "body: {"pairs":[{"statement":"s","doi":"10.1/x","cited_year":"2020"}],"webhook_url":"https://h.example/w"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > citecheck, text 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/citecheck",
+    "body: {"text":"t","max_citations":4,"language":"fr"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-c",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > citecheckAndWait 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/citecheck",
+    "body: {"text":"t"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+  [
+    "GET https://lenz.io/api/v1/citechecks/12bbbf65",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > extract 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/extract",
+    "body: {"text":"x"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-e",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > extract, focus + locate + language + in-input timeout 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/extract",
+    "body: {"text":"x","language":"es","focus":"f","locate":false}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > getCitecheck 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/citechecks/12bbbf65",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > getReview 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/reviews/442b6aa9",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > getReview full 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/reviews/442b6aa9",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > getReview issues 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/reviews/442b6aa9?view=issues",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > getStatus 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verify/status/t1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > library.list 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/library?page=1&sort=recent",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > library.list, every filter 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/library?page=2&sort=most_true&search=a+b&domain=health&entity=WHO&curated=x%2Cy&verdict=False",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > library.listAll 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/library?page=1&sort=recent&search=s",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+  ],
+  [
+    "GET https://lenz.io/api/v1/library?page=2&sort=recent&search=s",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > raw request with a lowercase accept 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/x?q=v&n=0&b=false",
+    "body: {"a":1}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "accept: text/plain",
+    "X-Custom: 1",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > review, bare 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/review",
+    "body: {"text":"draft","visibility":"private"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > review, every knob 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/review",
+    "body: {"text":"draft","language":"de","webhook_url":"","visibility":"private","escalate":{"verdicts":["False"],"confidence":["low"],"max_assessments":5,"max_verifications":2,"depth":"low","max_citations":3,"suggest_edits":true}}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-r",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > reviewAndWait 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/review",
+    "body: {"text":"draft","visibility":"private"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-rw",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+  [
+    "GET https://lenz.io/api/v1/reviews/442b6aa9",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > select 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify/t0/select",
+    "body: {"texts":["a","b"]}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-s",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > usage 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/me/usage",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.delete 1`] = `
+[
+  [
+    "DELETE https://lenz.io/api/v1/verifications/v1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.delete, already gone 1`] = `
+[
+  [
+    "DELETE https://lenz.io/api/v1/verifications/v1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.get 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications/v1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.get, keyless 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications/v1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.getCertificate 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications/v1/certificate",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.list 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications?page=1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.list page 3 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications?page=3",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.listAll from page 2 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications?page=2",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+  [
+    "GET https://lenz.io/api/v1/verifications?page=3",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.related 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications/v1/related?limit=5",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifications.related limit 3 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verifications/v1/related?limit=3",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verify, every field, random key 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify",
+    "body: {"text":"a","source_url":"https://s.example/p","webhook_url":"https://h.example/w","language":"de","visibility":"unlisted","depth":"low"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verify, idempotency false 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify",
+    "body: {"text":"a","source_url":""}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verify, pinned key 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify",
+    "body: {"text":"a","source_url":""}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-v",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifyAndWait 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify",
+    "body: {"text":"a","source_url":""}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-vw",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+  [
+    "GET https://lenz.io/api/v1/verify/status/t1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifyBatch 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify/batch",
+    "body: {"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b","source_url":""}],"language":"de","depth":"low"}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: frozen-b",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > verifyBatchAndWait 1`] = `
+[
+  [
+    "POST https://lenz.io/api/v1/verify/batch",
+    "body: {"claims":[{"text":"a","source_url":""},{"text":"b","source_url":""}]}",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "Idempotency-Key: <random>",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+    "Content-Type: application/json",
+  ],
+  [
+    "GET https://lenz.io/api/v1/verify/status/t1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+  [
+    "GET https://lenz.io/api/v1/verify/status/t2",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;
+
+exports[`frozen: the request of every call form > wait 1`] = `
+[
+  [
+    "GET https://lenz.io/api/v1/verify/status/t1",
+    "body: <none>",
+    "User-Agent: lenz-io-node/<VERSION>",
+    "Accept: application/json",
+    "X-Lenz-API-Version: 2026-10-11",
+    "Authorization: Bearer lenz_t",
+  ],
+]
+`;

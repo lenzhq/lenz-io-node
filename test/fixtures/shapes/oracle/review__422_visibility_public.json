@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "payload.visibility: Input should be 'private' or 'unlisted'",
+    "cause_": "payload.visibility: Input should be 'private' or 'unlisted'",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "validation_error",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "payload", "visibility"],
+        "msg": "Input should be 'private' or 'unlisted'"
+      }
+    ]
+  }
+}

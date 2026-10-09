@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "text: send the draft, or one public http(s) URL.",
+    "cause_": "text: send the draft, or one public http(s) URL.",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "validation_error",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "text"],
+        "msg": "text: send the draft, or one public http(s) URL."
+      }
+    ]
+  }
+}

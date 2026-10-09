@@ -1,14 +1,39 @@
 {
   "value": {
     "event": "verification.failed",
-    "taskId": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "taskId": "b36cbdb3de32e4a64458e7af9ea8d012",
     "attempt": 1,
-    "deliveredAt": "2026-03-10T12:02:02.002222+00:00",
+    "deliveredAt": "2026-03-14T09:02:02.000456+00:00",
     "verificationId": null,
     "batchId": null,
     "status": "failed",
     "error": "not_a_claim",
     "failureClass": "invalid_input",
-    "retryable": false
+    "retryable": false,
+    "failure": {
+      "code": "no_checkable_claim",
+      "detail": null,
+      "hint": null,
+      "failure_class": "invalid_input",
+      "retryable": false,
+      "docs_url": null,
+      "failure_reason": "not_a_claim"
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "b36cbdb3de32e4a64458e7af9ea8d012",
+      "failure_reason": "not_a_claim",
+      "failure_class": "invalid_input",
+      "retryable": false,
+      "failure": {
+        "code": "no_checkable_claim",
+        "detail": null,
+        "hint": null,
+        "failure_class": "invalid_input",
+        "retryable": false,
+        "docs_url": null,
+        "failure_reason": "not_a_claim"
+      }
+    }
   }
 }

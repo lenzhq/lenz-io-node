@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "claim: Field required",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "text"],
+        "msg": "Field required",
+        "type": "missing"
+      }
+    ]
+  }
+}

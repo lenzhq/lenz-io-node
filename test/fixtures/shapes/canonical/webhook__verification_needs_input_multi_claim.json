@@ -1,12 +1,12 @@
 {
   "payload": {
     "event": "verification.needs_input",
-    "event_id": "evt_fd2254e805fd382669126c88",
-    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "event_id": "evt_468d1682369ad2b6029241d7",
+    "task_id": "3d8de9645a32e86715dc032c6213a69e",
     "status": "needs_input",
     "verification": {
       "status": "needs_input",
-      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "task_id": "3d8de9645a32e86715dc032c6213a69e",
       "reason": "multi_claim",
       "claims": [
         {
@@ -21,6 +21,6 @@
       "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
     },
     "attempt": 1,
-    "delivered_at": "2026-03-10T12:02:02.002222+00:00"
+    "delivered_at": "2026-03-14T09:02:02.000456+00:00"
   }
 }

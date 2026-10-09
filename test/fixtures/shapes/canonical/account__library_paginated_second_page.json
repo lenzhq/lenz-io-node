@@ -1,0 +1,40 @@
+{
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "verification_id": "d3156905",
+        "claim": "Paged claim 020.",
+        "domain": "",
+        "entities": [],
+        "verdict": "True",
+        "confidence": "low",
+        "lenz_score": 10,
+        "key_finding": "The Earth is approximately spherical in shape.",
+        "executive_summary": "The claim is verified.",
+        "suggested_rewrite": null,
+        "created_at": "2026-03-14T09:02:02.000456+00:00",
+        "completed_at": "2026-03-14T09:02:02.000456+00:00",
+        "language": "en"
+      },
+      {
+        "verification_id": "2c4bbe00",
+        "claim": "Paged claim 021.",
+        "domain": "",
+        "entities": [],
+        "verdict": "True",
+        "confidence": "low",
+        "lenz_score": 10,
+        "key_finding": "The Earth is approximately spherical in shape.",
+        "executive_summary": "The claim is verified.",
+        "suggested_rewrite": null,
+        "created_at": "2026-03-14T09:04:04.000456+00:00",
+        "completed_at": "2026-03-14T09:04:04.000456+00:00",
+        "language": "en"
+      }
+    ],
+    "total": 22,
+    "page": 2,
+    "page_size": 20
+  }
+}

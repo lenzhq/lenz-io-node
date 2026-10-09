@@ -55,41 +55,15 @@ function makeFetch(responses: Iterable<MockResponse>) {
 // unit. Reused across usage tests. A free account: 100 credits, no bonus.
 const USAGE_BODY = {
   plan: "free",
-  quota_resets_at: "2026-07-01T00:00:00+00:00",
   credits: {
     total: 100,
     used: 0,
     remaining: 100,
     extra: 0,
-    bonus: 0,
     resets_at: "2026-07-01T00:00:00+00:00",
   },
   costs: { verify: 10, assess: 1, ask: 1, extract: 0 },
   cost_options: { verify: { depth: { standard: 10, low: 5 } } },
-  verify: {
-    quota_used: 0,
-    quota_total: 10,
-    quota_remaining: 10,
-    bonus: 0,
-    credits: 0,
-    remaining: 10,
-  },
-  ask: {
-    quota_used: 0,
-    quota_total: 100,
-    quota_remaining: 100,
-    bonus: 0,
-    credits: 0,
-    remaining: 100,
-  },
-  assess: {
-    quota_used: 0,
-    quota_total: 100,
-    quota_remaining: 100,
-    bonus: 0,
-    credits: 0,
-    remaining: 100,
-  },
   extract: { calls_today: 0, daily_limit: 1000, unlimited: false },
 };
 
@@ -144,6 +118,8 @@ describe("Construction", () => {
     await client.usage();
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("X-Lenz-API-Version")).toBe(API_VERSION);
+    // 3.0 asks for the response shape with one name for each field.
+    expect(API_VERSION).toBe("2026-10-11");
   });
 
   it("LENZ_API_KEY env var picked up", async () => {
@@ -866,11 +842,13 @@ describe("Automatic idempotency keys (extract, select, verify)", () => {
     expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ texts: ["a"] });
   });
 
-  it("ask.send still generates no key", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }]);
+  it("ask.send generates a key too (3.0); idempotency: false sends none", async () => {
+    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }, { body: { reply: "r" } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.ask.send("vid_1", { message: "Why?" });
-    expect(key(calls[0]!)).toBeNull();
+    await client.ask.send("vid_1", { message: "Why?", idempotency: false });
+    expect(key(calls[0]!)).toMatch(/^[0-9a-f]{32}$/);
+    expect(key(calls[1]!)).toBeNull();
   });
 });
 
@@ -1737,12 +1715,11 @@ describe("Resource namespaces", () => {
     expect(reply.created_at).toBe("2026-05-27T12:00:05Z");
   });
 
-  it("ask.send sends the Idempotency-Key it is given, and none when it is not", async () => {
+  it("ask.send sends the Idempotency-Key it is given, and a fresh one per call when it is not", async () => {
     // With a key, a retry of a question that already got a reply replays that
     // reply instead of spending a second credit and appending the question
-    // plus a second answer to the conversation. Never auto-generated: asking
-    // the same question again is a normal thing to do here, and each reply
-    // depends on the history the previous turn wrote.
+    // plus a second answer to the conversation. A generated key is random per
+    // call, so asking the same question again is a new turn.
     const { fetch, calls } = makeFetch([
       { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:05Z" } },
       { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:09Z" } },
@@ -1751,7 +1728,7 @@ describe("Resource namespaces", () => {
     await client.ask.send("vid_1", { message: "Why?", idempotencyKey: "ask-key-1" });
     await client.ask.send("vid_1", { message: "Why?" });
     expect(new Headers(calls[0]!.init.headers).get("Idempotency-Key")).toBe("ask-key-1");
-    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toBeNull();
+    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f]{32}$/);
   });
 
   it("ask.reset hits DELETE /ask/{id}", async () => {
@@ -2114,20 +2091,16 @@ describe("usage", () => {
     // 25 non-expiring credits buys 25 assesses but only 2 verifications.
     const body = {
       ...USAGE_BODY,
-      credits: { total: 125, used: 0, remaining: 125, bonus: 25, resets_at: null },
-      verify: { ...USAGE_BODY.verify, bonus: 2, credits: 2 },
-      assess: { ...USAGE_BODY.assess, bonus: 25, credits: 25 },
+      credits: { total: 125, used: 0, remaining: 125, extra: 25, resets_at: null },
     };
     const { fetch } = makeFetch([{ body }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
-    // This body carries only `bonus`; `usage()` fills `extra` from it.
     expect(u.credits.extra).toBe(25);
     expect(u.credits.resets_at).toBeNull();
     expect(u.verify.bonus).toBe(2);
     expect(u.assess.bonus).toBe(25);
-    // The deprecated per-capability `credits` is an alias of `bonus` until
-    // a server may send only one of the two names.
+    // The deprecated per-capability `credits` is an alias of `bonus`.
     expect(u.verify.credits).toBe(u.verify.bonus);
     expect(u.assess.credits).toBe(u.assess.bonus);
   });
@@ -2139,28 +2112,6 @@ describe("usage", () => {
     const u = await client.usage();
     expect(u.credits.extra).toBe(30);
     expect(u.credits.bonus).toBe(30);
-  });
-
-  it("parses a response that has already dropped the deprecated credits alias", async () => {
-    // A server that sends no per-block `credits`: `bonus` carries on, and
-    // the alias is not invented for a block the server sent.
-    const withoutAlias = (cap: Record<string, unknown>): Record<string, unknown> => {
-      const copy = { ...cap };
-      delete copy["credits"];
-      return copy;
-    };
-    const body = {
-      ...USAGE_BODY,
-      verify: withoutAlias(USAGE_BODY.verify),
-      assess: withoutAlias(USAGE_BODY.assess),
-      ask: withoutAlias(USAGE_BODY.ask),
-    };
-    const { fetch } = makeFetch([{ body }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const u = await client.usage();
-    expect(u.verify.credits).toBeUndefined();
-    expect(u.verify.bonus).toBe(0);
-    expect(u.verify.remaining).toBe(10);
   });
 });
 

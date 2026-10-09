@@ -2,9 +2,9 @@
   "status": 200,
   "body": {
     "status": "completed",
-    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "task_id": "d546a54e28ebeed022aca934135e67d2",
     "result": {
-      "verification_id": "0508bbf8",
+      "verification_id": "33e90bfb",
       "claim": "The Earth is round.",
       "visibility": "private",
       "depth": "standard",
@@ -47,14 +47,14 @@
           {
             "panelist_name": "Reviewer A",
             "focus_area": "Claim Precision & Quantitative Accuracy",
-            "score": 9.0,
+            "score": 9,
             "reasoning": "Precision analysis reasoning.",
             "warnings": []
           },
           {
             "panelist_name": "Reviewer B",
             "focus_area": "Sources",
-            "score": 9.0,
+            "score": 9,
             "reasoning": "Source audit reasoning.",
             "warnings": ["weak source A"]
           }

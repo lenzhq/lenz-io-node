@@ -6,6 +6,527 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+Major release (3.0.0). The SDK now speaks the API's `2026-10-11` response
+shape, in which every field, status and error code has one name. Code written
+against 2.x keeps compiling and reading the same fields with the same values
+(they are deprecated, see "Deprecated"), except for the breaking changes
+below (a status union gains `"cancelled"`, which an exhaustive `switch` over it
+must handle). Some upgrades need a change first: see "Migrating".
+
+> **Upgrading from 2.x.** Must: run Node 22.12 or later; move webhook
+> receivers to lenz-io 2.21.0 or later before any sender moves to 3.0 (a 2.21
+> receiver parses a `review.cancelled` or `citecheck.cancelled` event without
+> its `review` / `reviewId` or `citecheck` / `citecheckId`: branch on
+> `event.event` for every `*.cancelled` event until the receiver is on 3.0);
+> treat the status `cancelled` as terminal and handle the `*.cancelled` webhook
+> events; update code that reads raw response
+> bodies; re-record recorded 2.x response fixtures; finish an idempotent
+> request first sent with 2.x with 2.x (its replay answers
+> `LenzApiVersionError` in 3.x; never change the key to get past it). May:
+> move off the deprecated names, which keep working. Details: "Migrating".
+> The 2.x input forms (wait options inside the `verifyAndWait` /
+> `verifyBatchAndWait` input, snake_case batch-item and citation-pair fields)
+> still work and are deprecated.
+
+### Breaking
+
+- **3.0 reads only the API's `2026-10-11` response shape for its own calls**
+  (lenz.io serves it from 2026-10-11). Every request sends
+  `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`, typed `string`); 2.x sent
+  `2026-05-13`. The header is always this release's: a value a call's own
+  headers carry for it is replaced. A response in the earlier shape is not
+  read: when a response (success or error) names a version other than
+  `2026-10-11` in its `X-Lenz-API-Version` header, the call throws the new
+  `LenzApiVersionError` (extends `LenzError`; `apiVersion` is the version
+  named, `statusCode` the status, `body` the body as sent) instead of
+  parsing it. A response with no such header is not checked, and neither is
+  a webhook. Webhooks are the exception: `LenzWebhooks` still parses events of both shapes, because a
+  receiver is sent events for work started by any client on the account,
+  including older ones.
+- **Webhooks of calls made with 3.0 arrive in the newer shape.** The API
+  sends each webhook in the version of the request that asked for it, so a
+  `verify`, `verifyBatch`, `select`, `review` or `citecheck` made with this
+  release is answered by `verification.*` events with `event_id` and the
+  verification under `verification`, and by `review.*` / `citecheck.*`
+  events without `task_id`. Parse them with `LenzWebhooks` from 2.21.0 or
+  later (which reads both shapes and fills the 2.x names), or read both
+  shapes yourself; a receiver on 2.20.0 or older, or one that reads the raw
+  JSON, must be updated before its sender moves to 3.0.
+- **`cancelled` is a status of its own.** A task stopped elsewhere (the
+  website's Stop button, another process) reads `status: "cancelled"` in
+  `2026-10-11`; the earlier shape said `failed` with failure class
+  `cancelled`. Waits end on it instead of polling to their deadline: `wait`,
+  `verifyAndWait`, `reviewAndWait` and `citecheckAndWait` throw the same
+  error class with the same failure fields as 2.x for the same task
+  (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`:
+  `failureClass` `"cancelled"`, `retryable` `false`; a live verification's
+  message reads "Cancelled." where 2.x said "Pipeline stopped at:
+  cancelled"), and a batch item reads `"failed"`. `getStatus`, `getReview`
+  and `getCitecheck` return the cancelled status without throwing; a
+  cancelled task status carries the deprecated 2.x fields (`error`,
+  `failure_reason`, `failure_class` `"cancelled"`, `retryable` `false`,
+  `docs_url`). `TaskStatus.status`, `ReviewStatus` and `CitecheckStatus` gain
+  `"cancelled"`, so an exhaustive `switch` or a `Record<Status, …>` over them
+  needs the new case. The events `verification.cancelled`, `review.cancelled`
+  and `citecheck.cancelled` are sent only for work submitted under
+  `2026-10-11`; a cancellation of older work keeps arriving as `*.failed`.
+- **Node 20 is no longer supported** (it is end-of-life): `engines.node` is
+  `>=22.12.0`, and CI runs Node 22 and 24.
+- **A webhook event's `raw` is the payload as delivered**, in whichever shape
+  the API sent.
+- **What the API now words or sends differently**, which no client can
+  rebuild:
+  - a failed check's `error` (and the `LenzPipelineError` message built from
+    it) reads "Pipeline stopped at: <code>" or its fixed sentence; a failure
+    read back from storage said "Pipeline stopped: <code>." in 2.x. A
+    `task_error` reads "Pipeline failed." and a `task_stuck` "The task was
+    never completed and has been marked failed.", where 2.x said one of
+    several sentences for each;
+  - the 409 `verification_failed` from `verifications.get` carries the run's
+    own `hint` (and so `fix`), where 2.x sometimes carried a generic one; a
+    failed poll read back from storage can carry a `hint` 2.x left out;
+  - some other hints and 4xx messages are worded anew (an unparseable body,
+    a failed review's hint);
+  - `AssessResponse.status` on a list in which every row failed is the
+    value the API sends (the recorded all-failed list says
+    `no_checkable_claim`), not one computed from the rows; read each row's
+    `status` and `failure`;
+  - a review row's `hint` is the fixed compound-claim sentence (or `null`),
+    not the hint stored with the review;
+  - a review row stored without a failure block reads one, where 2.x read
+    `failure: null`; a review's deep check's `modified_at` is computed from
+    `completed_at` by the 2.x rule instead of read as stored;
+  - an extraction the API first read as not a claim and then found one in
+    says `status: "ready"` (2.x: `"not_a_claim"`);
+  - `verify`'s receipt has no `chain_id`; the `taskId` of a `review.*` /
+    `citecheck.*` webhook event is the review / citation-check id (dedupe on
+    `eventId`); a repeated `verify` answered from the first one is a 202
+    (the SDK returns the same receipt either way).
+- **A subclass of `LenzError` that declares its own `retryable` or
+  `idempotencyKey`** (rare) now overrides a member of `LenzError`: under
+  `noImplicitOverride` it needs the `override` modifier (TS4114), and an
+  `idempotencyKey` declared without an initializer needs `declare` (TS2612).
+  The runtime is unaffected.
+- `webhookUrl` keeps its meaning on every method: on `verify` and
+  `verifyBatch` an unset, empty or blank one is left out of the request (your
+  credential's default URL); on `review` and `citecheck` `""` still means no
+  webhook for this call.
+
+### Changed
+
+Intentional behaviour changes; apart from these and "Breaking", nothing that
+worked on 2.21 behaves differently:
+
+- **Per-request timeouts and retry counts are checked before any request.**
+  A `timeoutMs` must be a number of ms above 0 and at most 2,147,483,647 (the
+  longest a timer can hold), and a `maxRetries` a whole number, 0 or more,
+  wherever they are given: `new Lenz()`, the deprecated `timeoutMs` inside an
+  `extract` / `assess` input, and the new request options and `withOptions`.
+  Any other value throws an `Error`, including some that worked in 2.21: a
+  numeric string (`timeoutMs: "30000"`, `maxRetries: "3"`, taken as its
+  number) and a fractional retry count (`maxRetries: 1.5`, rounded down).
+  The rest did not work before: a timeout of 0 or less, `NaN`, `Infinity` or
+  above that limit ended every attempt at once; a negative or `NaN` retry
+  count sent no request, and `Infinity` retried without end.
+  `null` (or `undefined`) on the constructor or an input still means "not
+  given", as before. A wait's budget is not affected: `timeoutMs` of 0 or less
+  on a wait still polls once.
+- **A wait ends at once on an error that is neither a Lenz error nor a
+  transport failure** (a body that broke off or did not decode): an
+  override's `TypeError`, say. 2.x waited through it to the deadline and
+  threw a timeout. 5xx, 429 and network failures are polled through as
+  before.
+- **`retryAfter` is capped at 2,147,483 seconds** (on `LenzAPIError` and its
+  subclasses, and on `LenzRateLimitError`), the longest wait a timer can hold
+  in ms, so code that sleeps `retryAfter * 1000` cannot overflow `setTimeout`.
+  A huge stated `Retry-After` (say `1e300`) was passed through in 2.21. A
+  value that is not a number still reads `null` (`0` on a 429, as before).
+- **Cancel answers are checked**: `cancel` throws `LenzAPIError` when the
+  answer names another task or carries no `status`; `cancelReview` and
+  `cancelCitecheck` when it is not the job asked for (its id, a status and its
+  three lists).
+- **An empty `idempotencyKey` on `review`, `citecheck`, `reviewAndWait` or
+  `citecheckAndWait` mints a key**, as an omitted one does; 2.x sent an empty
+  `Idempotency-Key`, which left the job unkeyed so a retry could start a
+  second one.
+- **A cancelled task status carries a `failure` block** (`code` and
+  `failure_class` `"cancelled"`, `retryable` `false`, the cancelled docs
+  link), on `getStatus`, a batch item's `status_detail` and a
+  `verification.cancelled` event's `verification`, as 2.21 built it for a run
+  cancelled while it was running (2.21 had none for one read back from
+  storage).
+- **Webhook verification**: `verifySignature` refuses an empty secret, and a
+  signature header that arrives as an array (Node's `req.headers` for a
+  header sent twice) now reads as its first element on `parse` and
+  `parseAsync` alike (2.21 always failed it as a mismatch).
+- **A transport timeout's `fix` text** reads "The request may have reached
+  the server: resend it with the same key …" for a keyed call, else "Retry. If
+  it persists, raise timeoutMs or check the network …", so `String(err)`
+  differs from 2.21's.
+- **Header order**: `X-Lenz-API-Version` is now sent after the method's own
+  headers (set last, over any spelling a call's headers carry); 2.21 sent it
+  second, after `User-Agent`. Values are unchanged.
+- **The browser export condition has its own declarations**
+  (`dist/index.browser.d.ts`), which name only what the browser build
+  exports: code that imports `LenzWebhooks`, `verifySignature` or
+  `verifySignatureAsync` under the `browser` condition now fails to type-check
+  instead of failing in the bundler.
+- **Error class names survive bundling**: `LenzQuotaExceededError`'s `name`
+  was `_LenzQuotaExceededError` in the built package (2.21 too).
+- **`reviewAndWait` and `citecheckAndWait` start their `timeoutMs` after the
+  submit**, as `verifyAndWait`, `verifyBatchAndWait` and the Python SDK's
+  review and citation-check waits do. The submit is no longer cut at the
+  wait's budget: it makes its attempts with the client's `timeoutMs` and its
+  retries, and the budget covers the polls from the moment the job is
+  accepted. A `timeoutMs` of 0 or less now submits normally and reads the job
+  once (it used to give the submit a 0 ms timer).
+- **Every id in a request path is sent as one encoded path segment**, and an
+  empty id, `.` or `..` is refused locally with a plain `Error` before any
+  request (`getStatus`, `select`, `verifications.*` and `ask.*` used to send an
+  empty id to the server and get an API error back). Ordinary ids are sent
+  exactly as before. `verifications.getCertificate`, `verifications.related`
+  and `ask.history` now reject their promise on a bad id instead of throwing
+  synchronously. A `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait` or
+  `citecheckAndWait` whose acceptance body carries such an id (empty, `.` or
+  `..`) throws `LenzAPIError` at once, after the submit alone, instead of
+  polling to its deadline.
+- **`verifyBatch` / `verifyBatchAndWait` and `ask.send` send an
+  `Idempotency-Key` by default**, like `verify`, `assess`, `extract` and
+  `select` already did: a random key per call, reused across that call's own
+  retries, so a retried batch or question is not run (and charged) twice. A
+  key you pass wins; `idempotency: false` sends none. The request body is
+  unchanged.
+- **An in-flight 409 (`idempotency_conflict`) is retried inside the call**:
+  when a call that sent an `Idempotency-Key` (its own or yours) meets the
+  first request with that key still running, the client waits (the stated
+  `Retry-After`, else its usual backoff) and asks again with the same key and
+  body, within `maxRetries` and the call's timeout. 2.x threw the 409 at
+  once. If it still conflicts, the same error is thrown (class, `code` and
+  message as in 2.x), with `retryable: true`. A `review` or `citecheck` 409
+  that names the job is still returned as its receipt at once.
+- **`wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once on an error
+  waiting cannot change** (401, 403, 404, `LenzApiVersionError`): `wait`
+  throws it, where 2.x polled on to a `LenzTimeoutError` at the deadline. In
+  a batch, a 404 or an answer in another API version for one claim makes
+  that claim read `"failed"` (no `status_detail`) and the others keep being
+  polled, while a 401 or 403 (the key's, not the claim's) throws
+  `LenzAuthError` from `verifyBatchAndWait`. A 5xx, a 429 and a network drop
+  are polled through as before.
+- **No poll runs past the wait's deadline**: each poll request is cut to the
+  time the wait has left, and once it is spent the wait stops polling (the
+  claims still running read `"timeout"`, `wait` throws `LenzTimeoutError`).
+  2.x made one more poll after sleeping the remaining time, with the client's
+  full request timeout. A wait given no time at all (`timeoutMs: 0`) still
+  looks once, as in 2.x.
+- **Network failures and transport timeouts throw subclasses of the class
+  they threw in 2.x**: `LenzConnectionError` and, for a timeout,
+  `LenzRequestTimeoutError`, both `LenzAPIError`s. A timeout's message reads
+  `<METHOD> <path> timed out after <n>ms (<k> attempts).` instead of the raw
+  `AbortError: …`; a body that stalls past the timeout keeps its message.
+  **A 404 throws `LenzNotFoundError`** (a `LenzError`, as before) whose `fix`
+  says to check the id rather than to retry; its message is unchanged.
+- **The client no longer prints `[lenz-io] Submitted task: …`** to the
+  console on every `verifyAndWait`. Pass a `logger` to get it (see Added).
+
+- **The newer names are the way to read a response**: `claims`, `status` and
+  `failure`, `claim`, `more_claims`, `completed_at`, `claim_limit_exceeded`,
+  `citation_limit_exceeded`, `credits` with `costs`, `failure.code`. See
+  "Newer field names" in the README.
+- No exported type was narrowed, removed or made required, and every 2.x
+  field reads the value it had in 2.x (apart from the differences listed
+  under Breaking and the `failure` values below), computed from the newer
+  response with its 2.x meaning: a failed `assess` row still reads `verdict: "Error"` and
+  `confidence: "low"`, `extract`'s `status` reads `not_a_claim`, and a
+  failure's `failure_reason` / `error_code` say `not_a_claim` (`verify`,
+  `extract`) or `no_claim` (`assess`, `review`) where `failure.code` says
+  `no_checkable_claim`.
+
+- On a `verification.completed` event, `verification.result` has the same
+  defaults as `result` (a field the payload leaves out reads as `result`
+  reads it); `raw` stays as delivered.
+- **`failure` values on the newer `*.failed` events come from the server.**
+  2.21 built a failed event's `failure` block (and a verification event's
+  `verification.failure`) from the original flat payload, which carries no
+  sentence, docs link or hint, so `failure.detail`, `failure.docs_url` and
+  `failure.hint` read `null`. On an event in the newer shape they are the
+  server's own (`detail` its sentence, `docs_url` the error page, `hint` when it
+  has one), and a run that stopped with no failure code reads `failure.code`
+  `""` (and `failure_reason` `""`) where 2.21 read `null`. A verification
+  event's `verification` also carries the flat fields a `getStatus` read
+  derives from that block (`error`, `docs_url`, `hint`).
+
+### Added
+
+- **Per-call request options.** Every method takes `signal`, `timeoutMs`,
+  `maxRetries` and `headers` for one call (the `RequestOptions` type): in a new
+  trailing options argument (`verify(input, options)`, `getStatus(taskId,
+options)`, `usage(options)`, …), or merged into the options object a method
+  already takes (the waits' options, `getReview`'s `{ view }`,
+  `verifications.list` / `listAll`'s `{ page }`, `verifications.related`'s
+  `{ limit }`). `timeoutMs` is one HTTP attempt's timeout; on `extract` and
+  `assess` a value given for the call is used as given, even below the 150 s /
+  100 s floor that still applies to an inherited timeout. On the waits
+  `timeoutMs` stays the wait's budget, `signal` and `headers` reach the submit
+  and every poll, and `maxRetries` is the submit's (`wait` takes none).
+  `headers` merge without regard to case (a name set again keeps its place);
+  `null` removes one a copy set; a `User-Agent` or `Accept` replaces the
+  client's; the headers the client sets itself (`X-Lenz-API-Version`,
+  `Idempotency-Key`, `Authorization`, `Content-Type`, `Content-Length`, `Host`,
+  `Transfer-Encoding`) are refused, and so are a name that is not a valid token
+  and a value that is not visible ASCII with spaces and tabs only between
+  visible characters, before any request. A call reads its options once,
+  when it is made (every page of a `listAll` and every poll of a wait use that
+  copy). `wait` takes no `maxRetries` and throws when given one (TypeScript
+  already refused it). A call made
+  without options sends exactly what it sent before. New types: `RequestOptions`, `GetStatusOptions`
+  (`getStatus`'s options, with the waits' `deadlineAt`), `VerifyAndWaitOptions`
+  (`verifyAndWait` / `verifyBatchAndWait`); `WaitOptions`,
+  `ReviewAndWaitOptions` and `CitecheckAndWaitOptions` gain `signal` and
+  `headers` (the last two, and `VerifyAndWaitOptions`, `maxRetries`).
+- **`client.withOptions(options)`**: a copy of the client whose request
+  options apply to every call made through it. It shares the `fetch`, key,
+  base URL and logger, keeps a subclass and replaced methods, and leaves the
+  original unchanged. A call's own options win over the copy's.
+- **`LenzAbortError`**, thrown when a call's `signal` (or a copy's) fires:
+  during a request, a retry sleep, a poll, or between the items of a
+  `listAll`. It is not a `LenzError` (code that retries every `LenzError` does
+  not retry an abort); its `name` is `"AbortError"` and its `cause` the
+  signal's `reason`. It carries the request's `idempotencyKey` when it was
+  keyed, and the `taskId`, `batchId` and `taskIds`, `reviewId` or
+  `citecheckId` once the server had accepted the work. Nothing is cancelled
+  on the server: call `cancel`, `cancelReview` or `cancelCitecheck`.
+- **Webhooks on edge runtimes.** `await webhooks.unwrap(request)` takes a
+  standard `Request`, reads the raw body once and `X-Lenz-Signature`, and
+  verifies with WebCrypto. `await webhooks.parseAsync(rawBody, headers)` is the
+  same for a framework that hands you the body and headers. Both return the
+  same event as `parse` and throw the same `LenzWebhookSignatureError` for every
+  bad input (missing, malformed or wrong signature, a body that is not JSON or
+  not an object, a stale `delivered_at`). `verifySignatureAsync(rawBody,
+signature, secret)` is the low-level counterpart of `verifySignature`.
+- **The package loads with no Node built-ins.** The webhook code no longer
+  imports `node:crypto` or `node:buffer` when the module loads, and nothing
+  else in the package uses a Node built-in or `Buffer`. The synchronous
+  `parse` and `verifySignature` still work on Node, and throw a clear error
+  pointing to `unwrap` on a runtime without Node's `crypto`. Their results are
+  unchanged, with the two corrections listed under "Changed" (an empty secret,
+  an array signature header).
+- **Export conditions `workerd`, `edge-light` and `deno`**, listed before
+  `browser`, resolve to the main build (`dist/index.js`), which exports the
+  whole API, webhook receiver included, so these runtimes skip the `browser`
+  build that omits it. `import`, `require` and `browser` resolve as before.
+  Tested in Cloudflare Workers (workerd, without Node compatibility), Deno and
+  Bun; Vercel Edge is covered by the `edge-light` condition but not tested in a
+  real Next.js build.
+- `parse` / `parseAsync` copy the body once before verifying, so a caller
+  that reuses its buffer cannot change what is parsed after the signature
+  checked. A body that is not a string or bytes (an object left by a body
+  parser, `null`, `undefined`) still throws a `TypeError`, as in 2.21; its
+  message now says what was expected.
+- `unwrap` throws a clear error when the request's body was already read.
+- The generated `Idempotency-Key` falls back to `getRandomValues` where
+  `crypto.randomUUID` is missing (insecure browser origins, Hermes).
+- Examples for a Next.js route handler and a Hono app
+  (`examples/core/nextjs-webhook.ts`, `examples/core/hono-webhook.ts`).
+
+- **`cancel(taskId)`, `cancelReview(reviewId)` and `cancelCitecheck(citecheckId)`
+  stop a run** (`POST /verify/{task_id}/cancel`, `/reviews/{review_id}/cancel`,
+  `/citechecks/{citecheck_id}/cancel`). `cancel` returns the new exported
+  `CancelResult` (`{ task_id, cancelled, status }`): `cancelled: true` when
+  the run is cancelled (by this call or an earlier one), `cancelled: false`
+  with the run's status (normally `completed` or `failed`) when it is not. `cancelReview` and `cancelCitecheck` return the review and
+  the check as `getReview` and `getCitecheck` read them, `status: "cancelled"`
+  or unchanged when finished. A cancelled verification is not charged; a review
+  or citation check keeps charged what it delivered before the cancel. The calls send no
+  body and no `Idempotency-Key` (cancelling twice is harmless) and are
+  retried on 5xx, 429 and dropped connections like any request. `cancel` on a
+  review's deep check throws a `LenzError` with `statusCode` 409 and `code`
+  `"use_review_cancel"`, which is not retried: cancel the review. A 404 throws
+  `LenzNotFoundError` with `code` `"not_found"`. Requires the API version
+  `2026-10-11`.
+- **`verification.cancelled`, `review.cancelled` and `citecheck.cancelled`
+  webhook events are typed** (`VerificationCancelled`, `ReviewCancelled`,
+  `CitecheckCancelled`; `isEvent` narrows on them). Each carries the cancelled
+  `verification` / `review` / `citecheck` and its `eventId`, nothing more.
+- **`verifyAndWait(input, opts)` and `verifyBatchAndWait(input, opts)`** take
+  their wait options (`WaitOptions`: `timeoutMs`, `onProgress`) as a second
+  argument, as `wait`, `reviewAndWait` and `citecheckAndWait` already did.
+  Same meaning as the in-input fields (the deadline starts after the submit;
+  `0` or less polls once); when both are given, the second argument wins
+  field by field. Nothing new is sent.
+- **camelCase batch-item and citation-pair inputs**: a `verifyBatch` /
+  `verifyBatchAndWait` item takes `sourceUrl` and `webhookUrl`; a `citecheck`
+  pair takes `citedTitle`, `citedAuthors`, `citedYear` and `citedJournal`.
+  Inputs are camelCase; outputs keep the API's names. Each camelCase field is
+  sent under its API name, so the request is the one the snake_case form
+  sends. Giving both spellings of a field with different values throws an
+  `Error` naming both before anything is sent; equal values are fine
+  (`Object.is`, arrays element by element). On a batch item a value 2.x
+  ignored counts as not given (`undefined`, `null`, an empty `sourceUrl`, an
+  empty or blank `webhookUrl`); on a pair only `undefined` does.
+- **`VerifyBatchItem`** is exported from both entry points.
+- **`LenzNotFoundError`** (404), **`LenzConnectionError`** and
+  **`LenzRequestTimeoutError`** (see Changed). `LenzRequestTimeoutError` is
+  one HTTP attempt that took too long; `LenzTimeoutError` remains a wait that
+  reached its deadline while the job kept running.
+- **`retryable` on every error** (`boolean | null`, set when the error is
+  built): `true` for a network failure, a transport timeout, a 429, a 5xx
+  or a 409 `idempotency_conflict` / `verification_not_ready`, `false` for
+  any other 4xx and for `LenzApiVersionError`, `null` when
+  unknown; a boolean the response body states wins. A failed run
+  (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`) keeps
+  the server's value, `null` when it stated none, as in 2.x.
+- **An optional second argument to `getStatus`**, the wait's budget (the
+  per-request timeout and deadline). The waits poll through the public
+  `getStatus`, as in 2.x, so an override (a subclass, a test double) is used;
+  an override may ignore the argument and the wait still ends at its
+  deadline.
+- **`idempotencyKey` on every error of a call that sent one**
+  (`string | undefined`), the timeout of a `*AndWait` included. A resend is
+  safe only with that key: pass `idempotencyKey: err.idempotencyKey` back. A
+  plain new call mints a new key and, if the first request reached the
+  server, runs (and charges) twice. A response body that breaks off after the
+  headers still throws the runtime's own error, as in 2.x (its class is
+  unchanged); on a keyed call it carries `idempotencyKey` too.
+- **The underlying `fetch` error as the native `cause`** of a
+  `LenzConnectionError`; the string `cause_` line is unchanged.
+- **Every error class from the browser entry**: `LenzUpstreamUnavailableError`
+  and the new classes were missing from it.
+- **`logger` option** on `new Lenz({ logger })` (`LenzLogger`: optional
+  `debug`, `info`, `warn`; `console` fits): retries go to `debug`, the
+  `verifyAndWait` task id to `info`. Silent without one. A logger method
+  that throws, or returns a promise that rejects, never breaks a call.
+- **`idempotency` option** on `verifyBatch`, `verifyBatchAndWait` and
+  `ask.send`.
+- **`isEvent(event, kind)`** narrows a parsed webhook event without a cast,
+  only when the event's name is `kind` and the members the narrowed type
+  requires were parsed: a `verification.*` event's `verification` with a
+  string `task_id` and the kind's own `status` (on `verification.completed`,
+  `"completed"` with an object `result`); a review's or citation check's id,
+  `status`, lists, `summary` and `credits`; a certificate's `coverage`. A
+  malformed event under a known name never narrows. `WebhookEventMap` names
+  the narrowed types. It needs no crypto, so the browser entry exports it
+  too. **`eventId`** (optional) on every webhook event, from the payload's
+  `event_id` in either shape.
+- **`verifications.listAll()` and `library.listAll(filters)`**: every item
+  across pages, as an `AsyncIterable`, one page request at a time. The page
+  size is read from each response and the start page is honoured (one below
+  1 throws when `listAll` is called). The walk stops after a short or empty
+  page, a page that reaches `total`, or one with no usable `page_size`, and
+  a response for another page than the one asked for ends it without being
+  yielded. `sort: "random"` is refused when `listAll` is called.
+- **`Verdict`, `Confidence` and `Depth` types**, and the `verdict` /
+  `confidence` fields typed plain `string` (verifications, list items,
+  related verifications, `assess` rows) now name their values
+  (`Verdict | (string & {})`), so an editor completes them; any string
+  still fits.
+- README: a "First call" section, and runnable `review` and `citecheck`
+  examples (`examples/core/review-draft.ts`, `examples/core/citecheck.ts`),
+  type-checked with the other examples by `npm run type`.
+
+### Deprecated
+
+Kept in 3.x with their 2.x values, so 2.x code runs and compiles unchanged;
+they will be removed in a future major release. Move to the newer names when
+convenient. Editors strike them through (`@deprecated` names the
+replacement).
+
+| Where                                                                              | Deprecated (2.x name)                                              | Read instead                                                                     |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `extract`                                                                          | `claim`                                                            | `claims[0].claim`                                                                |
+|                                                                                    | `identified_claims`                                                | `claims`                                                                         |
+|                                                                                    | `locations`                                                        | `claims[i].positions`                                                            |
+|                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+| `assess` row                                                                       | `verdict: "Error"`, `confidence: "low"` on a failed row            | `status === "failed"`                                                            |
+|                                                                                    | `error_code`                                                       | `failure.code`                                                                   |
+|                                                                                    | `hint`                                                             | `failure.hint` on a failed row; `more_claims` on a completed compound row        |
+|                                                                                    | `identified_claims`                                                | `more_claims`                                                                    |
+|                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+| `assess` body                                                                      | `error`                                                            | `failure.detail`                                                                 |
+|                                                                                    | `error_code`                                                       | `failure.code`                                                                   |
+|                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+| `verifyBatch` / `select` receipt, `verifyBatchAndWait`                             | `claim_text`                                                       | `claim`                                                                          |
+| `needs_input` options                                                              | `text`                                                             | `claim`                                                                          |
+| Verifications (`get`, `list`, `library`, a status `result`, a review's deep check) | `modified_at`                                                      | `completed_at`                                                                   |
+| `getStatus` / `wait` on a failed run                                               | `error`                                                            | `failure.detail`                                                                 |
+|                                                                                    | `failure_reason`                                                   | `failure.code`                                                                   |
+|                                                                                    | `failure_class`, `retryable`, `docs_url`, `hint`                   | `failure.failure_class`, `failure.retryable`, `failure.docs_url`, `failure.hint` |
+|                                                                                    | `candidates`, `similar_claims` (typed only; the API sends neither) | `claims` for `candidates`; none for `similar_claims`                             |
+| `usage()`                                                                          | `verify`, `ask`, `assess` blocks                                   | `credits` and `costs` (divide `credits.remaining` by the cost)                   |
+|                                                                                    | per-block `credits`                                                | the block's `bonus`                                                              |
+|                                                                                    | `credits.bonus`                                                    | `credits.extra`                                                                  |
+|                                                                                    | `quota_resets_at`                                                  | `credits.resets_at`                                                              |
+| Reviews and citation checks                                                        | `failure.failure_reason` (every failure block)                     | `failure.code`                                                                   |
+|                                                                                    | assessment `error_code`, `hint`                                    | assessment `failure.code`, `failure.hint`                                        |
+|                                                                                    | assessment `identified_claims`                                     | `more_claims`                                                                    |
+|                                                                                    | summary `claim_limit_reached`                                      | `claim_limit_exceeded`                                                           |
+|                                                                                    | summary `citation_limit_reached`                                   | `citation_limit_exceeded`                                                        |
+| `verification.failed` webhook                                                      | `error`                                                            | `failure.code`                                                                   |
+|                                                                                    | `failureClass`, `retryable`                                        | `failure.failure_class`, `failure.retryable`                                     |
+| `verification.completed` webhook                                                   | `result`                                                           | `verification.result`                                                            |
+| Errors                                                                             | `LenzRateLimitError.resetInSeconds`                                | `retryAfter`                                                                     |
+|                                                                                    | `LenzQuotaExceededError.creditsRemaining` (still warns once)       | `remaining`                                                                      |
+|                                                                                    | `ReviewFailedError.errorCode`                                      | `review.failure.code`                                                            |
+|                                                                                    | `CitecheckFailedError.errorCode`                                   | `citecheck.failure.code`                                                         |
+| `verifyBatch` items                                                                | `idempotency_key` (never sent; no effect)                          | `idempotencyKey` on the batch                                                    |
+|                                                                                    | `source_url`, `webhook_url`                                        | `sourceUrl`, `webhookUrl`                                                        |
+| `citecheck` pairs                                                                  | `cited_title`, `cited_authors`, `cited_year`, `cited_journal`      | `citedTitle`, `citedAuthors`, `citedYear`, `citedJournal`                        |
+| `verifyAndWait` / `verifyBatchAndWait` input                                       | `timeoutMs`, `onProgress`                                          | the same fields in the second argument                                           |
+| `extract` / `assess` input                                                         | `timeoutMs`                                                        | `timeoutMs` in the options argument (`extract(input, { timeoutMs })`)            |
+
+`creditsRemaining`, which earlier releases said would be removed in 3.0, is
+kept, and its one-time console warning now says "a future major release".
+Values that keep their 2.x wording while `failure.code` says
+`no_checkable_claim`: `extract`'s `status` (`not_a_claim`), `failure_reason`
+and `error_code`.
+
+### Migrating
+
+**Required**
+
+- **The API must answer `2026-10-11`.** 3.0 asks for it and reads only that
+  shape; a response naming another version throws `LenzApiVersionError`.
+  Stay on 2.x against an API that does not serve it yet.
+- **Webhook receivers on lenz-io older than 2.21.0, or that read the raw
+  JSON, upgrade before any sender moves to 3.0.** Calls made with 3.0 are
+  delivered in the newer shape (see Breaking).
+- **Code that reads raw bodies** (`err.body`, or the JSON of a response you
+  fetched yourself) reads the API's own shape: `err.body.detail` is a
+  sentence, not a list, so read the error's own `errors`; `doc_url` is
+  `docs_url`, `reset_in_seconds` and `retry_after_seconds` are
+  `retry_after`, and there is no `error` key (read `code`).
+- **Tests with recorded 2.x response bodies** are re-recorded against the
+  newer shape: a recorded body in the earlier shape is refused
+  (`LenzApiVersionError`) when it carries its version header, and is not
+  guaranteed to read correctly when it does not.
+- **An idempotent request first sent before lenz.io served `2026-10-11`**
+  and replayed later with the same `Idempotency-Key` is answered in the
+  version it was first answered in, which 3.x refuses
+  (`LenzApiVersionError`). Finish such work with 2.x; never change the key to
+  get past it, which would run the call a second time. In practice none
+  remain at release: replays last 24 hours, and the API has stored both
+  shapes for every request since its versioning release on 2026-10-09.
+- **Treat `cancelled` as terminal** in your own loops over `getStatus`,
+  `getReview` and `getCitecheck`, and in `onUpdate` callbacks: it is the
+  status of a task cancelled elsewhere, and a loop that stops only on
+  `completed` and `failed` polls forever. Widen exhaustive `switch`es and
+  `Record<Status, …>` tables over `TaskStatus["status"]`, `ReviewStatus` and
+  `CitecheckStatus`.
+- **Handle `*.cancelled` in webhook receivers.** For work submitted with 3.x
+  the events arrive as `verification.cancelled`, `review.cancelled` and
+  `citecheck.cancelled`. A 2.21 receiver parses them only as the base event
+  (branch on `event.event` there); this release types them.
+- Node 22.12 or later.
+
+**Optional**
+
+- Move off the deprecated names, using the newer ones listed under "Newer
+  field names" in the README. They keep working and compiling.
+
+Error classes keep every field they had in 2.x (`code` is `""` where 2.x had
+none, a schema error's message is "Validation failed" and its `errors` the
+field items, `resetInSeconds` reads the daily limit's wait). Their `body` is
+the body as the API sent it.
+
 ## [2.21.0] - 2026-10-09
 
 Minor release. Existing code keeps working unchanged; nothing to do on

@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzQuotaExceededError",
+    "message": "No remaining credits to assess the draft.",
+    "cause_": "No remaining credits to assess the draft.",
+    "fix": "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
+    "docUrl": "https://lenz.io/docs/billing",
+    "requestId": "",
+    "statusCode": 402,
+    "code": "no_credits",
+    "name": "LenzQuotaExceededError",
+    "upgradeUrl": "https://lenz.io/plans?wall=42f12ca1-a7db-4796-86d3-c182949fca6d",
+    "remaining": 100,
+    "resetsAt": "2026-03-14T09:02:02+00:00",
+    "requested": null,
+    "creditBalance": 100,
+    "cost": 1
+  }
+}

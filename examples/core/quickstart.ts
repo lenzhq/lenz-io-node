@@ -26,15 +26,15 @@ async function main(): Promise<void> {
   const out = await client.extract({
     text: "Sharks don't get cancer. The Eiffel Tower is 330m tall.",
   });
-  const claims = out.identified_claims?.length ? out.identified_claims : [out.claim ?? ""];
+  const claims = (out.claims ?? []).map((c) => c.claim);
   console.log(`Extracted ${claims.length} claims:`);
   for (const c of claims) console.log(`  - ${c}`);
   console.log("");
 
   // 2. assess — one call per 20 claims (extract finds up to 100), one row
-  //    per claim in the same order (~15s a call, sync). A row with verdict
-  //    "Error" has error_code + hint; a compound item lists the rest of its
-  //    claims in identified_claims.
+  //    per claim in the same order (~15s a call, sync). A row with status
+  //    "failed" has a failure (code + hint); a compound item lists the rest
+  //    of its claims in more_claims.
   const quick: AssessClaim[] = [];
   for (let i = 0; i < claims.length; i += 20) {
     quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     console.log(
       `  ${(c.verdict ?? "").padEnd(12)}  conf=${(c.confidence ?? "").padEnd(7)}  ${c.claim}`,
     );
-    if (c.hint) console.log(`      hint: ${c.hint}`);
+    if (c.failure?.hint) console.log(`      hint: ${c.failure.hint}`);
   }
   console.log("");
 
@@ -52,8 +52,8 @@ async function main(): Promise<void> {
   //    back low-confidence, so the walkthrough always reaches steps 3 and 4.
   // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
   const doubtful = quick
-    .filter((c) => c.verdict !== "Error" && c.confidence === "low")
-    .map((c) => ({ claim: c.claim ?? "" }))
+    .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
+    .map((c) => ({ claim: c.claim! }))
     .slice(0, 20);
   const results = await client.verifyBatchAndWait({
     claims: doubtful.length ? doubtful : [{ claim: "Sharks don't get cancer" }],
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   let deepId: string | null = null;
   for (const r of results) {
     if (r.status !== "completed") {
-      console.log(`${r.claim_text} → ${r.status}`); // needs_input | failed | timeout
+      console.log(`${r.claim} → ${r.status}`); // needs_input | failed | timeout
       continue;
     }
     const v = r.verification!;

@@ -2,7 +2,7 @@
   "getStatus": {
     "value": {
       "status": "failed",
-      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "task_id": "76be0e746d5a5c500a8324c20bbf685c",
       "error": "Pipeline stopped at: research_empty",
       "failure_reason": "research_empty",
       "failure_class": "insufficient_evidence",

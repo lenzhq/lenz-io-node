@@ -1,0 +1,17 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "escalate.confidence: Unknown confidence band 'certain'; use low, medium or high.",
+    "code": "invalid_confidence_band",
+    "errors": [
+      {
+        "loc": ["body", "payload", "escalate", "confidence"],
+        "msg": "Unknown confidence band 'certain'; use low, medium or high.",
+        "type": "invalid_confidence_band",
+        "ctx": {
+          "band": "certain"
+        }
+      }
+    ]
+  }
+}

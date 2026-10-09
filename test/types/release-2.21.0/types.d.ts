@@ -1,0 +1,1970 @@
+/**
+ * TypeScript types mirroring the public Lenz API response surface.
+ *
+ * Hand-written to match `lenz/api/schemas/public_api.py` server-side;
+ * cross-language invariant — the Python SDK has equivalent Pydantic
+ * models, and `test/contract.test.ts` validates both against the same
+ * frozen JSON fixtures.
+ *
+ * Types are intentionally permissive (`?` on most fields, no
+ * `noUncheckedIndexedAccess`-tight discriminated unions) so a minor
+ * server addition doesn't break customer deserialisation.
+ *
+ * Vocabulary (applies across every claim-shaped response):
+ *   - claim       : string         — the framed claim text
+ *   - verdict     : string         — "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
+ *   - confidence  : string         — "high" | "medium" | "low" (categorical)
+ *   - lenz_score  : number | null  — integer 1–10 (deep / list; /assess omits)
+ */
+export interface Source {
+  source_name?: string;
+  title?: string;
+  url?: string;
+  /**
+   * The passage around the quoted sentence(s) on the source page, in the
+   * page's own language: up to ~2,000 characters, and it may contain line
+   * breaks. `…` marks a cut paragraph, ` … ` separates two passages.
+   */
+  snippet?: string;
+  date?: string;
+}
+export interface DebateSide {
+  role?: string;
+  argument?: string;
+  rebuttal?: string;
+}
+/**
+ * One reviewer's structured assessment.
+ *
+ * Current verifications carry three reviewers, `Reviewer A` to `Reviewer C`,
+ * all running the same checks over the evidence, plus `Reviewer D` and
+ * `Reviewer E` when those three disagree. Their `focus_area` reads
+ * `"Sources, evidence fit and wording"`.
+ *
+ * Older verifications carry specialist panelists instead, one warning
+ * category each: logical fallacies (Logic Examiner), precision issues
+ * (Precision Analyst), weakest sources (Source Auditor) and, before 2026-06,
+ * missing context (Context Analyst).
+ */
+export interface Assessment {
+  /** A display value, not a stable key — don't branch on it. */
+  panelist_name?: string;
+  focus_area?: string;
+  /** Reviewer-level 1-10 sub-score, distinct from the top-level `lenz_score`. */
+  score?: number | null;
+  reasoning?: string;
+  /**
+   * The source issues, evidence gaps and precision issues this reviewer
+   * found, in one list. On an older verification, the one category that
+   * panelist covers.
+   */
+  warnings?: string[];
+}
+export interface Audit {
+  adjudication_summary?: string;
+  assessments?: Assessment[];
+  debate_pro?: DebateSide | null;
+  debate_con?: DebateSide | null;
+  panel_agreement?: string;
+}
+/** One claim a `multi_claim` pause offers. */
+export interface CandidateClaim {
+  /** The claim. */
+  claim?: string;
+  /** @deprecated Read `claim`; the same text. */
+  text?: string;
+  domain?: string;
+}
+/**
+ * An entity (person, place, organization, concept) referenced in the
+ * claim. `qid` is the Wikidata Q identifier (e.g. `Q42`) when the entity
+ * was resolved against Lenz's internal catalog; `null` otherwise.
+ */
+export interface EntityRef {
+  name: string;
+  qid: string | null;
+}
+/**
+ * An existing public verification that semantically resembles another one,
+ * as returned by `related`. Same vocabulary as `Verification` — flat
+ * `verdict` / `confidence` / `lenz_score`, no nested object.
+ */
+export interface SimilarVerification {
+  verification_id?: string;
+  claim?: string;
+  verdict?: string;
+  confidence?: string;
+  lenz_score?: number | null;
+  url?: string;
+  distance?: number;
+}
+/**
+ * Full verification report — returned by `verifyAndWait`,
+ * `verifications.get`, the `/verify/status/{task_id}` polling endpoint,
+ * and the webhook payload.
+ *
+ * The verdict block is FLAT at top level (was nested `Verdict` object
+ * pre-unify). `created_at` + `modified_at` are the only timestamp
+ * fields on the API surface — editorial `published_at` is internal-only.
+ *
+ * 1.1.0: dropped `url` and `visibility`. API claims are private by
+ * default and referenced by `verification_id` only. Cache-hit on
+ * another customer's claim is transparent — the customer always sees
+ * their own `verification_id`.
+ *
+ * Later: `visibility` returns — "private" | "unlisted" | "public". It
+ * echoes what you set on submit ("private"/"unlisted" are settable;
+ * "public" can only be read, for listed claims). `url` stays dropped.
+ */
+export interface Verification {
+  verification_id?: string;
+  claim?: string;
+  /** "private" | "unlisted" | "public". Read-back of the claim's visibility. */
+  visibility?: string;
+  /**
+   * "standard" | "low". Read-back of the depth the verdict was actually
+   * produced with — a "low" request served from cache reads "standard".
+   * Absent on servers that predate the field.
+   */
+  depth?: string;
+  domain?: string;
+  entities?: EntityRef[];
+  presumed_intent?: string;
+  verdict?: string;
+  confidence?: string;
+  lenz_score?: number | null;
+  /**
+   * The analysis's key finding: one declarative sentence stating the
+   * most important fact it established (2.6.0). "" on legacy claims
+   * that were never backfilled.
+   */
+  key_finding?: string;
+  executive_summary?: string;
+  warnings?: string[];
+  sources?: Source[];
+  audit?: Audit;
+  created_at?: string | null;
+  /**
+   * When the verification finished. Sent by the API's newer response shape;
+   * absent from the original shape, which sends `modified_at` instead.
+   */
+  completed_at?: string | null;
+  /**
+   * @deprecated Read `completed_at`. The completion time when the
+   * verification finished on a later UTC calendar day than `created_at`,
+   * else `null`. Computed from `created_at` and `completed_at` when the
+   * server sends only those.
+   */
+  modified_at?: string | null;
+  /**
+   * Output language (ISO 639-1). Always populated when the SDK is
+   * current; `?` is kept for resilience against older / mocked payloads
+   * that may omit the field. Verdict / domain / status enums stay
+   * English regardless of language.
+   */
+  language?: string;
+  /**
+   * Warranty state for YOUR account over this analysis.
+   *
+   * Absent for two reasons that are NOT "this verdict does not qualify": Lenz
+   * is not operating the warranty, or the call was unauthenticated
+   * (`verifications.get` accepts anonymous callers, and an anonymous caller
+   * has no account for a warranty to attach to). A verdict that does not
+   * qualify carries the block with `status: "uncovered"` and the reasons why.
+   */
+  coverage?: Coverage | null;
+  /**
+   * A suggested rewrite of `claim` that this verification's findings
+   * support, to use in place of the original sentence. It has not been
+   * verified itself: before using it, review it or run it through
+   * `client.verify({ claim })`.
+   *
+   * `null` for a true claim, when no correction is established, and on
+   * verifications that predate the field. Absent on responses from an API
+   * that predates it, so read it as `v.suggested_rewrite ?? null`. On every
+   * verification, single or listed (`VerificationListItem` carries it too).
+   *
+   * It answers the same question the claim answers: it may replace the
+   * claim's subject when the subject is the wrong part, negates the claim
+   * when the findings establish it is false but name no right answer, and is
+   * `null` when the findings only find no support. `assess` rows carry their
+   * own (`AssessClaim.suggested_rewrite`, with `suggestRewrite: true`).
+   */
+  suggested_rewrite?: string | null;
+}
+/**
+ * Closed set of `coverage.status` values. Exported for exhaustive matching;
+ * the field itself stays `string` so the SDK never rejects a status the
+ * server adds after this release was cut.
+ */
+export type CoverageStatus = "covered" | "uncovered" | "pending_timestamp";
+/**
+ * Closed set of `coverage.reasons` values — why a verdict is NOT covered.
+ * Deliberately smaller than the internal gate's vocabulary: `plan` and
+ * `depth` are actionable, `account` means the account turned certificates off
+ * (a verification that already carries one keeps it), `verdict` is a product
+ * rule you design around,
+ * `quality` covers everything you can neither act on nor define, and
+ * `withdrawn` / `issue_failed` are statements about Lenz rather than about
+ * your claim.
+ */
+export type CoverageReason =
+  | "plan"
+  | "account"
+  | "depth"
+  | "verdict"
+  | "quality"
+  | "withdrawn"
+  | "issue_failed";
+/**
+ * Whether this verdict carries Lenz's warranty, for YOUR account.
+ *
+ * It describes the pair (your account, this analysis), not the analysis
+ * alone — two accounts can hold two certificates over one cached verdict, so
+ * the block you see is never another customer's.
+ *
+ * `reasons` is empty exactly when `status` is not `"uncovered"`.
+ *
+ * The money fields are three, not two: `currency` is ISO 4217 and the amounts
+ * are integers in **major units** — `cap: 10000` means ten thousand, not a
+ * hundred. They are contract figures, not amounts a payment processor
+ * charges. Read `currency`; do not assume EUR.
+ */
+export interface Coverage {
+  status?: string;
+  reasons?: string[];
+  certificate_id?: string | null;
+  certificate_url?: string | null;
+  /**
+   * The date the verdict is warranted AS OF — the analysis time, not the
+   * issue time. `null` when there is no certificate.
+   */
+  as_of?: string | null;
+  currency?: string;
+  cap?: number;
+  aggregate?: number;
+  terms_version?: string;
+}
+/**
+ * The signed warranty certificate, byte-identical to the public document.
+ *
+ * Everything needed to verify the record **without Lenz**: `leaf` is the
+ * digest the `signature` is over, `anchors` carries the qualified
+ * (RFC 3161 / eIDAS) timestamp and the OpenTimestamps receipt, and
+ * `verifier_url` / `keys_url` point at the open-source checker and the
+ * published keys.
+ *
+ * A withdrawn certificate is still served — it is the record of what was
+ * warranted, and `withdrawn_at` is on it.
+ */
+export interface Certificate {
+  /**
+   * A NUMBER on the wire, unlike `record_version` which is a string. Not a
+   * tidy asymmetry, but it is what the server sends: `record_version` is part
+   * of the signed leaf and has always been a string, while `document_version`
+   * versions the envelope around it.
+   */
+  document_version?: number;
+  certificate_id?: string;
+  record_version?: string;
+  /**
+   * The signed payload: the exact statement, verdict, warnings, sources and
+   * caps. This is what the leaf is computed over — treat it as opaque and
+   * hand it to the verifier rather than reconstructing it.
+   */
+  payload?: Record<string, unknown>;
+  leaf?: string;
+  signature?: string | null;
+  key_id?: string | null;
+  anchors?: Record<string, unknown>;
+  withdrawn_at?: string | null;
+  keys_url?: string;
+  verifier_url?: string;
+}
+/**
+ * Compact item for the verifications list endpoint and the public
+ * library list. Slim shape — no `url` (reference by `verification_id`),
+ * no `visibility` (1.1.0).
+ */
+export interface VerificationListItem {
+  verification_id?: string;
+  claim?: string;
+  domain?: string;
+  entities?: EntityRef[];
+  verdict?: string;
+  confidence?: string;
+  lenz_score?: number | null;
+  /** The analysis's key finding (2.6.0). See `Verification.key_finding`. */
+  key_finding?: string;
+  executive_summary?: string;
+  created_at?: string | null;
+  /** See `Verification.completed_at`. */
+  completed_at?: string | null;
+  /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
+  modified_at?: string | null;
+  /** Output language (ISO 639-1). See `Verification.language`. */
+  language?: string;
+  /**
+   * A suggested rewrite of `claim`, not verified itself. `null` on a true
+   * claim and on older rows. See `Verification.suggested_rewrite`.
+   */
+  suggested_rewrite?: string | null;
+}
+export interface VerificationList {
+  items: VerificationListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+/** Same shape as `VerificationListItem` on the public Library list. */
+export type LibraryItem = VerificationListItem;
+/** Wrapper for `GET /verifications/{id}/related`. */
+export interface RelatedVerifications {
+  items: SimilarVerification[];
+}
+export interface LibraryList {
+  items: LibraryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+export interface ExtractedEntity {
+  /** Full formal entity name as identified by framing. */
+  name: string;
+  /** One of: `person` | `org` | `place` | `topic`. */
+  type: string;
+}
+/**
+ * Outcome of an `extract` call.
+ *
+ * - `ready` — claims were found (and, when a `focus` was given, at least one
+ *   claim fell within it).
+ * - `not_a_claim` — the text contains no verifiable factual claim at all.
+ * - `no_match` — claims were found, but none fall within the `focus`. The
+ *   unfocused list is never substituted; widen the focus and call again.
+ *
+ * The `string & NonNullable<unknown>` arm preserves autocomplete for the
+ * known values while tolerating any future status the server adds (same
+ * trick as `FailureClass`).
+ */
+export type ExtractStatus = "ready" | "not_a_claim" | "no_match" | (string & NonNullable<unknown>);
+/**
+ * One place in the text as sent: where a claim is made (`extract({ locate:
+ * true })`, a review's claim rows and `more_claim_locations`) or where a
+ * citation's statement sits (review and citation-check citation rows).
+ *
+ * `start` and `end` index the text AS SENT, in Unicode code points (not
+ * UTF-16 code units, not bytes); `end` is exclusive. JavaScript's
+ * `text.slice(start, end)` counts UTF-16 units and shifts after an emoji or
+ * any other character outside the Basic Multilingual Plane. Slice by code
+ * point instead:
+ *
+ * ```ts
+ * Array.from(text).slice(start, end).join("");
+ * ```
+ *
+ * Both are `null` when the text sent was a URL: the page is not returned, so
+ * there is nothing to index. `text` is the passage as it appears in the
+ * text; `null` on a citation's position, whose row carries the statement.
+ */
+export interface Position {
+  start: number | null;
+  end: number | null;
+  text: string | null;
+}
+/**
+ * Where the submitted text makes one returned claim.
+ *
+ * `claim` is exactly as returned. `positions` is every place the text makes
+ * it, in text order: at least one, at most 10. `null` only when that claim
+ * could not be placed; on `/extract` every returned claim is placed.
+ */
+export interface ClaimLocation {
+  claim: string;
+  positions: Position[] | null;
+}
+/**
+ * One claim `extract` found, with where the text makes it (`positions`,
+ * `null` unless the call set `locate: true` and the claim was placed).
+ */
+export type ExtractedClaim = ClaimLocation;
+export interface ExtractedClaims {
+  /**
+   * `"ready"`, `"not_a_claim"` or `"no_match"`. The API's newer response
+   * shape says `"no_checkable_claim"` for nothing checkable; the SDK reports
+   * it as `"not_a_claim"`, so code written against this value keeps working.
+   */
+  status?: ExtractStatus;
+  /**
+   * Every claim found, in order: one entry for one claim, `[]` for none.
+   * Each carries `positions` (see {@link ClaimLocation}). Filled from
+   * `claim` / `identified_claims` / `locations` when the server sends those.
+   */
+  claims?: ExtractedClaim[];
+  /** @deprecated Read `claims[0].claim`. The first claim, `""` for none. */
+  claim?: string;
+  /** @deprecated Read `claims`. Every claim when there are several, `[]` for one. */
+  identified_claims?: string[];
+  /**
+   * @deprecated Always empty since 2026-09-12. Kept because the server still
+   * sends the key.
+   */
+  candidate_claims?: string[];
+  domain?: string;
+  key_entities?: ExtractedEntity[];
+  presumed_intent?: string;
+  original_input?: string;
+  /**
+   * Where the text makes each returned claim, when the call set
+   * `locate: true`: one entry per returned claim, in the order of
+   * `identified_claims` (one entry for a single `claim`).
+   *
+   * `[]` when every claim was left out (`status` is then `"not_a_claim"`);
+   * `null` when `locate` was not set (or `false`), when the extraction found no claims,
+   * or when the claims could not be located (the list is then returned
+   * unfiltered). Offsets are code points — see {@link Position}.
+   * Optional only so a response from an API that predates the field still
+   * fits; read it as `out.locations ?? null`.
+   *
+   * @deprecated Read `claims[i].positions`. Computed from `claims` when the
+   * server sends only that; it then reads `null`, not `[]`, when every claim
+   * was left out.
+   */
+  locations?: ClaimLocation[] | null;
+}
+/**
+ * Per-claim entry in an `AssessResponse.claims` list.
+ *
+ * Lean shape by design — no model_votes, no panel identity. The
+ * `verification_url` (when present) points at the full payload at
+ * `GET /api/v1/verifications/{id}` for callers that want citations and
+ * the full audit trail.
+ *
+ * A vague item is assessed on its most likely reading, which `claim`
+ * carries.
+ */
+export interface AssessClaim {
+  claim?: string;
+  /** Output language (ISO 639-1). Echoes the request's language. */
+  language?: string;
+  /**
+   * `"completed"` (the row has a verdict) or `"failed"` (it has none;
+   * `failure` says why). Branch on this rather than on `verdict === "Error"`.
+   */
+  status?: "completed" | "failed" | (string & NonNullable<unknown>);
+  /**
+   * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
+   * `"Error"` on a failed row (kept for existing code: read `status`).
+   */
+  verdict?: string;
+  /** "high" | "medium" | "low"; `"low"` on a failed row (read `status`). */
+  confidence?: string;
+  /**
+   * Why a failed row has no verdict: `code` (`no_checkable_claim`,
+   * `framing_failed`, `upstream_unavailable`, `timeout`, an open set),
+   * `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. `null` on a
+   * row with a verdict. Fields the server did not send read `null`.
+   */
+  failure?: ReviewFailureBlock | null;
+  /**
+   * Other claims found in this item that were NOT assessed: a compound item
+   * is assessed on its main claim. Send these as their own items. Else `[]`.
+   */
+  more_claims?: string[];
+  verification_url?: string | null;
+  /**
+   * The reasoning of a reviewer who agrees with the panel's verdict. A
+   * reviewer's note, not a checked source; for sourced evidence, call
+   * `verify`. Optional: `null` on an `"Error"` row, and absent on a response
+   * replayed from before the API added it.
+   */
+  rationale?: string | null;
+  /**
+   * When set, the reasoning of the reviewer farthest from the panel's
+   * verdict. A reviewer's note, not a checked source. `null` or absent
+   * otherwise.
+   */
+  dissent?: string | null;
+  /**
+   * The claim with its wrong part corrected, when the request set
+   * `suggestRewrite: true` and the check found the claim `"False"` or
+   * `"Mostly False"` with high confidence. `null` when not requested,
+   * outside that, or when there was no correction to write; absent on a
+   * response replayed from before the API added it, so read it as
+   * `row.suggested_rewrite ?? null`. Written from the quick check's reasoning
+   * and not itself verified: review it, or run it through `verify`, before
+   * using it.
+   */
+  suggested_rewrite?: string | null;
+  /**
+   * Why this row has no verdict — set only when `verdict === "Error"`:
+   * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`.
+   * `null` on a verdict row. Error rows are free.
+   *
+   * An OPEN set, deliberately typed `string` rather than a union: the API may
+   * add a cause in a minor version, so branch on the ones you know and fall
+   * through on the rest.
+   *
+   * Worth resending as-is: `upstream_unavailable` (a provider was down) and
+   * `timeout` (the call ran out of its time budget before this item was done —
+   * fewer items per call makes it less likely). `framing_failed` is
+   * deterministic, so retrying the same text will not help (a provider
+   * outage comes back as `upstream_unavailable` instead); `no_claim` wants a
+   * different input. Read `hint`.
+   *
+   * @deprecated Read `failure.code` (which says `no_checkable_claim` where
+   * this says `no_claim`).
+   */
+  error_code?: string | null;
+  /**
+   * @deprecated Always empty since 2026-09-12, when the `ambiguous` cause
+   * that filled it was retired. Kept because the server still sends the key.
+   */
+  candidate_claims?: string[];
+  /** @deprecated Read `more_claims`; the same list. */
+  identified_claims?: string[];
+  /**
+   * One sentence on what to send next. Set on every Error row and on a
+   * row with non-empty `identified_claims`; `null` on a plain verdict row.
+   *
+   * @deprecated Read `failure.hint`. Computed from it when the server sends
+   * only `failure`; a row with a verdict then reads `null`.
+   */
+  hint?: string | null;
+}
+/**
+ * Output of `POST /assess`.
+ *
+ * Single form (`claim`): `claims` is one entry per claim found in the
+ * input — up to 20, at 1 credit each. A text that makes more claims than one
+ * call checks gets its most check-worthy 20 checked and the rest listed in
+ * `more_claims`, unchecked and free: send them back with `assess({ claims })`,
+ * 20 a call, to check them. `error` is set when the input holds no checkable
+ * claim.
+ *
+ * List form (`claims`): exactly one entry per item sent, in the order
+ * sent. An item that could not be given a verdict is still in position,
+ * with `verdict: "Error"` and `error_code` / `hint` saying why; `error`
+ * is `null`.
+ *
+ * When `claims` is empty (single form), `error_code` is `'no_claim'`: the
+ * input holds no checkable claim (a vague input is assessed on its most
+ * likely reading instead). It is optional, so older servers that don't send
+ * it degrade to the plain `error` message.
+ */
+export interface AssessResponse {
+  /**
+   * `"ok"` (at least one row has a verdict), `"error"`, or, when the input
+   * holds nothing checkable, `"no_checkable_claim"` (`"not_a_claim"` on the
+   * API's original response shape). Passed through as the server sent it;
+   * absent from servers older than the field.
+   */
+  status?: string;
+  claims: AssessClaim[];
+  /**
+   * Why the single form found nothing to assess (`code`, `detail`, `hint`,
+   * ...); `null` otherwise.
+   */
+  failure?: ReviewFailureBlock | null;
+  /** @deprecated Read `failure.detail`. */
+  error?: string | null;
+  /** @deprecated Read `failure.code` (`no_checkable_claim` where this says `no_claim`). */
+  error_code?: string;
+  /**
+   * @deprecated Always empty since 2026-09-12. Kept because the server still
+   * sends the key.
+   */
+  candidate_claims?: string[];
+  /**
+   * Single form: the claims found past the ones checked, most check-worthy
+   * first. `[]` otherwise. Absent from servers older than this field, so read
+   * it as `more_claims ?? []`.
+   */
+  more_claims?: string[];
+}
+export interface TaskAccepted {
+  task_id: string;
+  /** The claim this task checks (on `verifyBatch` / `select` items). */
+  claim?: string;
+  /** @deprecated Read `claim`; the same text. */
+  claim_text?: string;
+}
+export interface BatchAccepted {
+  batch_id: string;
+  items: TaskAccepted[];
+}
+/**
+ * Where a running verification has got to. Advisory — never results.
+ *
+ * `step` is one of `starting` / `framing` / `research` / `debate` /
+ * `adjudication` / `conclusion`. It is typed `string`, not a union: an SDK
+ * that hard-rejects a stage the server adds later is worse than one that
+ * passes it through.
+ *
+ * `index` is the 1-based stage position (0 while `starting`) out of `total`;
+ * read `total` off the response rather than hard-coding it. It is stage
+ * POSITION, not elapsed work — the stages are uneven, so a bar driven by it
+ * sits on `research` for roughly half the run.
+ *
+ * `poll_after_seconds` is how long to wait before looking again;
+ * `verifyAndWait` honours it for you. `elapsed_seconds` is how long the run
+ * has been going — a measurement, not an estimate of what is left.
+ */
+export interface Progress {
+  step: string;
+  index?: number;
+  total?: number;
+  elapsed_seconds?: number;
+  poll_after_seconds?: number;
+}
+export interface TaskStatus {
+  status: "processing" | "needs_input" | "completed" | "failed";
+  /**
+   * Echoed on every status shape since 2026-09, so a caller polling several
+   * verifications in one loop can tell the replies apart. Older servers
+   * omit it.
+   */
+  task_id?: string;
+  /** On `needs_input`: `multi_claim`, the only reason. */
+  reason?: string;
+  /**
+   * Present on `processing`; absent on every terminal shape (the server
+   * omits unset fields). Was `Record<string, unknown>` up to 2.10.0 — the
+   * runtime value is unchanged, so this is a compile-time narrowing only.
+   */
+  progress?: Progress;
+  result?: Verification | null;
+  claims?: CandidateClaim[];
+  /**
+   * @deprecated Always empty: its producer was retired and the API no longer
+   * sends it. Removal is planned for **2026-11-29**; read `claims` instead.
+   */
+  candidates?: string[];
+  /**
+   * @deprecated Always empty: the API never raised `duplicate_found` for API
+   * tasks and no longer sends it. Removal is planned for **2026-11-29**.
+   */
+  similar_claims?: SimilarVerification[];
+  /**
+   * On a `failed` status, why: `code` (e.g. `no_checkable_claim`,
+   * `research_empty`), `detail` (one sentence), `hint`, `failure_class`,
+   * `retryable`, `docs_url`. Built from the flat fields below when the
+   * server sends those.
+   */
+  failure?: ReviewFailureBlock | null;
+  /**
+   * @deprecated Read `failure.detail`. The diagnostic sentence on a
+   * `failed` status; read precedence is `error || failure_detail ||
+   * failure_reason`.
+   */
+  error?: string;
+  failure_reason?: string;
+  failure_detail?: string;
+  /**
+   * WHY it failed — closed set (`upstream_unavailable` |
+   * `insufficient_evidence` | `invalid_input` | `cancelled` | `internal`) —
+   * and the derived retry signal (true iff `upstream_unavailable`). Rows
+   * predating 2026-08 omit both.
+   */
+  failure_class?: FailureClass;
+  retryable?: boolean;
+  /** On a `failed` status: the page explaining that `failure_class`. */
+  docs_url?: string;
+  /**
+   * One sentence on how to resolve the interrupt: what was unclear and that
+   * `select` resolves it. Sent on a `multi_claim` `needs_input` and on a
+   * `failed` status whose `failure_reason` is `not_a_claim`. Older servers
+   * omit it.
+   */
+  hint?: string;
+}
+/**
+ * Closed set of failure causes on a `failed` verification. The
+ * `string & NonNullable<unknown>` arm preserves autocomplete for the known
+ * values while tolerating any future class the server adds (same trick as
+ * `WebhookEventKind`).
+ */
+export type FailureClass =
+  | "upstream_unavailable"
+  | "insufficient_evidence"
+  | "invalid_input"
+  | "cancelled"
+  | "internal"
+  | (string & NonNullable<unknown>);
+/**
+ * Per-item outcome from `verifyBatchAndWait`.
+ *
+ * A client-side composition type — NOT a wire shape (the server never emits
+ * it, so it has no contract fixture). One entry per task that
+ * `POST /verify/batch` returned, in input order. Field names stay snake_case
+ * to match the wire-shaped models (`TaskAccepted`, `Verification`).
+ *
+ * `status` is a client-side rollup:
+ * - `completed`   — `verification` is set (and `status_detail` carries the raw poll).
+ * - `needs_input` — paused for caller input; inspect `status_detail`.
+ * - `failed`      — terminal failure (or completed-without-result); `status_detail` carries the diagnostic.
+ * - `timeout`     — the deadline elapsed before this task reached a terminal state; `status_detail` is `undefined`.
+ */
+/**
+ * One item of `verifyBatchAndWait`. A claim removed under its account's
+ * retention period while the batch was polled reads `"failed"` with no
+ * `status_detail`.
+ */
+export interface BatchItemResult {
+  task_id: string;
+  claim?: string;
+  /** @deprecated Read `claim`; the same text. */
+  claim_text?: string;
+  status: "completed" | "needs_input" | "failed" | "timeout";
+  verification?: Verification;
+  status_detail?: TaskStatus;
+}
+/**
+ * The account's credit balance — the one pool every capability spends from.
+ *
+ * Two buckets:
+ * - the monthly allowance for the current plan, which resets at `resets_at`;
+ * - `extra`, non-expiring credits from grants and top-ups, spent only once
+ *   the allowance is gone.
+ *
+ * `remaining` is the sum of both and is what a call is checked against.
+ * `total` and `used` cover the same two buckets, so `used + remaining` can
+ * exceed nothing — read `remaining` when you want "can I make this call".
+ *
+ * Convert to calls with {@link Usage.costs}: `remaining / costs.verify` is
+ * how many verifications the balance still buys — or the `depth` prices in
+ * that price, for a `depth: "low"` check. The per-capability blocks on
+ * {@link Usage} do that division for you, except for the depth prices, which are
+ * price with no block of its own.
+ */
+export interface UsageCredits {
+  total: number;
+  used: number;
+  remaining: number;
+  /** The non-expiring part of `remaining`: credits from grants and top-ups. */
+  extra: number;
+  /**
+   * @deprecated Old name of {@link UsageCredits.extra}, the same number; read
+   * `extra` instead. Kept for existing callers: `usage()` fills it from
+   * `extra` when the server does not send it.
+   */
+  bonus: number;
+  resets_at: string | null;
+}
+/**
+ * One capability's share of the pool, projected into that capability's unit
+ * (`verify` / `ask` / `assess`).
+ *
+ * These are **projections, not allowances**. Every billable capability draws
+ * on the single balance in {@link Usage.credits}, at the weight in
+ * {@link Usage.costs}; this block answers "how many `/verify` calls could I
+ * still make if I spent everything on them". Spending on any capability moves
+ * every block, and the division floors — a `verify` block at a weight of 10
+ * ticks once per 10 credits spent anywhere.
+ *
+ * - `quota_total` / `quota_remaining`: the pool's `total` / `remaining`
+ *   divided by this capability's cost.
+ * - `quota_used`: derived as `quota_total - quota_remaining`, so
+ *   `used + remaining === total` always holds. It is therefore a ceiling —
+ *   one `/ask` credit moves the verify block's `quota_used` from 0 to 1.
+ * - `bonus`: {@link UsageCredits.extra} in this capability's unit. A user
+ *   holding 5 extra credits sees `verify.bonus === 0` and `assess.bonus === 5`
+ *   — 5 credits doesn't buy a verification.
+ * - `remaining`: equals `quota_remaining` (it already spans both buckets).
+ */
+export interface UsageCapacity {
+  quota_used: number;
+  quota_total: number;
+  quota_remaining: number;
+  /** {@link UsageCredits.extra}, in this capability's unit. */
+  bonus: number;
+  /**
+   * @deprecated Alias of {@link UsageCapacity.bonus}; read `bonus` instead.
+   * Kept for existing callers.
+   *
+   * It never meant the pool — before the single pool existed it meant this
+   * capability's one-off top-up balance, which is exactly what `bonus` now
+   * reports.
+   */
+  credits?: number;
+  remaining: number;
+}
+/** Daily `/extract` usage — a per-day rate limit, not credit-based. */
+export interface UsageExtract {
+  calls_today: number;
+  daily_limit: number;
+  unlimited: boolean;
+}
+/**
+ * Returned by `GET /me/usage` — the account's credit balance and what it buys.
+ *
+ * `credits` is the balance and `costs` is the price list (credits per call,
+ * keyed by capability name). The `verify` / `ask` / `assess` blocks are
+ * projections of that one pool into each capability's unit — read whichever is
+ * convenient, they all describe the same money.
+ *
+ * ```ts
+ * const u = await client.usage();
+ * u.credits.remaining; // 5070 credits left
+ * u.costs["verify"]; // 10 credits per verification
+ * u.cost_options.verify?.depth?.low; // 5 — half price at depth: "low"
+ * u.verify.remaining; // 507 verifications, the same balance divided
+ * ```
+ *
+ * `extract` is free at the pool (`costs.extract` is 0) and carries a
+ * per-account daily fair-use cap instead; it rejects with 429, not 402.
+ *
+ * The depth prices are **prices, not capabilities** — there is deliberately
+ * no `verify_low` block beside `verify`. See {@link Usage.cost_options}.
+ */
+export interface Usage {
+  /**
+   * The tier slug — `"free" | "plus" | "pro" | "scale"`. This is the
+   * field to branch on; it is stable. The Pro plan's slug was `"developer"`
+   * until 2026-09-15.
+   */
+  plan: string;
+  /**
+   * The same tier as display copy (`"Pro"`). Separate from
+   * {@link Usage.plan} on purpose: this one is copy and may be reworded, so
+   * comparing against it breaks on a rename that ought to be free. Empty
+   * string on servers predating this field — fall back to `plan`.
+   */
+  plan_label: string;
+  /**
+   * @deprecated Read `credits.resets_at`, the same time. Kept for existing
+   * callers: `usage()` fills it from `credits.resets_at` when the server
+   * does not send it.
+   */
+  quota_resets_at: string | null;
+  /**
+   * The pool — the authoritative balance every capability spends from.
+   * Present since the 2026-08-29 credits release.
+   */
+  credits: UsageCredits;
+  /**
+   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`,
+   * `extract`), at that capability's default price. Keys are the server's
+   * own, verbatim — never rewritten by the SDK — and a zero cost means the
+   * capability is free at the pool and bounded by a daily cap instead. New
+   * keys appear here without an SDK release.
+   *
+   * Capability names and nothing else. Prices that depend on a request
+   * parameter are in {@link Usage.cost_options}.
+   */
+  costs: Record<string, number>;
+  /**
+   * Prices that depend on a request PARAMETER, nested capability → parameter
+   * → value:
+   *
+   * ```ts
+   * u.cost_options.verify?.depth; // { standard: 10, low: 5 }
+   * ```
+   *
+   * Read as "on `verify`, the `depth` parameter prices like this". `{}` on
+   * servers predating this field.
+   *
+   * Every capability here also appears in {@link Usage.costs} at its default
+   * price, so reading only `costs` is imprecise, never wrong.
+   *
+   * ```ts
+   * const low = u.cost_options.verify?.depth?.low ?? u.costs["verify"]!;
+   * const lowDepthLeft = Math.floor(u.credits.remaining / low);
+   * ```
+   *
+   * Every level is optional at the type level because every level is
+   * genuinely optional at runtime: a server predating this field sends
+   * `{}`, and the capability-default in `costs` is the correct fallback.
+   *
+   * ```ts
+   * ```
+   *
+   * Nested rather than flat so that a future request parameter adds a key
+   * under its capability instead of a new top-level entry — `costs` stays a
+   * list of capability names, safe to iterate.
+   *
+   * You are charged for the depth you **requested**, not the one served; a
+   * verdict served from the last hour's cache is free (except a `verify` that
+   * issues a new warranty certificate). The `depth` echoed on a completed
+   * verification is what the verdict was PRODUCED with, so it can read
+   * `standard` on a `low` request — the echo describes the evidence, the
+   * charge follows the request.
+   */
+  cost_options: Record<string, Record<string, Record<string, number>>>;
+  /**
+   * @deprecated Derive from {@link Usage.credits} and {@link Usage.costs}
+   * instead. Kept for existing callers: `usage()` computes the block from
+   * `credits` and `costs` when the server sends only those.
+   *
+   * ```ts
+   * const left = Math.floor(u.credits.remaining / u.costs["verify"]!);
+   * ```
+   */
+  verify: UsageCapacity;
+  /** @deprecated See {@link Usage.verify}. */
+  ask: UsageCapacity;
+  /** @deprecated See {@link Usage.verify}. */
+  assess: UsageCapacity;
+  extract: UsageExtract;
+  /**
+   * Whether this key has a webhook signing secret provisioned. `POST /verify`
+   * with a `webhook_url` is rejected without one, so callers that rely on
+   * webhook delivery can check this up front. Reports existence only — the
+   * secret value is never exposed here (shown once at rotation, never again).
+   *
+   * Optional: absent on servers predating this field, in which case it reads
+   * as `undefined` (treat that as "unknown", not `false`).
+   */
+  has_webhook_secret?: boolean;
+}
+/** One message in an `/ask` conversation thread. */
+export interface AskMessage {
+  role?: string;
+  content?: string;
+  created_at?: string;
+}
+/** Returned by `GET /ask/{verification_id}`. */
+export interface AskHistory {
+  messages: AskMessage[];
+  exchanges_used: number;
+  exchange_limit: number;
+  can_send: boolean;
+}
+/**
+ * Returned by `POST /ask/{verification_id}`.
+ *
+ * `content` is the assistant's reply text in a small markdown subset:
+ *
+ * - `**bold**` and `*italic*`
+ * - `- ` or `* ` bullet lists
+ * - Blank-line paragraph breaks; single newlines inside a paragraph
+ *   mean line break
+ *
+ * The model only produces these — no headings, no tables, no code
+ * blocks. Pass it through any markdown library or display it
+ * verbatim. See https://lenz.io/docs/quickstart#ask-reply-format.
+ *
+ * Pre-1.0.2 this interface declared a single `reply: string` field
+ * that never matched the wire — the server has always returned
+ * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
+ */
+export interface AskReply {
+  role?: string;
+  content?: string;
+  created_at?: string;
+}
+export interface VerifyInput {
+  /** The claim to check. A document is `text` (see `extract`); a claim is `claim`. */
+  claim?: string;
+  /** Accepted alias for `claim`; `claim` wins if both are given. */
+  text?: string;
+  sourceUrl?: string;
+  webhookUrl?: string;
+  /**
+   * "private" (default, owner-only) or "unlisted" (readable by
+   * verification_id and at the /c/ URL, but never listed in the Library
+   * or search). Omitted from the request body when unset — the server
+   * applies its "private" default.
+   */
+  visibility?: "private" | "unlisted";
+  /**
+   * Output language (ISO 639-1). Omit for English (default). Supported:
+   * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Or `"auto"`: the answer
+   * comes back in the language of the submitted text. A concrete code always
+   * wins. Omitted from the request body when empty so existing English
+   * callers keep byte-identical wire format.
+   */
+  language?: string;
+  /**
+   * "standard" (server default) or "low". "low" runs a shallower check —
+   * fewer sources, faster. Same models, same quota cost. Omitted from the
+   * request body when unset. The completed `Verification.depth` echoes the
+   * depth the verdict was actually produced with, which can be "standard"
+   * for a "low" request served from cache.
+   */
+  depth?: "standard" | "low";
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout replays the first response instead of running the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
+}
+/**
+ * Per-item shape for `verifyBatch`. All fields optional; the SDK accepts
+ * plain objects at runtime — this interface exists purely for IDE
+ * autocompletion (mirrors Python's `VerifyBatchItem` TypedDict).
+ *
+ * Precedence on conflicting language: per-item `language` overrides the
+ * batch-wide `language` on `VerifyBatchInput`, which overrides the
+ * implicit English default. SDK forwards both verbatim; server is
+ * authoritative on the merge.
+ */
+export interface VerifyBatchItem {
+  /**
+   * The item's claim. `null` is accepted so a row read off another response
+   * (e.g. `ReviewClaim.claim`) can be passed straight through.
+   */
+  claim?: string | null;
+  /** Accepted alias for `claim`; `claim` wins if both are given. */
+  text?: string | null;
+  /** Output language (ISO 639-1). `"auto"` is not accepted. */
+  language?: string;
+  source_url?: string;
+  webhook_url?: string;
+  idempotency_key?: string;
+  /** Per-item "private" | "unlisted"; overrides the batch-wide default. */
+  visibility?: "private" | "unlisted";
+  /** Per-item "standard" | "low"; overrides the batch-wide default. */
+  depth?: "standard" | "low";
+}
+export interface VerifyBatchInput {
+  claims: VerifyBatchItem[];
+  /** Batch-wide webhook URL; per-item value (if set) overrides. */
+  webhookUrl?: string;
+  /** Batch-wide output-language default; per-item `language` overrides. `"auto"` is not accepted. */
+  language?: string;
+  /** Batch-wide "private" | "unlisted" default; per-item `visibility` overrides. */
+  visibility?: "private" | "unlisted";
+  /** Batch-wide "standard" | "low" default; per-item `depth` overrides. */
+  depth?: "standard" | "low";
+  idempotencyKey?: string;
+}
+export interface ExtractInput {
+  text: string;
+  /** Output language (ISO 639-1). `"auto"` is not accepted here. */
+  language?: string;
+  /**
+   * Narrows the result to the claims this describes, e.g.
+   * `"market size, growth and competitors"`. At most 300 characters — a
+   * longer focus is rejected with a 422, never truncated.
+   *
+   * A focus can only select from the claims the extractor found: it cannot
+   * add a claim, reword one, reorder them, change the output language, or
+   * change what counts as a claim.
+   *
+   * When nothing matches, `status` is `"no_match"` and `identified_claims`
+   * is empty — the unfocused list is never substituted. Widen the focus and
+   * call again.
+   *
+   * A focused call costs the same single unit of the daily cap.
+   */
+  focus?: string;
+  /**
+   * Keep only the claims that can be traced directly back to the text, and
+   * say where the text makes each one (`locations` on the result). A claim
+   * found nowhere in the text, or found with a different figure, is left out;
+   * a list that ends up empty answers `status: "not_a_claim"`. Locating adds
+   * a few seconds.
+   *
+   * If the claims cannot be located, `locations` is `null` and the list is
+   * returned unfiltered.
+   *
+   * Defaults to `false`. Sent only when set, so an explicit `false` is sent
+   * and an omitted value leaves the server's default in charge.
+   */
+  locate?: boolean;
+  /**
+   * Per-call HTTP timeout. When omitted, `extract` waits at least 150s rather
+   * than the client's default: a long input can take more than 30s to
+   * extract.
+   */
+  timeoutMs?: number;
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout replays the first response instead of running the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
+}
+export interface AssessInput {
+  /**
+   * The claim to check. If it contains several atomic claims, each is
+   * verdicted separately. A document is `text` (see `extract`); a claim is
+   * `claim`.
+   */
+  claim?: string;
+  /** Accepted alias for `claim`; `claim` wins if both are given. */
+  text?: string;
+  /**
+   * A list of claims — up to 20 per call — assessed in one trip. Exactly
+   * one `AssessClaim` comes back per item, in this order. Mutually
+   * exclusive with `claim` / `text`: giving both throws before any request
+   * is made. A compound item is assessed on its main claim and lists the
+   * rest in `identified_claims`; an item without a verdict is an
+   * in-position `verdict: "Error"` row (free) with `error_code` and `hint`.
+   */
+  claims?: string[];
+  /**
+   * Output language (ISO 639-1), or `"auto"` for the language of the
+   * submitted text. See `VerifyInput.language`. With a `claims` list,
+   * `"auto"` chooses one language for the whole request (the language most
+   * items agree on, else English); name a code for a list in mixed languages.
+   */
+  language?: string;
+  /**
+   * Also write `suggested_rewrite` on each row: the claim with its wrong part
+   * corrected, for a claim the check found `"False"` or `"Mostly False"` with
+   * high confidence. Both forms, per row, no extra credit. Not itself
+   * verified: review it, or run it through `verify`, before using it. Sent
+   * as `suggest_rewrite` only when `true`.
+   */
+  suggestRewrite?: boolean;
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop replays the
+   * first response instead of running — and paying for — the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
+  /**
+   * Per-call HTTP timeout. When omitted, both forms wait at least 100s rather
+   * than the client's default: the server finds the claims and runs a
+   * 3-model panel inside one request (typically ~15s; a long text can take
+   * up to 90s).
+   */
+  timeoutMs?: number;
+}
+export interface AskSendInput {
+  message: string;
+  /**
+   * Optional language override (ISO 639-1). When omitted, the server
+   * uses the claim's stored language as the default. `"auto"` answers in
+   * the language of the claim being discussed.
+   */
+  language?: string;
+  /**
+   * Pin an `Idempotency-Key` so a retry of a question that already got a
+   * reply replays that reply instead of spending a second credit and leaving
+   * the question plus a second answer in the conversation. A retry sent while
+   * the first call is still running gets a 409 — there is no reply to replay
+   * yet.
+   *
+   * Never generated for you and never derived from the message, unlike
+   * `assess`: a reply depends on the conversation so far, so asking the same
+   * question again is a normal thing to do, and a key you did not choose would
+   * replay a stale answer. Without one, the call behaves exactly as before:
+   * a retry asks again.
+   */
+  idempotencyKey?: string;
+}
+export interface SelectInput {
+  /**
+   * One or more claims chosen from a multi_claim interrupt.
+   * Each must match a claim that was offered in the prior status response.
+   * Each selected claim fans out into its own pipeline.
+   */
+  claims?: string[];
+  /** Accepted alias for `claims`; `claims` wins if both are given. */
+  texts?: string[];
+  /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout replays the first response instead of running the call twice.
+   * Defaults to `true`, generating a random key per invocation that is reused
+   * across this client's own retries. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
+}
+export interface LibraryListInput {
+  page?: number;
+  sort?: "recent" | "most_true" | "most_untrue" | "relevance" | "random";
+  search?: string;
+  domain?: string;
+  entity?: string;
+  /** Restrict to one or more named curated collections, e.g. `["trivia"]`. */
+  curated?: string[];
+  /** Comma-separated verdict labels, e.g. "True,False". Others: "Mostly True", "Mixed", "Mostly False". */
+  verdict?: string;
+}
+/**
+ * Called once per poll while a verification is still running.
+ *
+ * It takes the `taskId` as well as the progress because the batch helper
+ * round-robins several ids in one loop — without it a callback cannot tell
+ * the caller which claim moved. A throw inside it is swallowed and never
+ * breaks the poll.
+ */
+export type OnProgress = (taskId: string, progress: Progress) => void;
+export interface VerifyAndWaitInput extends VerifyInput {
+  /** Deadline for polling to a terminal state. Default 300s. */
+  timeoutMs?: number;
+  /** See {@link OnProgress}. The only way to see the stage during the ~90s wait. */
+  onProgress?: OnProgress;
+}
+export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
+  /** Overall deadline for polling every item to a terminal state. Default 300s. */
+  timeoutMs?: number;
+  /** See {@link OnProgress}. Fires per still-running item per round. */
+  onProgress?: OnProgress;
+}
+/** Options for `wait()`. */
+export interface WaitOptions {
+  /** Deadline before raising `LenzTimeoutError`. Default 300s. */
+  timeoutMs?: number;
+  /** See {@link OnProgress}. */
+  onProgress?: OnProgress;
+}
+/** The five verdict labels a check can return. */
+export type VerdictLabel = "True" | "Mostly True" | "Mixed" | "Mostly False" | "False";
+/** A confidence band. */
+export type ConfidenceBand = "low" | "medium" | "high";
+/**
+ * Where a review stands. `verifying` is skipped when no deep check was
+ * planned; `completed` and `failed` are terminal.
+ */
+export type ReviewStatus = "queued" | "assessing" | "verifying" | "completed" | "failed";
+/**
+ * The one field to branch on once a review is terminal (`null` before):
+ *
+ * - `clean` — every selected claim was assessed, none is an issue, and every
+ *   planned deep check completed. It covers the claims the review selected,
+ *   at the depth the policy chose.
+ * - `issues_found` — at least one claim's final verdict is `False`,
+ *   `Mostly False` or `Mixed`.
+ * - `incomplete` — an assessment or a planned deep check failed.
+ * - `unchecked` — the review failed before assessing anything (no claim in
+ *   the draft, not enough credits, an outage, an unreadable input).
+ *
+ * On a review that asked for the citation check, a citation issue makes it
+ * `issues_found` too (`issues` may then be empty: the rows are in
+ * `citation_issues`), and a failed citation check makes it `incomplete`.
+ */
+export type ReviewOutcome = "clean" | "issues_found" | "incomplete" | "unchecked";
+/**
+ * Why a claim did or did not get a deep check. `not_selected`: no rule
+ * matched. `planned`: it got one. `cap`: a rule matched but
+ * `maxVerifications` was reached. `credits`: the balance ran out.
+ * `account_cap`: the account's allowance of running deep checks was reached.
+ */
+export type EscalationDisposition =
+  | "not_selected"
+  | "planned"
+  | "cap"
+  | "credits"
+  | "account_cap"
+  | (string & NonNullable<unknown>);
+/** The escalation policy as the review resolved it (defaults filled in). */
+export interface EscalationPolicy {
+  verdicts: VerdictLabel[];
+  confidence: ConfidenceBand[];
+  max_verifications: number;
+  max_assessments: number;
+  depth: "standard" | "low";
+  /**
+   * How many of the draft's citations the review checks; `0` (or `null` from
+   * an older server) when it checks none.
+   */
+  max_citations: number | null;
+  /** Whether the review computes suggested edits (`false` from an older server). */
+  suggest_edits: boolean;
+}
+/** Why a claim did or did not get a deep check. */
+export interface Escalation {
+  /** Which rules matched: `verdict`, `confidence`, both, or none. */
+  matched_rules: Array<"verdict" | "confidence">;
+  disposition: EscalationDisposition;
+}
+/** The failure block `GET /verify/status` answers a failed task with. */
+export interface ReviewFailureBlock {
+  /**
+   * The specific cause, e.g. `no_checkable_claim`, `insufficient_credits`,
+   * `assessment_failed`, `timeout`. An open set; `null` when the API has no
+   * specific cause to name.
+   */
+  code?: string | null;
+  /** One sentence on what went wrong; `null` when the server sent none. */
+  detail?: string | null;
+  /**
+   * @deprecated Read `code`. The same cause in its original words
+   * (`no_claim` / `not_a_claim` where `code` says `no_checkable_claim`).
+   */
+  failure_reason: string | null;
+  failure_class: FailureClass;
+  /** Resubmitting the same input can succeed. */
+  retryable: boolean;
+  /** One sentence on what to do next. */
+  hint: string | null;
+  docs_url: string;
+}
+export interface ReviewAssessmentCounts {
+  completed: number;
+  failed: number;
+}
+export interface ReviewVerificationCounts {
+  planned: number;
+  completed: number;
+  failed: number;
+}
+/**
+ * Three disjoint counts over the citation rows. `checked`: a finding other
+ * than `unchecked`. `unchecked`: could not be checked, for a reason of the
+ * page or the draft. `failed`: no finding, for a reason of ours. A row still
+ * running is in none of the three.
+ */
+export interface ReviewCitationCheckCounts {
+  checked: number;
+  unchecked: number;
+  failed: number;
+}
+/**
+ * Counters are `null` until their denominator is known. The `citation*`
+ * counts are `null` (`citation_issues` 0) on a review that did not ask for
+ * the citation check.
+ */
+export interface ReviewSummary {
+  /** Claims this review works on; `null` until the draft is read. */
+  claims_selected: number | null;
+  /** Claims found in the draft; `null` until the draft is read. */
+  claims_found?: number | null;
+  /** The resolved `maxAssessments`. */
+  claim_limit: number;
+  /** More than `claim_limit` claims were found: `more_claims` lists the rest. */
+  claim_limit_exceeded?: boolean | null;
+  /**
+   * @deprecated Read `claim_limit_exceeded`. The draft held at least
+   * `claim_limit` claims, so more MAY exist.
+   */
+  claim_limit_reached: boolean | null;
+  /** The text was cut at 50,000 characters. */
+  input_truncated: boolean;
+  assessments: ReviewAssessmentCounts | null;
+  verifications: ReviewVerificationCounts | null;
+  /** `issues.length`. */
+  issues: number;
+  /** Citations with a URL or a DOI in the draft (exact; each use counts). */
+  citations_found: number | null;
+  /** How many of them the review checks: the first, in the draft's order. */
+  citations_selected: number | null;
+  /** The resolved `maxCitations`. */
+  citation_limit: number | null;
+  /** `citations_found` is over `citation_limit`: `more_citations` lists the rest. */
+  citation_limit_exceeded?: boolean | null;
+  /** @deprecated Read `citation_limit_exceeded`; the same value. */
+  citation_limit_reached: boolean | null;
+  citation_checks: ReviewCitationCheckCounts | null;
+  /** `citation_issues.length`. */
+  citation_issues: number;
+  /**
+   * Why the citation check was asked for and did not run: `url_input` (the
+   * draft was one URL), `insufficient_credits` or `switched_off`.
+   */
+  citations_skipped:
+    | "url_input"
+    | "insufficient_credits"
+    | "switched_off"
+    | (string & NonNullable<unknown>)
+    | null;
+}
+export interface ReviewCredits {
+  /**
+   * Net credits this review cost the account, its citation checks included.
+   * Authoritative once no deep check or citation check is running; read it
+   * at `completed`.
+   */
+  charged: number;
+}
+/** The one answer to read for a claim: a completed deep check overrides the quick one. */
+export interface ReviewResult {
+  verdict: VerdictLabel | "Error";
+  confidence: ConfidenceBand | null;
+  source: "assessment" | "verification";
+  /** The verdict is `False`, `Mostly False` or `Mixed`. */
+  is_issue: boolean;
+}
+/** The quick check (`/assess`) on one claim. */
+export interface ReviewAssessment {
+  status: "pending" | "running" | "completed" | "failed";
+  verdict: VerdictLabel | "Error" | null;
+  confidence: ConfidenceBand | null;
+  /** A reviewer's reasoning for the verdict, not sourced evidence. */
+  rationale: string | null;
+  /** When set, the reasoning of the reviewer who disagreed. */
+  dissent: string | null;
+  /** Set when the quick check served an existing deep verdict. */
+  verification_url: string | null;
+  /**
+   * @deprecated Read `failure.code`. On a failed assessment, as on `/assess`
+   * rows (`no_claim` where `failure.code` says `no_checkable_claim`).
+   */
+  error_code: string | null;
+  /** Other claims found in this item that were not assessed; `[]` when none. */
+  more_claims?: string[];
+  /** @deprecated Read `more_claims`; the same list. */
+  identified_claims: string[];
+  /** One sentence on what to send next (a compound item); else `null`. */
+  hint: string | null;
+  /**
+   * With `suggestEdits: true`: the claim with its wrong part corrected, from
+   * the quick check's reasoning, when it found the claim `"False"` or
+   * `"Mostly False"` with high confidence. `null` otherwise, and on a body
+   * from an API that predates the field. Not itself verified: review it, or
+   * run it through `verify`, before using it.
+   */
+  suggested_rewrite: string | null;
+  failure: ReviewFailureBlock | null;
+}
+/** An entity a deep check named. Either field may be `null`. */
+export interface ReviewEntity {
+  name: string | null;
+  /** The Wikidata id, when one was matched. */
+  qid: string | null;
+}
+/** The deep check (`/verify`) on one claim. */
+export interface ReviewVerification {
+  status: "processing" | "completed" | "failed";
+  /**
+   * `purged` once the verification was deleted or removed under the
+   * account's retention period: the verdict and ids stay, every text field
+   * and both URLs are `null`.
+   */
+  content_status: "available" | "purged";
+  verification_id: string | null;
+  task_id: string | null;
+  claim: string | null;
+  language: string | null;
+  /** EFFECTIVE: a same-account cache hit keeps its own visibility. */
+  visibility: string | null;
+  /** EFFECTIVE: a cache hit may serve `standard` for a `low` request. */
+  depth: string | null;
+  domain: string | null;
+  entities: ReviewEntity[];
+  verdict: VerdictLabel | null;
+  confidence: ConfidenceBand | null;
+  lenz_score: number | null;
+  key_finding: string | null;
+  executive_summary: string | null;
+  suggested_rewrite: string | null;
+  warnings: string[];
+  created_at: string | null;
+  /** When the deep check finished; absent from the API's original response shape. */
+  completed_at?: string | null;
+  /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
+  modified_at: string | null;
+  /** `GET /verifications/{id}`: the sources. */
+  verification_url: string | null;
+  /** The verification's page on lenz.io. */
+  url: string | null;
+  failure: ReviewFailureBlock | null;
+}
+/**
+ * One replacement in the draft: the span `start`..`end` of the `text` you
+ * sent (Unicode code points, `end` exclusive, as in {@link Position}), `text`
+ * exactly that slice, and `replacement` what takes its place (`""` deletes
+ * it). `position` is the index of the claim row's `positions` entry the edit
+ * sits in, for grouping by passage.
+ *
+ * Compare `text` with your draft before you apply an edit, so a draft that
+ * changed since is never edited in the wrong place.
+ */
+export interface SuggestedEdit {
+  position: number;
+  start: number;
+  end: number;
+  text: string;
+  replacement: string;
+}
+/**
+ * The smallest edits to the draft that make it say what the claim's
+ * `suggested_rewrite` says (the deep check's, or the quick check's on a
+ * claim that stayed on the quick verdict), in the draft's own language
+ * (`review({ suggestEdits: true })`). `status` is `"pending"` while they are
+ * computed (`edits` is `null`; keep polling) and `"completed"` once settled,
+ * which includes settling on none (`edits` is `[]`: no edit could be made
+ * safely, or it could not be computed). Not themselves verified:
+ * review them before you publish.
+ */
+export interface SuggestedEdits {
+  status: "pending" | "completed";
+  edits: SuggestedEdit[] | null;
+}
+/** One claim of the draft, in the order the draft's claims were read. */
+export interface ReviewClaim {
+  index: number;
+  /** The claim as Lenz states it. */
+  claim: string | null;
+  /**
+   * Every place the draft makes this claim, in text order: at most 10.
+   * `start` / `end` are Unicode code points of `text` as you sent it,
+   * half-open, the same shape as a citation's `position` — see
+   * {@link Position} for slicing by code point. `text` is the passage. For a
+   * URL draft `start` / `end` are `null` and `text` carries the passage.
+   *
+   * `null` when the claim could not be located, or once a zero-retention
+   * draft is gone. A body from an API that predates the field reads as
+   * `null` too.
+   */
+  positions: Position[] | null;
+  /** `null` while the quick check runs, and on a failed one. */
+  result: ReviewResult | null;
+  assessment: ReviewAssessment;
+  /** `null` on a failed assessment. */
+  escalation: Escalation | null;
+  /** `null` unless a deep check was planned. */
+  verification: ReviewVerification | null;
+  /**
+   * The claim's suggested edits to the draft (`review({ suggestEdits: true })`).
+   * `null` when not asked, when the claim got no suggested rewrite from a
+   * completed deep check or its quick check, when its passage is not in a supported language or could not be
+   * placed, once a zero-retention draft is gone, and from an API that
+   * predates the field.
+   */
+  suggested_edits: SuggestedEdits | null;
+}
+/**
+ * A claim whose final verdict is `False`, `Mostly False` or `Mixed`. Until
+ * the review is `completed` the list can still change.
+ */
+export interface ReviewIssue {
+  claim_index: number;
+  claim: string | null;
+  /** The deep check's reading of the claim, when it differs from `claim`. */
+  verified_claim: string | null;
+  verdict: VerdictLabel;
+  confidence: ConfidenceBand | null;
+  /** Which check the verdict comes from. */
+  source: "assessment" | "verification";
+  /** `null` on a quick-only row. */
+  verification_id: string | null;
+  verification_status: "processing" | "completed" | "failed" | null;
+  verification_url: string | null;
+  url: string | null;
+  /** Why the row did or did not get a deep check. */
+  escalation: Escalation | null;
+  /** Set on a deep-checked row. */
+  key_finding: string | null;
+  /** The quick check's reasoning; may be `null`. */
+  rationale: string | null;
+  /**
+   * The claim rewritten to fit what the check found: the deep check's when
+   * the claim has one, otherwise, when the review asked for suggested edits,
+   * the quick check's (for a claim found `"False"` or `"Mostly False"` with
+   * high confidence); `source` says which check it came from. `null` when
+   * neither suggested one.
+   *
+   * A suggestion, not itself verified: review it or run it through /verify
+   * before you use it.
+   */
+  suggested_rewrite: string | null;
+  /** The deep check's failure, when it failed. */
+  failure: ReviewFailureBlock | null;
+  /** A copy of its claim row's `suggested_edits`. */
+  suggested_edits: SuggestedEdits | null;
+}
+/** A claim outside the issue set whose work failed. */
+export interface ReviewFailure {
+  claim_index: number;
+  claim: string | null;
+  stage: "assessment" | "verification";
+  failure: ReviewFailureBlock | null;
+}
+/**
+ * What a citation check found, most serious first. The first seven are
+ * issues; `supported` and `unchecked` are not.
+ */
+export type ReviewCitationFinding =
+  | "doi_not_found"
+  | "page_not_found"
+  | "contradicted"
+  | "quote_not_in_source"
+  | "not_in_source"
+  | "partly_supported"
+  | "metadata_mismatch"
+  | "supported"
+  | "unchecked";
+/** Which check a citation's finding came from. */
+export type ReviewCitationSource = "doi" | "page" | "support" | "quote" | "metadata";
+/**
+ * Why a citation's finding is `unchecked`. An open set: a value this version
+ * does not list can arrive.
+ */
+export type ReviewCitationUncheckedReason =
+  | "no_text"
+  | "partial_text"
+  | "login_required"
+  | "unsupported_site"
+  | "no_statement"
+  | "invalid_url"
+  | "other_version"
+  | "inconclusive"
+  | "ambiguous_reference"
+  | (string & NonNullable<unknown>);
+/** The one answer to read for a citation, derived from its `check`. */
+export interface ReviewCitationResult {
+  finding: ReviewCitationFinding;
+  /** `null` on `unchecked`. */
+  source: ReviewCitationSource | null;
+  /** The row is in `citation_issues`. */
+  is_issue: boolean;
+}
+/** A DOI's record in the registry. */
+export interface ReviewCitationRecord {
+  title: string | null;
+  authors: string[];
+  year: number | null;
+  journal: string | null;
+}
+/** One way the reference differs from the registry's record. */
+export interface ReviewCitationDifference {
+  field: "title" | "authors" | "year" | "journal";
+  cited: string | null;
+  registered: string | null;
+}
+/** A citation's check. `status` is progress, as on `assessment`. */
+export interface ReviewCitationCheck {
+  status: "pending" | "running" | "completed" | "failed";
+  /** What reading the source gave. */
+  page_read: "full" | "partial" | "not_found" | "none" | null;
+  page_title: string | null;
+  page_published_date: string | null;
+  page_language: string | null;
+  /** Where the text was actually read from (after redirects, or a free copy of a paper). */
+  source_url: string | null;
+  /** For a DOI: which version of the paper was read. */
+  source_version: "published" | "accepted" | "submitted" | null;
+  support: "supported" | "partly_supported" | "contradicted" | "not_in_source" | "unchecked" | null;
+  /** The verified passage of the source the support answer rests on. */
+  snippet: string | null;
+  /** A reviewer's note: reasoning, not a checked source. */
+  rationale: string | null;
+  /** `null` when the draft quoted nothing from this source. */
+  quote: "matched" | "not_in_source" | "unchecked" | null;
+  /** The quoted excerpt the quote check did not find; `null` unless `quote` is `not_in_source`. */
+  missing_quote: string | null;
+  /** `null` with no DOI, or when the registry did not answer. */
+  doi_registered: boolean | null;
+  /** `null` with no DOI. */
+  metadata: "consistent" | "mismatch" | "unchecked" | null;
+  metadata_differences: ReviewCitationDifference[];
+  registered: ReviewCitationRecord | null;
+  unchecked_reason: ReviewCitationUncheckedReason | null;
+  /** One sentence on what to do next, on an `unchecked` row. */
+  hint: string | null;
+  failure: ReviewFailureBlock | null;
+}
+/**
+ * One citation of the draft (a URL or a DOI where the draft uses it), in the
+ * draft's order.
+ */
+export interface ReviewCitation {
+  index: number;
+  /** The citation as the draft writes it. */
+  reference: string | null;
+  cited_url: string | null;
+  /** The DOI, normalised. */
+  doi: string | null;
+  /** The draft's sentence the citation is attached to, link syntax reduced to its words. */
+  statement: string | null;
+  /** The words the draft quotes from this source; `[]` when none. */
+  quotes: string[];
+  /** Where `statement` sits in the text as sent, link syntax included (`text` is `null`). */
+  position: Position | null;
+  /** `null` until the check has ended, and on a failed row with nothing established. */
+  result: ReviewCitationResult | null;
+  check: ReviewCitationCheck;
+}
+/**
+ * A citation whose finding is an issue; most serious first, then in the
+ * draft's order. `snippet` and `rationale` are set only when `source` is
+ * `support`.
+ */
+export interface ReviewCitationIssue {
+  citation_index: number;
+  reference: string | null;
+  cited_url: string | null;
+  doi: string | null;
+  statement: string | null;
+  quotes: string[];
+  /** Where `statement` sits in the text as sent, link syntax included (`text` is `null`). */
+  position: Position | null;
+  finding: Exclude<ReviewCitationFinding, "supported" | "unchecked">;
+  source: ReviewCitationSource;
+  snippet: string | null;
+  rationale: string | null;
+  /** On `quote_not_in_source`: the quoted excerpt that was not found. */
+  missing_quote: string | null;
+  metadata_differences: ReviewCitationDifference[];
+  page_title: string | null;
+  /** Set when another part of the check failed after the finding was established. */
+  failure: ReviewFailureBlock | null;
+}
+/**
+ * A citation found in the draft past the ones this review checked: found but
+ * not checked. Send it in a later request to check it.
+ */
+export interface ReviewMoreCitation {
+  index: number;
+  reference: string | null;
+  cited_url: string | null;
+  doi: string | null;
+  /** The draft's sentence around the citation. */
+  sentence: string;
+  /** Where `statement` sits in the text as sent, link syntax included (`text` is `null`). */
+  position: Position | null;
+}
+/** A citation whose check failed with nothing established. */
+export interface ReviewCitationFailure {
+  citation_index: number;
+  reference: string | null;
+  cited_url: string | null;
+  doi: string | null;
+  failure: ReviewFailureBlock | null;
+}
+/** What both views of a review share. */
+export interface ReviewEnvelope {
+  review_id: string;
+  view: "full" | "issues";
+  status: ReviewStatus;
+  /** `null` until terminal. */
+  outcome: ReviewOutcome | null;
+  created_at: string;
+  completed_at: string | null;
+  /** The output language, resolved (`""` reads as English). */
+  language: string;
+  policy: EscalationPolicy;
+  summary: ReviewSummary;
+  credits: ReviewCredits;
+  /** How long to wait before polling again; `null` once terminal. */
+  poll_after_seconds: number | null;
+  /** Ordered by severity, then confidence, then position. */
+  issues: ReviewIssue[];
+  failures: ReviewFailure[];
+  /** Citations whose finding is an issue; `[]` when the check was not asked for. */
+  citation_issues: ReviewCitationIssue[];
+  /** Citations whose check failed with nothing established; `[]` when not asked for. */
+  citation_failures: ReviewCitationFailure[];
+  /**
+   * Claims found past `maxAssessments`, in the draft's order: found but not
+   * checked. `null` until the draft is read, `[]` when there are none.
+   */
+  more_claims: string[] | null;
+  /**
+   * Where the draft makes each of `more_claims`: one `{claim, positions}`
+   * entry per string, same order (see {@link ReviewClaim.positions}; an
+   * entry's `positions` is `null` when that claim could not be placed).
+   * `null` until the draft is read. A body from an API that predates the
+   * field reads as `null` too.
+   */
+  more_claim_locations: ClaimLocation[] | null;
+  /**
+   * Citations found past the ones checked (up to 100): found but not checked.
+   * `null` until the draft is read, `[]` when there are none.
+   */
+  more_citations: ReviewMoreCitation[] | null;
+  /** On `failed`, why. */
+  failure: ReviewFailureBlock | null;
+}
+/** `GET /reviews/{id}`: every claim, with the issues and failures. */
+export interface ReviewFull extends ReviewEnvelope {
+  view: "full";
+  claims: ReviewClaim[];
+  /** Every checked citation; `[]` when the check was not asked for. */
+  citations: ReviewCitation[];
+}
+/** `GET /reviews/{id}?view=issues`: the envelope without `claims`. */
+export interface ReviewIssues extends ReviewEnvelope {
+  view: "issues";
+}
+/** The `POST /review` receipt. `status` is always `queued`, not the current state. */
+export interface ReviewStarted {
+  review_id: string;
+  status: "queued";
+}
+export interface ReviewInput {
+  /** The draft, up to 50,000 characters (longer text is cut), or one public http(s) URL. */
+  text: string;
+  /**
+   * Quick-check labels that get a deep check. Default
+   * `["False", "Mostly False", "Mixed"]`; `[]` means no label rule.
+   */
+  verdicts?: VerdictLabel[];
+  /** Quick-check confidence bands that get a deep check. Default `["low"]`; `[]` means no band rule. */
+  confidence?: ConfidenceBand[];
+  /**
+   * How many of the draft's claims, most check-worthy first, get a quick
+   * verdict (0-20). Default 20; `0` checks no claim (with `maxCitations`:
+   * a review of the draft's citations only).
+   */
+  maxAssessments?: number;
+  /** The deep-check cap (0-20). Default 5; `0` makes an assess-only review. */
+  maxVerifications?: number;
+  /** Depth of every deep check. Default `"standard"`. */
+  depth?: "standard" | "low";
+  /**
+   * Also check the draft's first N citations (1-20; links and DOIs, read from
+   * `text`; keep a link as a markdown link, `[words](https://...)`): does
+   * each source say what the draft says it does? Sent as
+   * `escalate.max_citations`. Omitted or `0`: no citation is checked and
+   * nothing is sent.
+   */
+  maxCitations?: number;
+  /**
+   * Also return, for each claim with a suggested rewrite (from its deep
+   * check, or from its quick check when it stayed on the quick verdict), the
+   * smallest edits to the draft that make it say what the rewrite says, in
+   * the draft's own language (`ReviewClaim.suggested_edits`, copied on its
+   * issue). No extra credits; the review completes once they are settled.
+   * Sent as `escalate.suggest_edits` only when `true`.
+   */
+  suggestEdits?: boolean;
+  /** Output language of every claim and rewrite (ISO 639-1). Omit for English. `"auto"` is not accepted. */
+  language?: string;
+  /**
+   * Where `review.completed` / `review.failed` go. Omitted or `null`: the
+   * credential's default webhook URL. `""`: no webhook for this review. A URL:
+   * that URL.
+   */
+  webhookUrl?: string | null;
+  /** Applied to every deep check. Default `"private"`. */
+  visibility?: "private" | "unlisted";
+  /**
+   * A resend with the same key within 24 hours returns the same review; a new
+   * key is a new review. When omitted, a random key is generated per call and
+   * reused across this client's own retries.
+   */
+  idempotencyKey?: string;
+}
+export interface GetReviewOptions {
+  /** `"issues"` drops `claims[]`. Default `"full"`. */
+  view?: "full" | "issues";
+}
+/**
+ * One statement and the source it cites, for `citecheck({ pairs })`:
+ * `statement` (1 to 1,000 characters) and exactly one of `url` (http or
+ * https) and `doi` (the DOI alone, like `10.1038/nature12373`).
+ */
+export interface CitationPair {
+  statement: string;
+  url?: string;
+  doi?: string;
+  /** Up to 3 excerpts the statement quotes from the source, each 15 to 500 characters and words of the statement. */
+  quotes?: string[];
+  /** With `doi`: the title the reference gives. */
+  cited_title?: string;
+  /** With `doi`: the authors, family names, at most 10. */
+  cited_authors?: string[];
+  /** With `doi`: the year the reference gives, four digits. */
+  cited_year?: string;
+  /** With `doi`: the journal the reference gives. */
+  cited_journal?: string;
+}
+/** Send exactly one of `text` and `pairs`. */
+export interface CitecheckInput {
+  /**
+   * A draft, up to 50,000 characters, with its links (markdown links, bare
+   * URLs, `doi:` and `doi.org` forms, `[n]` markers with a reference list).
+   */
+  text?: string;
+  /** 1 to 20 statement-source pairs, each checked as it is. */
+  pairs?: CitationPair[];
+  /** With `text`: check its first N citations (1-20). Default 20. */
+  maxCitations?: number;
+  /**
+   * The language Lenz writes the reasoning in. English when omitted; `"auto"`
+   * is not accepted. Hints
+   * are always in English, and the passage and the quote stay verbatim in the
+   * page's language.
+   */
+  language?: string;
+  /**
+   * Where `citecheck.completed` / `citecheck.failed` go. Omitted or `null`:
+   * the credential's default webhook URL. `""`: no webhook. A URL: that URL.
+   */
+  webhookUrl?: string | null;
+  /**
+   * A resend with the same key within 24 hours returns the same check. When
+   * omitted, a random key is generated per call.
+   */
+  idempotencyKey?: string;
+}
+/** The `POST /citecheck` receipt. `status` is always `queued`. */
+export interface CitecheckStarted {
+  citecheck_id: string;
+  status: "queued";
+}
+export interface CitecheckPolicy {
+  /** How many citations are checked (for pairs, the number of pairs). */
+  max_citations: number | null;
+}
+/** Counts over the check, as on a review's `summary`. */
+export interface CitecheckSummary {
+  /** Citations in the text, or the pairs sent; `null` until read. */
+  citations_found: number | null;
+  citations_selected: number | null;
+  citation_limit: number | null;
+  /** `citations_found` is over `citation_limit`. */
+  citation_limit_exceeded?: boolean | null;
+  /** @deprecated Read `citation_limit_exceeded`; the same value. */
+  citation_limit_reached: boolean | null;
+  citation_checks: ReviewCitationCheckCounts | null;
+  citation_issues: number;
+}
+/**
+ * Where a citation check stands. `completed` and `failed` are terminal.
+ */
+export type CitecheckStatus = "queued" | "checking" | "completed" | "failed";
+/** `GET /citechecks/{id}`: a citation check, with the review's citation rows. */
+export interface Citecheck {
+  citecheck_id: string;
+  status: CitecheckStatus;
+  /**
+   * `null` until terminal. `incomplete`: a citation could not be checked
+   * for a reason of ours.
+   */
+  outcome: ReviewOutcome | null;
+  created_at: string;
+  completed_at: string | null;
+  /** The language the reasoning is written in (ISO 639-1); absent from older servers. */
+  language?: string;
+  /** How long to wait before polling again; `null` once terminal. */
+  poll_after_seconds: number | null;
+  policy: CitecheckPolicy;
+  summary: CitecheckSummary;
+  credits: ReviewCredits;
+  citations: ReviewCitation[];
+  citation_issues: ReviewCitationIssue[];
+  citation_failures: ReviewCitationFailure[];
+  /**
+   * The text's citations past the ones checked (up to 100): found but not
+   * checked. `null` until the text is read; `[]` for pairs.
+   */
+  more_citations: ReviewMoreCitation[] | null;
+  /** On `failed`, why. */
+  failure: ReviewFailureBlock | null;
+}
+export interface CitecheckAndWaitOptions {
+  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  timeoutMs?: number;
+  /** Called with the check on every poll whose body changed. A throw inside it is swallowed. */
+  onUpdate?: (check: Citecheck) => void;
+}
+export interface ReviewAndWaitOptions {
+  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  timeoutMs?: number;
+  /**
+   * Called with the review on every poll whose body changed. A throw inside
+   * it is swallowed and never breaks the wait.
+   */
+  onUpdate?: (review: ReviewFull) => void;
+}

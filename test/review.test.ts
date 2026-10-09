@@ -190,23 +190,34 @@ describe("review()", () => {
   });
 
   for (const reviewId of [null, "", 42]) {
-    it(`a 409 idempotency_conflict with review_id ${JSON.stringify(reviewId)} still throws`, async () => {
-      const { fetch } = makeFetch([
-        {
-          status: 409,
-          body: {
-            detail: "Still being created.",
-            code: "idempotency_conflict",
-            review_id: reviewId,
-          },
+    it(`a 409 idempotency_conflict with review_id ${JSON.stringify(reviewId)} is retried with the same key, then throws`, async () => {
+      const conflict = {
+        status: 409,
+        body: {
+          detail: "Still being created.",
+          code: "idempotency_conflict",
+          review_id: reviewId,
         },
-      ]);
-      const client = new Lenz({ apiKey: "lenz_t", fetch });
-      const err = (await client
-        .review({ text: DRAFT, idempotencyKey: "k" })
-        .catch((e: unknown) => e)) as LenzError;
+      };
+      const { fetch, calls } = makeFetch([conflict, conflict, conflict, conflict]);
+      vi.useFakeTimers();
+      let err: LenzError;
+      try {
+        const client = new Lenz({ apiKey: "lenz_t", fetch });
+        const pending = client
+          .review({ text: DRAFT, idempotencyKey: "k" })
+          .catch((e: unknown) => e);
+        await vi.advanceTimersByTimeAsync(20_000);
+        err = (await pending) as LenzError;
+      } finally {
+        vi.useRealTimers();
+      }
       expect(err).toBeInstanceOf(LenzError);
       expect(err.statusCode).toBe(409);
+      expect(err.retryable).toBe(true);
+      expect(err.idempotencyKey).toBe("k");
+      expect(calls).toHaveLength(4);
+      expect(calls.map((c) => sentHeaders(c)["Idempotency-Key"])).toEqual(["k", "k", "k", "k"]);
     });
   }
 
@@ -464,12 +475,17 @@ describe("reviewAndWait()", () => {
     expect(calls).toHaveLength(2); // the POST, then exactly one GET
   });
 
-  it("the submit's retry ladder stops at the deadline", async () => {
-    // An untyped 503 stating 3 s against a 500 ms budget: the submit gives
-    // up at once rather than sleeping past the deadline and retrying.
+  // Since 3.0 the budget starts after the submit, as every other wait's
+  // does, so it no longer bounds the submit (re-baselined from "the submit's
+  // retry ladder stops at the deadline" and "a hung submit is aborted at the
+  // deadline, not at the client timeout").
+  it("the submit's retry ladder is not cut by the wait's budget", async () => {
+    // An untyped 503 stating 3 s against a 500 ms budget: the submit sleeps
+    // the 3 s and retries; the budget starts once the review is accepted.
     const { fetch, calls } = makeFetch([
       { status: 503, body: { detail: "down" }, headers: { "Retry-After": "3" } },
       { status: 202, body: ACCEPTED },
+      { body: COMPLETED },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     let settled: unknown = "pending";
@@ -477,26 +493,28 @@ describe("reviewAndWait()", () => {
       (r) => (settled = r),
       (e: unknown) => (settled = e),
     );
-    await vi.advanceTimersByTimeAsync(600);
-    expect(settled).toBeInstanceOf(LenzAPIError);
-    expect(calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect((settled as ReviewFull).status).toBe("completed");
+    expect(calls).toHaveLength(3);
     await pending;
   });
 
-  it("a hung submit is aborted at the deadline, not at the client timeout", async () => {
+  it("a hung submit is aborted at the client timeout, not at the wait's budget", async () => {
     const hanging = vi.fn(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((_res, rej) => {
           init?.signal?.addEventListener("abort", () => rej(new Error("aborted")));
         }),
     ) as unknown as typeof fetch;
-    const client = new Lenz({ apiKey: "lenz_t", fetch: hanging });
+    const client = new Lenz({ apiKey: "lenz_t", fetch: hanging, maxRetries: 0 });
     let settled: unknown = "pending";
     const pending = client.reviewAndWait({ text: DRAFT }, { timeoutMs: 10_000 }).then(
       (r) => (settled = r),
       (e: unknown) => (settled = e),
     );
     await vi.advanceTimersByTimeAsync(10_001);
+    expect(settled).toBe("pending");
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(settled).toBeInstanceOf(LenzAPIError);
     expect(hanging).toHaveBeenCalledTimes(1);
     await pending;

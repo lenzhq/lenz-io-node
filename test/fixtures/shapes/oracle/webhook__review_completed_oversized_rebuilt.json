@@ -1,0 +1,11 @@
+{
+  "value": {
+    "event": "review.completed",
+    "taskId": "a965374a2694e66eac999ea4f927acce",
+    "attempt": 1,
+    "deliveredAt": "",
+    "verificationId": null,
+    "batchId": null,
+    "status": "completed"
+  }
+}

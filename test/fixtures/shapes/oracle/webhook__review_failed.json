@@ -1,21 +1,21 @@
 {
   "value": {
     "event": "review.failed",
-    "taskId": "3f0a3b05d2f4ae94b617c3759c31238e",
+    "taskId": "106bbf98cda52dd3daa44d55e7b60d00",
     "attempt": 1,
-    "deliveredAt": "2026-03-10T12:06:06.006666+00:00",
+    "deliveredAt": "2026-03-14T09:06:06.000456+00:00",
     "verificationId": null,
     "batchId": null,
     "status": "failed",
-    "eventId": "evt_c4ee0497cadc2f23b3fe8047",
-    "reviewId": "0508bbf8",
+    "eventId": "evt_bdde05a7582ff208391f15dd",
+    "reviewId": "d5bcd0e4",
     "review": {
-      "review_id": "0508bbf8",
+      "review_id": "d5bcd0e4",
       "view": "full",
       "status": "failed",
       "outcome": "unchecked",
-      "created_at": "2026-03-10T12:04:04.004444Z",
-      "completed_at": "2026-03-10T12:05:05.005555Z",
+      "created_at": "2026-03-14T09:04:04.000456Z",
+      "completed_at": "2026-03-14T09:05:05.000456Z",
       "language": "en",
       "policy": {
         "verdicts": ["False", "Mostly False", "Mixed"],
@@ -40,7 +40,10 @@
         "citation_limit_reached": null,
         "citation_checks": null,
         "citation_issues": 0,
-        "citations_skipped": null
+        "citations_skipped": null,
+        "claims_found": null,
+        "claim_limit_exceeded": null,
+        "citation_limit_exceeded": null
       },
       "credits": {
         "charged": 0
@@ -57,7 +60,9 @@
         "failure_class": "invalid_input",
         "retryable": false,
         "hint": "No factual statement that can be checked against evidence was found in the input. Send one factual claim, or run the text through /extract to enumerate its claims.",
-        "docs_url": "https://lenz.io/docs/errors#invalid-input"
+        "docs_url": "https://lenz.io/docs/errors#invalid-input",
+        "code": "no_checkable_claim",
+        "detail": null
       },
       "more_claims": null,
       "more_claim_locations": null,

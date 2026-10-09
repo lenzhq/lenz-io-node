@@ -17,7 +17,8 @@
  *     Request ID: {id}
  */
 
-import type { Citecheck, ReviewFull } from "./types.js";
+import { CANCELLED_DOCS_URL, legacyErrorBody, type RequestContext } from "./compat.js";
+import type { Citecheck, ReviewFailureBlock, ReviewFull } from "./types.js";
 
 export interface LenzErrorContext {
   message?: string;
@@ -29,6 +30,49 @@ export interface LenzErrorContext {
   /** The server's machine-readable error code, e.g. `"no_credits"`. */
   code?: string;
   body?: Record<string, unknown> | null;
+  /**
+   * Whether the same request can succeed later. Omitted: derived from
+   * `statusCode` and `body` (see {@link LenzError.retryable}).
+   */
+  retryable?: boolean | null;
+}
+
+/**
+ * The 409 codes that mean "the same request, sent again later, can succeed":
+ * the run is still going (`verification_not_ready`) or the first request
+ * with this `Idempotency-Key` is still in flight (`idempotency_conflict`).
+ */
+const RETRYABLE_409_CODES: readonly string[] = ["verification_not_ready", "idempotency_conflict"];
+
+/**
+ * `retryable` for an error built from a status and a body: a boolean the
+ * body states (in its `failure` block, else at the top level) wins; else 429,
+ * 5xx and the two in-progress 409s are retryable, any other 4xx is not, and
+ * no status is unknown.
+ */
+function deriveRetryable(
+  statusCode: number,
+  body: Record<string, unknown> | null | undefined,
+  code: string,
+): boolean | null {
+  const failure = body?.["failure"];
+  if (failure && typeof failure === "object" && !Array.isArray(failure)) {
+    const stated = (failure as Record<string, unknown>)["retryable"];
+    if (typeof stated === "boolean") return stated;
+  }
+  const stated = body?.["retryable"];
+  if (typeof stated === "boolean") return stated;
+  if (statusCode === 429 || (statusCode >= 500 && statusCode < 600)) return true;
+  // The code as sent too: on some endpoints the 2.x `code` reads "" here.
+  const sentCode = typeof body?.["code"] === "string" ? (body["code"] as string) : "";
+  if (
+    statusCode === 409 &&
+    (RETRYABLE_409_CODES.includes(code) || RETRYABLE_409_CODES.includes(sentCode))
+  ) {
+    return true;
+  }
+  if (statusCode >= 400 && statusCode < 500) return false;
+  return null;
 }
 
 export class LenzError extends Error {
@@ -44,9 +88,34 @@ export class LenzError extends Error {
    */
   code: string;
   body: Record<string, unknown> | null;
+  /**
+   * Whether sending the same request again later can succeed: `true` for a
+   * network failure, a transport timeout, a 429, a 5xx (including
+   * `upstream_unavailable`) and a 409 `verification_not_ready` or
+   * `idempotency_conflict`; `false` for any other 4xx and for
+   * {@link LenzApiVersionError}; `null` when unknown. A boolean the response
+   * body states wins. On a failed run ({@link LenzPipelineError} and its
+   * review / citation-check subclasses) it is the server's own value, `null`
+   * when it stated none. A plain field, set when the error is built (typed
+   * optional only so objects built against 2.x types still fit).
+   */
+  retryable?: boolean | null;
+  /**
+   * The `Idempotency-Key` the call sent, when it sent one (every paid call
+   * does by default); `undefined` otherwise. To resend after this error
+   * without running the work twice, pass it back:
+   * `client.verify({ claim, idempotencyKey: err.idempotencyKey })`. A plain
+   * new call mints a new key and can run (and charge) twice.
+   */
+  idempotencyKey?: string;
 
-  constructor(ctx: LenzErrorContext = {}) {
-    super(ctx.message || new.target.name);
+  /**
+   * `options.cause` is the native `Error.cause` (the error this one wraps,
+   * e.g. the `fetch` rejection behind a {@link LenzConnectionError}); the
+   * string `cause_` is the human-readable cause line.
+   */
+  constructor(ctx: LenzErrorContext = {}, options?: { cause?: unknown }) {
+    super(ctx.message || new.target.name, options);
     this.name = new.target.name;
     this.cause_ = ctx.cause ?? "";
     this.fix = ctx.fix ?? "";
@@ -55,6 +124,10 @@ export class LenzError extends Error {
     this.statusCode = ctx.statusCode ?? 0;
     this.code = ctx.code ?? "";
     this.body = ctx.body ?? null;
+    this.retryable =
+      ctx.retryable !== undefined
+        ? ctx.retryable
+        : deriveRetryable(this.statusCode, this.body, this.code);
   }
 
   override toString(): string {
@@ -135,7 +208,7 @@ export class LenzQuotaExceededError extends LenzError {
   private static warnedCreditsRemaining = false;
 
   /**
-   * @deprecated Use {@link remaining}. Removed in 3.0.
+   * @deprecated Use {@link remaining}. Removed in a future major release.
    *
    * Reports `0` when the balance is unknown — exactly the ambiguity
    * `remaining` exists to fix.
@@ -172,7 +245,7 @@ export class LenzQuotaExceededError extends LenzError {
     LenzQuotaExceededError.warnedCreditsRemaining = true;
     // eslint-disable-next-line no-console
     console.warn(
-      "[lenz-io] creditsRemaining is deprecated and will be removed in 3.0; " +
+      "[lenz-io] creditsRemaining is deprecated and will be removed in a future major release; " +
         "use `remaining`, which is null when the server didn't report a " +
         "balance (creditsRemaining reports that as 0). It is not the " +
         "server's `credits_remaining` field — that pool balance is " +
@@ -197,7 +270,11 @@ export class LenzRateLimitError extends LenzError {
   retryAfter = 0;
   /** The cap that was hit, when the server states it. */
   limit: number | null = null;
-  /** The body's raw echo of the same wait. */
+  /**
+   * The daily `/extract` limit's wait in seconds; `null` on any other 429.
+   *
+   * @deprecated Read `retryAfter`, which carries the same wait.
+   */
   resetInSeconds: number | null = null;
   /**
    * Where the cap lifts. The server sends this on 429 as well as 402,
@@ -232,6 +309,44 @@ export class LenzAPIError extends LenzError {
  */
 export class LenzUpstreamUnavailableError extends LenzAPIError {}
 
+/**
+ * The request never got an HTTP answer: DNS, a refused or dropped
+ * connection, TLS. Thrown after this client's own retries. Always
+ * `retryable`; the original `fetch` rejection is the native `cause`.
+ *
+ * The request may still have reached the server. Resend it with the same
+ * key, `idempotencyKey: err.idempotencyKey`, so it cannot run twice; a plain
+ * new call mints a new key and can run (and charge) twice.
+ *
+ * Subclasses {@link LenzAPIError}, the class 2.x threw here, so existing
+ * handlers keep catching it.
+ */
+export class LenzConnectionError extends LenzAPIError {
+  constructor(ctx: LenzErrorContext = {}, options?: { cause?: unknown }) {
+    super({ retryable: true, ...ctx }, options);
+  }
+}
+
+/**
+ * One HTTP attempt ran past its timeout (`timeoutMs`), sending the request or
+ * reading its answer. Thrown after this client's own retries.
+ *
+ * Not {@link LenzTimeoutError}, which means a wait (`wait`, `*AndWait`)
+ * reached its deadline while the job kept running. A request that timed out
+ * may still have reached the server: resend it only with the same key,
+ * `idempotencyKey: err.idempotencyKey` (every paid call sends one by
+ * default). A plain new call mints a new key and can run (and charge) twice.
+ */
+export class LenzRequestTimeoutError extends LenzConnectionError {}
+
+/**
+ * 404: nothing with the id or key the call names is visible to this
+ * credential (a wrong id, another account's private verification, a deleted
+ * one). Retrying will not help. Subclasses {@link LenzError}, the class 2.x
+ * threw for a 404.
+ */
+export class LenzNotFoundError extends LenzError {}
+
 export class LenzTimeoutError extends LenzError {
   taskId = "";
 }
@@ -261,7 +376,7 @@ export class LenzPipelineError extends LenzError {
    */
   failureClass = "";
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. `null` = server didn't say. */
-  retryable: boolean | null = null;
+  override retryable: boolean | null = null;
   /** The server's one-sentence hint on what to send instead (e.g. `not_a_claim`); "" when absent. */
   hint = "";
 }
@@ -291,8 +406,8 @@ export class LenzVerificationNotReadyError extends LenzError {
  * Nothing brings it back, so retrying will not help. The certificate of a
  * covered verification is kept and stays downloadable.
  *
- * A caller who could not read the verification gets a plain 404 instead,
- * never this error.
+ * A caller who could not read the verification gets a 404
+ * ({@link LenzNotFoundError}) instead, never this error.
  */
 export class LenzGoneError extends LenzError {
   /** ISO-8601 timestamp of the removal, or `null` when the server sent none. */
@@ -300,6 +415,62 @@ export class LenzGoneError extends LenzError {
 }
 
 export class LenzWebhookSignatureError extends LenzError {}
+
+/**
+ * The API answered a call in a version this SDK does not read.
+ *
+ * Every response names the version that served it in `X-Lenz-API-Version`.
+ * lenz-io 3.x asks for `2026-10-11` and reads only that shape; when a
+ * response names another version (in practice `2026-05-13`, for example an
+ * older stored replay of an idempotent call), the body is not parsed into
+ * the 3.x shapes. It is thrown instead, as sent, in `body`.
+ *
+ * A response with no `X-Lenz-API-Version` header is not checked. Webhook
+ * events are not checked either: `LenzWebhooks` reads both shapes.
+ */
+export class LenzApiVersionError extends LenzError {
+  /** The version the response named, e.g. `"2026-05-13"`. */
+  apiVersion = "";
+  /** Always `false`: the same request reads the same version again. */
+  override retryable: boolean | null = false;
+}
+
+/**
+ * The caller's `signal` fired: the call stopped where it was.
+ *
+ * Not a {@link LenzError}: an abort is the caller's own decision, not an
+ * answer from the API, so code that retries every `LenzError` does not retry
+ * it. Its `name` is `"AbortError"`, so a check of `err.name === "AbortError"`
+ * still matches; `cause` is the signal's `reason` (a `TimeoutError` for
+ * `AbortSignal.timeout(ms)`).
+ *
+ * It carries what the call knew when it stopped: the `idempotencyKey` of a
+ * keyed request (resend with it to get the same answer back), and once the
+ * server had accepted the work, its `taskId` (or a batch's `batchId` and
+ * `taskIds`), `reviewId` or `citecheckId`. Nothing is cancelled on the
+ * server: the work keeps running and is charged if it completes; stop it
+ * with `cancel`, `cancelReview` or `cancelCitecheck` on a client whose signal
+ * has not fired.
+ */
+export class LenzAbortError extends Error {
+  /** The request's `Idempotency-Key`, when the call sent one. */
+  idempotencyKey?: string;
+  /** The verification run the call was waiting on. */
+  taskId?: string;
+  /** Every run a batch accepted, in input order. */
+  taskIds?: string[];
+  /** The batch the call submitted. */
+  batchId?: string;
+  /** The review the call was waiting on. */
+  reviewId?: string;
+  /** The citation check the call was waiting on. */
+  citecheckId?: string;
+
+  constructor(message = "The call was aborted.", options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "AbortError";
+  }
+}
 
 /**
  * `reviewAndWait` reached its deadline before the review finished.
@@ -342,17 +513,32 @@ export class CitecheckTimeoutError extends LenzTimeoutError {
 }
 
 /**
- * `citecheckAndWait` read a check that ended `failed`. `errorCode` is the
- * failure's `failure_reason` (an open set) and `citecheck` the failed check.
- * A subclass of {@link LenzPipelineError}.
+ * What a review or citation check cancelled elsewhere states (API version
+ * 2026-10-11 gives it no `failure` of its own; the original shape's `failed`
+ * said exactly this).
+ */
+const CANCELLED_FAILURE: ReviewFailureBlock = {
+  failure_reason: "cancelled",
+  failure_class: "cancelled",
+  retryable: false,
+  hint: null,
+  docs_url: CANCELLED_DOCS_URL,
+};
+
+/**
+ * `citecheckAndWait` read a check that ended `failed`, or `cancelled` (failure
+ * class `cancelled`, `errorCode` `"cancelled"`). `errorCode` is the failure's
+ * `failure_reason` (an open set) and `citecheck` the ended check. A subclass
+ * of {@link LenzPipelineError}.
  */
 export class CitecheckFailedError extends LenzPipelineError {
   citecheckId: string;
+  /** @deprecated Read `citecheck.failure.code`. */
   errorCode: string;
   citecheck: Citecheck;
 
   constructor(check: Citecheck) {
-    const failure = check.failure;
+    const failure = check.failure ?? (check.status === "cancelled" ? CANCELLED_FAILURE : undefined);
     const errorCode = failure?.failure_reason ?? "";
     const hint = failure?.hint ?? "";
     super({
@@ -378,7 +564,8 @@ export class CitecheckFailedError extends LenzPipelineError {
 }
 
 /**
- * `reviewAndWait` read a review that ended `failed`.
+ * `reviewAndWait` read a review that ended `failed`, or `cancelled` (failure
+ * class `cancelled`, `errorCode` `"cancelled"`).
  *
  * `errorCode` is the failure's `failure_reason` (`no_claim`,
  * `insufficient_credits`, `upstream_unavailable`, …: an open set), `hint`
@@ -388,11 +575,13 @@ export class CitecheckFailedError extends LenzPipelineError {
  */
 export class ReviewFailedError extends LenzPipelineError {
   reviewId: string;
+  /** @deprecated Read `review.failure.code` (which says `no_checkable_claim` where this says `no_claim`). */
   errorCode: string;
   review: ReviewFull;
 
   constructor(review: ReviewFull) {
-    const failure = review.failure;
+    const failure =
+      review.failure ?? (review.status === "cancelled" ? CANCELLED_FAILURE : undefined);
     const errorCode = failure?.failure_reason ?? "";
     const hint = failure?.hint ?? "";
     super({
@@ -449,6 +638,8 @@ const STATUS_MAP: Record<number, StatusEntry> = {
     message: "Rate limit exceeded",
     docUrl: `${DOCS_BASE}/rate-limits`,
   },
+  // The 2.x message ("HTTP 404" when the body has no detail) is kept.
+  404: { cls: LenzNotFoundError, message: "HTTP 404", docUrl: `${DOCS_BASE}/errors` },
 };
 
 /**
@@ -483,12 +674,17 @@ const GONE_410: StatusEntry = {
 const GONE_FIX =
   "Its account's retention period removed it. A certificate issued for it is still available.";
 
+/** `POST /verify/{task_id}/cancel` on a review's deep check: retrying cannot succeed. */
+const USE_REVIEW_CANCEL_FIX =
+  "Cancel the review that started this task instead: client.cancelReview(reviewId).";
+
 const FIX_HINTS: Record<number, string> = {
   401: "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
   403: "This key doesn't have access to that resource.",
   402: "Top up or upgrade at https://lenz.io/plans, or wait for the period reset.",
   422: "Check the request body against the OpenAPI spec.",
   429: "Wait Retry-After seconds and retry.",
+  404: "Check the id or key the call names: nothing with it is visible to this credential. Retrying will not help.",
 };
 
 /**
@@ -507,7 +703,7 @@ export const MAX_RETRY_AFTER_SLEEP = 60;
  * map to {@link LenzUpstreamUnavailableError} and both state an honest wait.
  *
  * The retry ladder in `client.ts` keys its immediate-abort decision on THIS,
- * not on the status number: an ordinary Cloud Run / CDN / load-balancer 503
+ * not on the status number: an ordinary proxy / CDN / load-balancer 503
  * carries no Lenz code, states a maintenance-window wait, and must keep being
  * retried exactly as it was before 2.8.0.
  */
@@ -558,12 +754,37 @@ function getHeader(headers: Record<string, string>, name: string): string {
   return headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()] ?? "";
 }
 
+/**
+ * The typed error for an HTTP error response.
+ *
+ * `request` names the call it answered. With it, a body in the API's newer
+ * shape is read as the original one first ({@link legacyErrorBody}), so every
+ * field of the error keeps its original value: `code` is `""` where the
+ * original error had none, a schema error's `errors` are its field items,
+ * `resetInSeconds` reads the daily limit's wait. `body` is always the body as
+ * sent.
+ */
+/**
+ * The longest wait `retryAfter` reports, in seconds: 2,147,483 s, the longest
+ * a timer can hold in ms, so code that sleeps `retryAfter * 1000` never
+ * overflows `setTimeout`.
+ */
+const MAX_STATED_WAIT_S = 2_147_483;
+
+function capWait(seconds: number | null): number | null {
+  return seconds === null ? null : Math.min(seconds, MAX_STATED_WAIT_S);
+}
+
 export function mapResponseToError(
   statusCode: number,
   body: string | null | undefined,
   headers: Record<string, string> = {},
+  request?: RequestContext,
 ): LenzError {
-  const parsed = parseBody(body);
+  const raw = parseBody(body);
+  const parsed = request
+    ? (legacyErrorBody(statusCode, raw, request) as Record<string, unknown>)
+    : raw;
   const requestId = getHeader(headers, "X-Request-ID");
 
   const codeForClass = typeof parsed["code"] === "string" ? (parsed["code"] as string) : "";
@@ -605,12 +826,15 @@ export function mapResponseToError(
     message: detail,
     cause: detail,
     fix:
-      FIX_HINTS[statusCode] ?? "Retry; if the error persists, file an issue with the Request ID.",
+      statusCode === 409 && code === "use_review_cancel"
+        ? USE_REVIEW_CANCEL_FIX
+        : (FIX_HINTS[statusCode] ??
+          "Retry; if the error persists, file an issue with the Request ID."),
     docUrl: entry.docUrl,
     requestId,
     statusCode,
     code,
-    body: parsed,
+    body: raw,
   });
 
   // Per-class enrichment
@@ -665,10 +889,11 @@ export function mapResponseToError(
   if (err instanceof LenzAPIError) {
     // Body `retry_after` first (both 503 shapes carry it), header as the
     // fallback for any proxy that strips the body.
-    err.retryAfter =
+    err.retryAfter = capWait(
       optNumber(parsed["retry_after"]) ??
-      optNumber(parsed["retry_after_seconds"]) ??
-      optNumber(getHeader(headers, "Retry-After"));
+        optNumber(parsed["retry_after_seconds"]) ??
+        optNumber(getHeader(headers, "Retry-After")),
+    );
   } else if (err instanceof LenzQuotaExceededError) {
     const upgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
@@ -717,11 +942,12 @@ export function mapResponseToError(
     // never emitted — kept last purely as a defensive read.
     // `retry_after_seconds` is the /review in-flight 429's name for it.
     err.retryAfter =
-      optNumber(getHeader(headers, "Retry-After")) ??
-      optNumber(parsed["reset_in_seconds"]) ??
-      optNumber(parsed["retry_after_seconds"]) ??
-      optNumber(parsed["retry_after"]) ??
-      0;
+      capWait(
+        optNumber(getHeader(headers, "Retry-After")) ??
+          optNumber(parsed["reset_in_seconds"]) ??
+          optNumber(parsed["retry_after_seconds"]) ??
+          optNumber(parsed["retry_after"]),
+      ) ?? 0;
   }
 
   return err;

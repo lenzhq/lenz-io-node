@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "payload.escalate.max_verifications: Input should be less than or equal to 20",
+    "cause_": "payload.escalate.max_verifications: Input should be less than or equal to 20",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "validation_error",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "payload", "escalate", "max_verifications"],
+        "msg": "Input should be less than or equal to 20"
+      }
+    ]
+  }
+}

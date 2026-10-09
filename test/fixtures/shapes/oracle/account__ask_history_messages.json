@@ -1,0 +1,19 @@
+{
+  "value": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello",
+        "created_at": "2026-03-14T09:01:01.000456+00:00"
+      },
+      {
+        "role": "expert",
+        "content": "Hi there!",
+        "created_at": "2026-03-14T09:02:02.000456+00:00"
+      }
+    ],
+    "exchanges_used": 0,
+    "exchange_limit": 100,
+    "can_send": true
+  }
+}

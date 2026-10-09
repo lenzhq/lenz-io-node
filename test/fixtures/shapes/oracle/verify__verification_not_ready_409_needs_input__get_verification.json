@@ -1,0 +1,16 @@
+{
+  "error": {
+    "class": "LenzVerificationNotReadyError",
+    "message": "This check is waiting for your input.",
+    "cause_": "This check is waiting for your input.",
+    "fix": "GET /verify/status/5571bcb8b1a2615c7a5b3838d18fc486 lists the options and how to resolve them.",
+    "docUrl": "https://lenz.io/docs/verify",
+    "requestId": "",
+    "statusCode": 409,
+    "code": "verification_not_ready",
+    "name": "LenzVerificationNotReadyError",
+    "taskId": "5571bcb8b1a2615c7a5b3838d18fc486",
+    "status": "needs_input",
+    "hint": "GET /verify/status/5571bcb8b1a2615c7a5b3838d18fc486 lists the options and how to resolve them."
+  }
+}

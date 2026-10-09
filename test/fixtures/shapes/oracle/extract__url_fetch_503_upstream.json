@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzUpstreamUnavailableError",
+    "message": "The page could not be read right now. Please retry shortly.",
+    "cause_": "The page could not be read right now. Please retry shortly.",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors#unavailable",
+    "requestId": "",
+    "statusCode": 503,
+    "code": "upstream_unavailable",
+    "name": "LenzUpstreamUnavailableError",
+    "retryAfter": 90
+  }
+}

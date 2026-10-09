@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzAPIError",
+    "message": "The chat model could not answer this question.",
+    "cause_": "The chat model could not answer this question.",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors",
+    "requestId": "",
+    "statusCode": 502,
+    "code": "ask_failed",
+    "name": "LenzAPIError",
+    "retryAfter": null
+  }
+}

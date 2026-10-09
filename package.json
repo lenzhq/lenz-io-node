@@ -1,6 +1,6 @@
 {
   "name": "lenz-io",
-  "version": "2.12.0",
+  "version": "3.0.0",
   "description": "Official Node SDK for the Lenz Fact Checking API for AI Product Teams",
   "license": "MIT",
   "author": "Lenz <support@lenz.io>",
@@ -28,8 +28,20 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "browser": {
+      "workerd": {
         "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "edge-light": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "deno": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "browser": {
+        "types": "./dist/index.browser.d.ts",
         "default": "./dist/index.browser.js"
       },
       "import": {
@@ -50,7 +62,7 @@
     "CHANGELOG.md"
   ],
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "sync-version": "node scripts/sync-version.mjs",
@@ -60,30 +72,35 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:smoke": "npm run --silent sync-version",
+    "test:edge": "npm run build && node scripts/edge-check.mjs",
     "test:smoke": "vitest run test/smoke.test.ts",
     "pretest:coverage": "npm run --silent sync-version",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint --fix . && prettier --write .",
     "pretype": "npm run --silent sync-version",
-    "type": "tsc --noEmit",
+    "type": "tsc --noEmit && tsc -p tsconfig.examples.json",
     "regen": "if [ -z \"$LENZ_REPO\" ]; then echo 'Set LENZ_REPO=/path/to/Lenz' >&2; exit 1; fi && cd \"$LENZ_REPO\" && uv run python manage.py emit_openapi --output \"$OLDPWD/openapi.json\" --pretty && cd \"$OLDPWD\" && echo \"Refreshed openapi.json from $LENZ_REPO\"",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
-    "@vitest/coverage-v8": "^3.2.7",
+    "@vitest/coverage-v8": "5.0.3",
+    "esbuild": "^0.28.1",
     "eslint": "^8.57.0",
+    "hono": "4.13.13",
+    "miniflare": "4.20260730.0",
     "nock": "^13.5.0",
     "prettier": "^3.2.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vite": "^6.4.3",
-    "vitest": "^3.2.7"
+    "vitest": "5.0.3"
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "esbuild": "$esbuild"
   }
 }

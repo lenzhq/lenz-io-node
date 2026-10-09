@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "citations: Extra inputs are not permitted",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "payload", "citations"],
+        "msg": "Extra inputs are not permitted",
+        "type": "extra_forbidden"
+      }
+    ]
+  }
+}

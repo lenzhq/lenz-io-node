@@ -1,0 +1,14 @@
+{
+  "error": {
+    "class": "LenzUpstreamUnavailableError",
+    "message": "Our model providers are temporarily unavailable. Please retry shortly. Nothing was charged.",
+    "cause_": "Our model providers are temporarily unavailable. Please retry shortly. Nothing was charged.",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors#unavailable",
+    "requestId": "",
+    "statusCode": 503,
+    "code": "upstream_unavailable",
+    "name": "LenzUpstreamUnavailableError",
+    "retryAfter": 90
+  }
+}

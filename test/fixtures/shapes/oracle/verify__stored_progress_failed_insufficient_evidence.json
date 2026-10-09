@@ -1,0 +1,31 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "failed",
+      "task_id": "ca9a1e5419b6a0fdbce216a110d18bda",
+      "error": "Pipeline stopped at: research_empty",
+      "failure_reason": "research_empty",
+      "failure_class": "insufficient_evidence",
+      "retryable": false,
+      "docs_url": "https://lenz.io/docs/errors#insufficient-evidence"
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzPipelineError",
+      "message": "Pipeline failed: Pipeline stopped at: research_empty",
+      "cause_": "Pipeline stopped at: research_empty",
+      "fix": "Retry with a different claim, or check status.error for the diagnostic.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzPipelineError",
+      "taskId": "t",
+      "failureReason": "research_empty",
+      "failureClass": "insufficient_evidence",
+      "retryable": false,
+      "hint": ""
+    }
+  }
+}

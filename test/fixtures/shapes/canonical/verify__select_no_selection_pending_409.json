@@ -1,0 +1,7 @@
+{
+  "status": 409,
+  "body": {
+    "detail": "This task has no pending claim selection.",
+    "code": "no_selection_pending"
+  }
+}

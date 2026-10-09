@@ -21,55 +21,61 @@
  *   byte-identical English path. The omit-when-empty convention exists
  *   precisely to avoid that.
  *
- * Four API primitives form a research-depth ladder — find claims, judge
- * them fast, prove them deep, follow up:
+ * Six API calls: `extract`, `assess`, `verify` and `ask` form a
+ * research-depth ladder (find claims, judge them fast, prove them deep,
+ * follow up); `review` runs it on a whole draft and `citecheck` checks a
+ * draft's citations on their own.
  *
  * ```ts
- * import { Lenz } from 'lenz-io';
- * const client = new Lenz({ apiKey: 'lenz_...' });
+ * import { Lenz, type AssessClaim } from 'lenz-io';
+ * const client = new Lenz(); // reads LENZ_API_KEY
  *
- * // 1. extract — pull verifiable claims out of text (free, 1000/day)
+ * // 1. extract — pull verifiable claims out of text (free, 1000 calls a day)
  * const out = await client.extract({ text: llmOutput });
  * const claims = (out.claims ?? []).map((c) => c.claim);
  *
- * // 2. assess — one call per 20 claims (extract finds up to 100), one
- * //    row per claim in the same order. A row with verdict 'Error' has
- * //    error_code + hint; a compound item lists the rest in identified_claims.
+ * // 2. assess — a quick verdict per claim: up to 20 claims a call, one row per
+ * //    claim in the same order. A row with status 'failed' has no verdict
+ * //    (`failure` says why); a compound item lists the rest in more_claims.
  * const quick: AssessClaim[] = [];
  * for (let i = 0; i < claims.length; i += 20) {
  *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
  * }
  *
- * // 3. verify — escalate the low-confidence rows to the full pipeline (~90s, paid)
- * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
+ * // 3. verify — deep-check the low-confidence rows (~90s, paid, 20 a call)
  * const doubtful = quick
- *   .filter((c) => c.verdict !== 'Error' && c.confidence === 'low')
+ *   .filter((c) => c.status !== 'failed' && c.confidence === 'low' && c.claim)
  *   .map((c) => ({ claim: c.claim! }))
  *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
  *
- * // 4. ask — follow-up grounded on a verification
+ * // 4. ask — a follow-up question on a completed deep check, when there is one
  * const deep = results.find((r) => r.status === 'completed')?.verification;
- * const reply = await client.ask.send(deep!.verification_id!, {
- *   message: 'Which source is strongest?',
- * });
+ * if (deep?.verification_id) {
+ *   const reply = await client.ask.send(deep.verification_id, {
+ *     message: 'Which source is strongest?',
+ *   });
+ *   console.log(reply.content);
+ * }
  *
- * // Async / parallel verify-family verbs:
- * const task = await client.verify({ claim: '...' });   // returns task_id
- * const v = await client.wait(task);                     // block until it lands
- * const results = await client.verifyBatchAndWait({      // fan out + poll all
- *   claims: [{ text: '...' }, { text: '...' }],
- * });
+ * // Async verify: submit, then wait (or receive the webhook)
+ * const task = await client.verify({ claim: '...' }); // returns task_id
+ * const v = await client.wait(task); // block until it lands
  * ```
  */
 
 import {
   LenzAPIError,
+  LenzAbortError,
+  LenzApiVersionError,
   LenzAuthError,
+  LenzConnectionError,
   LenzError,
   LenzGoneError,
   LenzNeedsInputError,
+  LenzNotFoundError,
   LenzPipelineError,
+  LenzRequestTimeoutError,
   LenzTimeoutError,
   LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
@@ -87,10 +93,12 @@ import type {
   AssessInput,
   AssessResponse,
   BatchAccepted,
+  CancelResult,
   BatchItemResult,
   Certificate,
   ExtractInput,
   ExtractedClaims,
+  LibraryItem,
   LibraryList,
   LibraryListInput,
   OnProgress,
@@ -100,7 +108,9 @@ import type {
   CitecheckInput,
   CitecheckStarted,
   GetReviewOptions,
+  GetStatusOptions,
   RelatedVerifications,
+  RequestOptions,
   ReviewAndWaitOptions,
   ReviewFull,
   ReviewInput,
@@ -112,16 +122,24 @@ import type {
   Usage,
   Verification,
   VerificationList,
+  VerificationListItem,
   VerifyAndWaitInput,
   VerifyBatchAndWaitInput,
+  VerifyAndWaitOptions,
   VerifyBatchInput,
   VerifyInput,
   WaitOptions,
 } from "./types.js";
 
-// Pin the API version the SDK was built against. The server logs it on
-// every request; when v2 ships, old SDKs keep getting v1 behavior.
-export const API_VERSION = "2026-05-13";
+/**
+ * The API version this release asks for, sent on every request as
+ * `X-Lenz-API-Version`: the response shape with one name for each field.
+ * Every method still returns the 2.x names beside the newer ones, with their
+ * 2.x values (see `compat.ts`). Releases before 3.0 sent `2026-05-13`; 3.0
+ * reads only the `2026-10-11` shape.
+ */
+// Typed `string`, not the literal, so a later version is not a type change.
+export const API_VERSION: string = "2026-10-11";
 export const DEFAULT_BASE_URL = "https://lenz.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 /**
@@ -181,6 +199,7 @@ import {
   normalizeCitecheck,
   normalizeBatchAccepted,
   normalizeExtract,
+  CANCELLED_SENTENCE,
   normalizeTaskStatus,
   normalizeUsage,
   normalizeVerification,
@@ -188,20 +207,22 @@ import {
 } from "./compat.js";
 
 /**
- * Cross-runtime UUID. Prefers the WebCrypto global (browsers, Node ≥20, Deno,
- * Workers); lazily falls back to node:crypto on Node 18 without global
- * WebCrypto. The computed specifier keeps browser bundlers from statically
- * resolving node:crypto — this branch is unreachable in a browser, which
- * always exposes globalThis.crypto.
+ * Cross-runtime UUID: the WebCrypto global, present in Node >= 20, browsers,
+ * Deno, Bun and Workers. It needs no Node built-in, so the package loads
+ * on every one of them. Where `randomUUID` is missing (insecure browser
+ * origins, Hermes) a version 4 UUID is built from `getRandomValues`.
  */
 async function generateUuid(): Promise<string> {
-  const webCrypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (webCrypto?.randomUUID) return webCrypto.randomUUID();
-  const nodeCryptoSpecifier: string = "node:crypto";
-  const mod = (await import(
-    /* @vite-ignore */ nodeCryptoSpecifier
-  )) as typeof import("node:crypto");
-  return mod.randomUUID();
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") return webCrypto.randomUUID();
+  if (typeof webCrypto?.getRandomValues !== "function") {
+    throw new Error("lenz-io needs WebCrypto (globalThis.crypto) to make an Idempotency-Key.");
+  }
+  const b = webCrypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 /**
@@ -223,9 +244,48 @@ async function callIdempotencyKey(input: {
   return (await generateUuid()).replace(/-/g, "");
 }
 
+/**
+ * The key of a review or citation check: the caller's, else a random one.
+ * Always keyed: this client retries a failed POST, and a retry without a key
+ * could start a second job. Never derived from the text: the same draft sent
+ * again later is a new job.
+ */
+async function jobIdempotencyKey(input: { idempotencyKey?: string }): Promise<string> {
+  // `||`, not `??`: an empty key would send the job unkeyed, and a retry
+  // could then start (and charge for) a second one.
+  return input.idempotencyKey || (await generateUuid()).replace(/-/g, "");
+}
+
+/**
+ * Run a whole `*AndWait` call, stamping its submit's key on any LenzError it
+ * throws (a wait's timeout included): resending with that key replays the
+ * job already started rather than starting another.
+ */
+async function withIdempotencyKey<T>(key: string | undefined, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (exc) {
+    stampIdempotencyKey(exc, key);
+    throw exc;
+  }
+}
+
 /** Read an env var without assuming a Node `process` exists (browser-safe). */
 function envVar(name: string): string | undefined {
   return typeof process !== "undefined" ? process.env?.[name] : undefined;
+}
+
+/**
+ * Where the client may say what it is doing. Every method is optional; the
+ * client is silent without one. `console` fits.
+ */
+export interface LenzLogger {
+  /** A retry of a failed attempt, with the reason and the wait. */
+  debug?(message: string): void;
+  /** A `verifyAndWait` submission: `[lenz-io] Submitted task: <task_id>`. */
+  info?(message: string): void;
+  /** Reserved for warnings; nothing is sent here yet. */
+  warn?(message: string): void;
 }
 
 export interface LenzOptions {
@@ -235,9 +295,15 @@ export interface LenzOptions {
   maxRetries?: number;
   /** Inject a custom fetch implementation (testing). Defaults to global fetch. */
   fetch?: typeof fetch;
+  /**
+   * Receives the client's progress lines (`console` works). Without one the
+   * client prints nothing; 2.x printed `Submitted task: …` to the console on
+   * every `verifyAndWait`.
+   */
+  logger?: LenzLogger;
 }
 
-interface RequestOptions {
+interface SendOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
   path: string;
   json?: unknown;
@@ -262,6 +328,408 @@ interface RequestOptions {
    * key never reaches an endpoint that doesn't need it.
    */
   authOptional?: boolean;
+  /**
+   * A body key that makes an in-flight 409 (`idempotency_conflict`) the
+   * caller's answer rather than a reason to retry: when the 409 names it
+   * (e.g. `review_id`), it is thrown at once for the caller to read.
+   */
+  conflictReceipt?: string;
+
+  /**
+   * Signals that stop the call (a `withOptions` copy's and the call's own):
+   * when one fires, the attempt is aborted, no retry is made and the call
+   * throws `LenzAbortError`.
+   */
+  signals?: readonly AbortSignal[];
+  /**
+   * Headers from the request options, already merged and checked. Sent
+   * after `User-Agent` / `Accept` (replacing either, in any casing) and
+   * before `headers`.
+   */
+  optionHeaders?: HeaderList;
+}
+
+/** Headers from request options, in the order they are sent. */
+type HeaderList = ReadonlyArray<readonly [string, string]>;
+
+/** The names request options may not set, lowercased. */
+const RESERVED_HEADERS: ReadonlySet<string> = new Set([
+  "x-lenz-api-version",
+  "idempotency-key",
+  "authorization",
+  "content-type",
+  "content-length",
+  "host",
+  "transfer-encoding",
+]);
+
+const NO_SIGNALS: readonly AbortSignal[] = [];
+const NO_HEADERS: HeaderList = [];
+
+/** What a `withOptions` copy adds to every call: its signals and headers. */
+interface CopyOptions {
+  signals: readonly AbortSignal[];
+  headers: HeaderList;
+}
+
+/** Each client's copy options; a root client has none. */
+const COPY_OPTIONS = new WeakMap<object, CopyOptions>();
+
+/** Which request options a method takes. */
+type CallKind =
+  /** Every request option (a plain call). */
+  | "request"
+  /** `signal` and `headers` (`wait`): its `timeoutMs` is the wait's budget. */
+  | "wait"
+  /** `signal`, `headers` and `maxRetries` (the submit's), for the `*AndWait` calls. */
+  | "submitWait";
+
+/** A call's request options, resolved against the client's copy options. */
+interface Call {
+  /** The copy's signals, then the call's. */
+  signals: readonly AbortSignal[];
+  /** The copy's headers with the call's merged over them. */
+  headers: HeaderList;
+  /** The call's own attempt timeout, when it set one. */
+  timeoutMs?: number;
+  /** The call's own retries, when it set them. */
+  maxRetries?: number;
+  /**
+   * The call's own options, copied when the call was made (its headers
+   * object too), so a caller changing its objects later changes nothing:
+   * what a nested public call (each page of a `listAll`, a wait's
+   * `getStatus`, `verifyBatchAndWait`'s `verifyBatch`) is handed, since it
+   * merges the copy's itself.
+   */
+  own: RequestOptions;
+}
+
+/** The longest delay a timer can hold (2^31 - 1 ms, about 24.8 days). */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * A per-request timeout: a finite number of ms above 0 and at most
+ * `MAX_TIMEOUT_MS`, or not given. `legacy` names a field 2.x already took
+ * (the constructor's, the input's), where `null` still means "not given".
+ */
+function checkTimeoutMs(value: unknown, where: string, legacy = false): void {
+  if (value === undefined || (legacy && value === null)) return;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(
+      `${where}: timeoutMs must be a finite number of milliseconds above 0 (got ${String(value)}).`,
+    );
+  }
+  if (value > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `${where}: timeoutMs must be at most ${MAX_TIMEOUT_MS} ms, the longest a timer can wait ` +
+        `(got ${String(value)}).`,
+    );
+  }
+}
+
+/**
+ * A per-request retry count: a whole number, 0 or more, or not given.
+ * `legacy` as for `checkTimeoutMs`.
+ */
+function checkMaxRetries(value: unknown, where: string, legacy = false): void {
+  if (value === undefined || (legacy && value === null)) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(
+      `${where}: maxRetries must be a whole number, 0 or more (got ${String(value)}).`,
+    );
+  }
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v["aborted"] === "boolean" &&
+    typeof v["addEventListener"] === "function" &&
+    typeof v["removeEventListener"] === "function"
+  );
+}
+
+function checkHeaders(headers: unknown, where: string): void {
+  if (headers === undefined) return;
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    throw new Error(`${where}: headers must be an object of header names and values.`);
+  }
+  for (const [name, value] of Object.entries(headers)) {
+    if (!HEADER_NAME.test(name)) {
+      throw new Error(`${where}: ${JSON.stringify(name)} is not a valid header name.`);
+    }
+    if (RESERVED_HEADERS.has(name.toLowerCase())) {
+      throw new Error(
+        `${where}: the ${name} header is set by the client and cannot be sent as an option ` +
+          "(use idempotencyKey for Idempotency-Key and apiKey for Authorization).",
+      );
+    }
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new Error(
+        `${where}: the value of header ${name} must be a string, or null to remove it.`,
+      );
+    }
+    if (typeof value === "string" && !isHeaderValue(value)) {
+      throw new Error(
+        `${where}: the value of header ${name} must be a string of visible ASCII characters, ` +
+          "with spaces and tabs only between them (not at either end), or null.",
+      );
+    }
+  }
+}
+
+/** A header name: an RFC 7230 token. */
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * A header value: visible ASCII, with spaces and tabs only between visible
+ * characters (never at either end, which fetch would strip), or empty.
+ */
+const HEADER_VALUE = /^(?:[\x21-\x7e](?:[\t\x20-\x7e]*[\x21-\x7e])?)?$/;
+
+function isHeaderValue(value: string): boolean {
+  return HEADER_VALUE.test(value);
+}
+
+/** Checks the request options a method takes, before any key or request. */
+function checkOptions(options: unknown, where: string, kind: CallKind): RequestOptions {
+  if (options === undefined || options === null) return {};
+  if (typeof options !== "object" || Array.isArray(options)) {
+    throw new Error(`${where}: options must be an object.`);
+  }
+  const o = options as RequestOptions;
+  if (o.signal !== undefined && !isAbortSignal(o.signal)) {
+    throw new Error(`${where}: signal must be an AbortSignal.`);
+  }
+  if (kind === "request") checkTimeoutMs(o.timeoutMs, where);
+  if (kind === "wait" && o.maxRetries !== undefined) {
+    throw new Error(
+      `${where}: a wait takes no maxRetries (each poll uses the client's); ` +
+        "set it on a copy with withOptions({ maxRetries }).",
+    );
+  }
+  if (kind !== "wait") checkMaxRetries(o.maxRetries, where);
+  checkHeaders(o.headers, where);
+  return o;
+}
+
+/**
+ * Headers merged without regard to case: a later spelling of a name replaces
+ * an earlier one, value and spelling, in the earlier one's place; `null`
+ * removes it; `undefined` is not given.
+ */
+function mergeHeaders(
+  base: HeaderList,
+  add: Record<string, string | null | undefined> | undefined,
+): HeaderList {
+  if (!add) return base;
+  const out = new Map<string, readonly [string, string]>();
+  for (const [name, value] of base) out.set(name.toLowerCase(), [name, value]);
+  for (const [name, value] of Object.entries(add)) {
+    if (value === undefined) continue;
+    const lower = name.toLowerCase();
+    // A name set again keeps its place on the wire; its spelling and value change.
+    if (value === null) out.delete(lower);
+    else out.set(lower, [name, value]);
+  }
+  return [...out.values()];
+}
+
+/** The first of `signals` that has fired, if any. */
+function firedSignal(signals: readonly AbortSignal[]): AbortSignal | undefined {
+  for (const signal of signals) if (signal.aborted) return signal;
+  return undefined;
+}
+
+function abortError(signal: AbortSignal): LenzAbortError {
+  return new LenzAbortError("The call was aborted by its signal.", { cause: signal.reason });
+}
+
+/** Throws `LenzAbortError` when one of `signals` has fired. */
+function throwIfAborted(signals: readonly AbortSignal[]): void {
+  const fired = firedSignal(signals);
+  if (fired) throw abortError(fired);
+}
+
+/**
+ * The rule at every `catch` a call passes through: when the caller's signal
+ * has fired, the error is the abort, never a retry, a timeout or a mapped
+ * API error. A `LenzAbortError` already thrown is passed on as it is.
+ */
+function rethrowIfCallerAbort(signals: readonly AbortSignal[], exc?: unknown): void {
+  if (exc instanceof LenzAbortError) throw exc;
+  throwIfAborted(signals);
+}
+
+/**
+ * Links `signals` to one attempt's controller: when one fires, the attempt is
+ * aborted. The listeners are removed by `unlink`, so a long-lived signal
+ * gathers none.
+ */
+function linkSignals(
+  signals: readonly AbortSignal[],
+  controller: AbortController,
+): { unlink: () => void } {
+  if (signals.length === 0) return { unlink: () => {} };
+  const onAbort = () => controller.abort();
+  for (const signal of signals) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+  return {
+    unlink: () => {
+      for (const signal of signals) signal.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+/**
+ * `promise`, or `LenzAbortError` as soon as one of `signals` fires: for a
+ * public method an override may have replaced (a 2.21 `getStatus` or
+ * `verifyBatch` ignores the signal).
+ */
+async function raceAbort<T>(
+  promise: Promise<T>,
+  signals: readonly AbortSignal[],
+  others: ReadonlyArray<Promise<never>> = [],
+): Promise<T> {
+  if (signals.length === 0) return others.length ? Promise.race([promise, ...others]) : promise;
+  let onAbort: () => void = () => {};
+  const aborted = new Promise<never>((_res, rej) => {
+    onAbort = () => rej(abortError(firedSignal(signals) ?? signals[0]!));
+  });
+  // A rejection after the call settled has no reader.
+  aborted.catch(() => {});
+  const fired = firedSignal(signals);
+  if (fired) onAbort();
+  else for (const signal of signals) signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([promise, aborted, ...others]);
+  } finally {
+    for (const signal of signals) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+type AbortContext = Partial<
+  Pick<LenzAbortError, "taskId" | "taskIds" | "batchId" | "reviewId" | "citecheckId">
+>;
+
+/** Runs `run`, adding what the call knows to a `LenzAbortError` it throws. */
+async function withAbortContext<T>(context: AbortContext, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (exc) {
+    if (exc instanceof LenzAbortError) {
+      for (const [key, value] of Object.entries(context) as Array<[keyof AbortContext, never]>) {
+        if (exc[key] === undefined && value !== undefined) exc[key] = value;
+      }
+    }
+    throw exc;
+  }
+}
+
+/**
+ * The request options of a call, checked and resolved against `client`'s
+ * copy options. Throws before any key is made or request sent: a bad value,
+ * then, when `checkAbort`, a signal that has already fired.
+ */
+function resolveCall(
+  client: object,
+  options: unknown,
+  where: string,
+  kind: CallKind = "request",
+  checkAbort = true,
+): Call {
+  const o = snapshotOptions(checkOptions(options, where, kind), kind);
+  const copy = COPY_OPTIONS.get(client);
+  const signals = o.signal
+    ? [...(copy?.signals ?? NO_SIGNALS), o.signal]
+    : (copy?.signals ?? NO_SIGNALS);
+  const call: Call = {
+    signals,
+    headers: mergeHeaders(copy?.headers ?? NO_HEADERS, o.headers),
+    own: o,
+  };
+  if (o.timeoutMs !== undefined) call.timeoutMs = o.timeoutMs;
+  if (o.maxRetries !== undefined) call.maxRetries = o.maxRetries;
+  if (checkAbort) throwIfAborted(signals);
+  return call;
+}
+
+/** The request options a method takes, copied: only the fields given, headers copied too. */
+function snapshotOptions(o: RequestOptions, kind: CallKind): RequestOptions {
+  const out: RequestOptions = {};
+  if (o.signal !== undefined) out.signal = o.signal;
+  if (kind === "request" && o.timeoutMs !== undefined) out.timeoutMs = o.timeoutMs;
+  if (kind !== "wait" && o.maxRetries !== undefined) out.maxRetries = o.maxRetries;
+  if (o.headers !== undefined) out.headers = { ...o.headers };
+  return out;
+}
+
+/** What a resolved call hands its request. */
+function transportOf(
+  call: Call,
+): Pick<SendOptions, "signals" | "optionHeaders" | "timeoutMs" | "maxRetries"> {
+  const t: Pick<SendOptions, "signals" | "optionHeaders" | "timeoutMs" | "maxRetries"> = {
+    signals: call.signals,
+    optionHeaders: call.headers,
+  };
+  if (call.timeoutMs !== undefined) t.timeoutMs = call.timeoutMs;
+  if (call.maxRetries !== undefined) t.maxRetries = call.maxRetries;
+  return t;
+}
+
+/** The call's own signal and headers (as copied), for a nested public call; only the ones given. */
+function ownOptions(call: Call): RequestOptions {
+  const out: RequestOptions = {};
+  if (call.own.signal !== undefined) out.signal = call.own.signal;
+  if (call.own.headers !== undefined) out.headers = call.own.headers;
+  return out;
+}
+
+/** The `Idempotency-Key` among `headers`, in any casing, or `undefined`. */
+function idempotencyKeyIn(headers: Record<string, string> | undefined): string | undefined {
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (name.toLowerCase() === "idempotency-key" && value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Stamp the call's `Idempotency-Key` on an error it throws, so the caller
+ * can resend with the same key. A key already stamped stays.
+ *
+ * Not only on a LenzError: a response body that breaks off after the headers
+ * (the server may well have done the work) throws the runtime's own error, as
+ * in 2.x, and it carries the key too. Its class is never changed, so a 2.x
+ * `catch` keeps matching it.
+ */
+function stampIdempotencyKey(exc: unknown, key: string | undefined): void {
+  if (!key) return;
+  if (exc instanceof LenzError || exc instanceof LenzAbortError) {
+    if (exc.idempotencyKey === undefined) exc.idempotencyKey = key;
+    return;
+  }
+  if (exc instanceof Error && !("idempotencyKey" in exc)) {
+    try {
+      (exc as Error & { idempotencyKey?: string }).idempotencyKey = key;
+    } catch {
+      // A frozen error object keeps what it has.
+    }
+  }
+}
+
+/** Whether a 409 body names `key` with a non-empty string. */
+async function bodyNames(response: Response, key: string): Promise<boolean> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+    const value = (body as Record<string, unknown>)[key];
+    return typeof value === "string" && value !== "";
+  } catch {
+    return false;
+  }
 }
 
 const REVIEW_STATUSES: readonly string[] = [
@@ -270,7 +738,51 @@ const REVIEW_STATUSES: readonly string[] = [
   "verifying",
   "completed",
   "failed",
+  "cancelled",
 ];
+
+/**
+ * Every item of a paginated list, one page request at a time, from the page
+ * `first` asks for. Stops after a page that is short or empty, that reaches
+ * `total` (`page * page_size >= total`), or that states no usable
+ * `page_size`; a response for another page than the one asked for (a server
+ * that clamps a page past the end) ends the walk without yielding it. Nothing
+ * is fetched before the first item is asked for, and no page ahead of the
+ * one being read.
+ */
+async function* walkPages<T>(
+  read: (
+    page: number,
+  ) => Promise<{ items?: T[]; page_size?: number; page?: number; total?: number }>,
+  first: number,
+  signals: readonly AbortSignal[] = NO_SIGNALS,
+): AsyncGenerator<T, void, undefined> {
+  for (let page = first; ; page++) {
+    const body = await read(page);
+    if (typeof body.page === "number" && body.page !== page) return;
+    const items = Array.isArray(body.items) ? body.items : [];
+    // The signal stops delivery too, not only the page requests: an item
+    // already read is not handed out once it has fired.
+    for (const item of items) {
+      throwIfAborted(signals);
+      yield item;
+    }
+    const size = body.page_size;
+    if (items.length === 0 || typeof size !== "number" || !(size > 0) || items.length < size) {
+      return;
+    }
+    if (typeof body.total === "number" && page * size >= body.total) return;
+  }
+}
+
+/** The start page of a `listAll`: a whole number from 1, checked when it is called. */
+function startPage(page: number | undefined): number {
+  const first = page ?? 1;
+  if (!Number.isInteger(first) || first < 1) {
+    throw new Error(`listAll needs a whole start page of 1 or more (got ${String(page)}).`);
+  }
+  return first;
+}
 
 function isPlainObject(v: unknown): boolean {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -283,7 +795,7 @@ function isCitecheckBody(body: unknown, citecheckId: string): body is Citecheck 
   return (
     b["citecheck_id"] === citecheckId &&
     typeof b["status"] === "string" &&
-    ["queued", "checking", "completed", "failed"].includes(b["status"]) &&
+    ["queued", "checking", "completed", "failed", "cancelled"].includes(b["status"]) &&
     Array.isArray(b["citations"]) &&
     Array.isArray(b["citation_issues"]) &&
     Array.isArray(b["citation_failures"]) &&
@@ -306,12 +818,144 @@ function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
   );
 }
 
+const REVIEW_LISTS = ["issues", "failures", "claims"] as const;
+const CITECHECK_LISTS = ["citations", "citation_issues", "citation_failures"] as const;
+
+/**
+ * Whether a cancel answer is the job asked for: its id, a status and its
+ * three lists (any status: a cancel answers with whatever state the job is in).
+ */
+function isJobBody(body: unknown, idField: string, id: string, lists: readonly string[]): boolean {
+  if (!isPlainObject(body)) return false;
+  const b = body as Record<string, unknown>;
+  return (
+    b[idField] === id && typeof b["status"] === "string" && lists.every((k) => Array.isArray(b[k]))
+  );
+}
+
+/** A 200 whose body is not the thing asked for (a proxy page, another job's body). */
+function unexpectedAnswer(method: string, path: string): LenzAPIError {
+  return new LenzAPIError({
+    message: `${method} ${path} returned an unexpected response body.`,
+    cause: "The answer is not the shape the API documents for this call.",
+    fix: "Retry; if it persists, contact support (https://lenz.io/contact) with the request id.",
+    docUrl: "https://lenz.io/docs/errors",
+  });
+}
+
+/**
+ * The errors a request's transport raised (a body that broke off or did not
+ * decode), remembered without touching them (a frozen error included), so a
+ * poll loop can tell them from a programming error. The request still throws
+ * them as they are.
+ */
+const TRANSPORT_FAILURES = new WeakSet<object>();
+
+function recordTransportFailure(exc: unknown): void {
+  if ((typeof exc === "object" && exc !== null) || typeof exc === "function") {
+    TRANSPORT_FAILURES.add(exc as object);
+  }
+}
+
+/**
+ * Whether a poll's error is worth polling again for: a Lenz answer, or a
+ * transport failure. A thrown primitive is read as one too: a stream can
+ * reject with one and it cannot be remembered. Any other object that is not
+ * a `LenzError` is a programming error (an override's bug), and ends a wait.
+ */
+function isPollableError(exc: unknown): boolean {
+  if (exc instanceof LenzError) return true;
+  if ((typeof exc === "object" && exc !== null) || typeof exc === "function") {
+    return TRANSPORT_FAILURES.has(exc as object);
+  }
+  return true;
+}
+
+/**
+ * A batch poll's answer that ends the whole wait: the call's own refusal of an
+ * id, a refused key, or a programming error. Never the caller's abort, which
+ * is handled after the round.
+ */
+function isFatalPollError(exc: unknown): boolean {
+  if (exc instanceof LenzAbortError) return false;
+  return exc instanceof InvalidIdError || exc instanceof LenzAuthError || !isPollableError(exc);
+}
+
 function isRateLimit(exc: unknown): boolean {
   return exc instanceof LenzError && exc.statusCode === 429;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
+/**
+ * An id as it goes into a request path, or `null` when it cannot name one
+ * thing: empty, `.` or `..` (a path segment that climbs or stays put), or text
+ * `encodeURIComponent` refuses (a lone surrogate). Any other id is encoded
+ * exactly as before.
+ */
+function pathId(id: string): string | null {
+  if (!id || id === "." || id === "..") return null;
+  try {
+    return encodeURIComponent(id);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The local error of a call given an id that cannot name one thing. A class of
+ * its own so the poll loops can tell it from a failed poll: waiting does not
+ * change it.
+ */
+class InvalidIdError extends Error {}
+
+/** `pathId`, or the local error a call throws instead of sending a request. */
+function requirePathId(method: string, field: string, id: string): string {
+  const encoded = pathId(id);
+  if (encoded !== null) return encoded;
+  throw new InvalidIdError(
+    id
+      ? `${method}() was given an invalid ${field}.`
+      : `${method}() requires a non-empty ${field}.`,
+  );
+}
+
+/**
+ * An id the API handed back in an acceptance body, checked before any poll
+ * uses it. One it cannot be polled by is a bad answer from the server (not a
+ * mistake of the caller's), so a LenzAPIError, raised at once.
+ */
+function acceptedId(field: string, id: unknown): string {
+  if (typeof id === "string" && pathId(id) !== null) return id;
+  throw new LenzAPIError({
+    message: `The API accepted the request with an invalid ${field}.`,
+    cause: `The acceptance body carries no usable ${field}.`,
+    fix: "Retry the request; contact support with the request id if this persists.",
+    docUrl: "https://lenz.io/docs/errors",
+  });
+}
+
+/** Sleeps `ms`; rejects with `LenzAbortError` as soon as one of `signals` fires. */
+function sleep(ms: number, signals: readonly AbortSignal[] = NO_SIGNALS): Promise<void> {
+  if (signals.length === 0) return new Promise((res) => setTimeout(res, ms));
+  return new Promise((res, rej) => {
+    const fired = firedSignal(signals);
+    if (fired) {
+      rej(abortError(fired));
+      return;
+    }
+    const unlink = () => {
+      for (const signal of signals) signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      clearTimeout(timer);
+      unlink();
+      rej(abortError(firedSignal(signals) ?? signals[0]!));
+    };
+    const timer = setTimeout(() => {
+      unlink();
+      res();
+    }, ms);
+    for (const signal of signals) signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function retrySleepMs(attempt: number): number {
@@ -361,6 +1005,149 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
   // Floored at zero: `Retry-After: -5` is malformed, and a negative delay
   // triggers a TimeoutNegativeWarning on stderr.
   return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : null;
+}
+
+/**
+ * Whether `verify` / `verifyBatch` send a `webhook_url`. An unset, empty or
+ * blank one is left out, which means the credential's default URL, as it did
+ * in 2.x (where the API read `""` that way); the API version this release
+ * asks for reads a blank value as "no webhook", so it is never sent.
+ */
+function sendsWebhookUrl(url: unknown): boolean {
+  return typeof url === "string" ? url.trim() !== "" : Boolean(url);
+}
+
+/**
+ * The wait options of `verifyAndWait` / `verifyBatchAndWait`: the second
+ * argument's, field by field, else the ones 2.x read from the input.
+ */
+function waitOptions(
+  input: { timeoutMs?: number; onProgress?: OnProgress },
+  opts: WaitOptions,
+): { timeoutMs: number; onProgress: OnProgress | undefined } {
+  return {
+    timeoutMs: opts.timeoutMs ?? input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS,
+    onProgress: opts.onProgress ?? input.onProgress,
+  };
+}
+
+/** The camelCase names a batch item takes beside its 2.x snake_case ones. */
+const BATCH_ITEM_ALIASES: Readonly<Record<string, string>> = {
+  sourceUrl: "source_url",
+  webhookUrl: "webhook_url",
+};
+
+/** The camelCase names a citation pair takes beside its 2.x snake_case ones. */
+const CITATION_PAIR_ALIASES: Readonly<Record<string, string>> = {
+  citedTitle: "cited_title",
+  citedAuthors: "cited_authors",
+  citedYear: "cited_year",
+  citedJournal: "cited_journal",
+};
+
+/**
+ * Equal for an alias pair: `Object.is` (so `NaN` equals `NaN`), with arrays
+ * equal element by element, in order, at any depth.
+ */
+function sameAliasValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => sameAliasValue(v, b[i]));
+  }
+  return Object.is(a, b);
+}
+
+/** Whether a value counts as not given. */
+type IsAbsent = (snake: string, value: unknown) => boolean;
+
+/** On a citation pair only `undefined` is absent: anything else is sent. */
+const undefinedIsAbsent: IsAbsent = (_snake, value) => value === undefined;
+
+/**
+ * On a batch item, a value 2.x ignored is absent: `undefined` or `null`, an
+ * empty `source_url` (sent as `""` either way), and a `webhook_url` it did
+ * not send (empty or blank).
+ */
+const batchItemAbsent: IsAbsent = (snake, value) => {
+  if (value === undefined || value === null) return true;
+  if (snake === "source_url") return value === "";
+  if (snake === "webhook_url") return !sendsWebhookUrl(value);
+  return false;
+};
+
+/**
+ * Throws when an input gives both spellings of a field with different
+ * values. Only the alias pairs are checked.
+ */
+function checkAliases(
+  input: Record<string, unknown>,
+  aliases: Readonly<Record<string, string>>,
+  where: string,
+  isAbsent: IsAbsent,
+): void {
+  for (const [camel, snake] of Object.entries(aliases)) {
+    const a = input[camel];
+    const b = input[snake];
+    if (!isAbsent(snake, a) && !isAbsent(snake, b) && !sameAliasValue(a, b)) {
+      throw new Error(`${where}: ${camel} and ${snake} differ; send one of them.`);
+    }
+  }
+}
+
+/**
+ * Citation pairs as the API names their fields. A pair's own enumerable keys
+ * are read (the ones it is serialized with). Pairs with no camelCase key
+ * go as given (the same array when none has one), so a 2.x call sends the
+ * same bytes; a pair with one is copied with the key renamed in place.
+ */
+function pairsToWire(pairs: unknown): unknown {
+  if (!Array.isArray(pairs)) return pairs;
+  let changed = false;
+  const out = pairs.map((pair: unknown, i) => {
+    if (pair === null || typeof pair !== "object" || Array.isArray(pair)) return pair;
+    const fields = pair as Record<string, unknown>;
+    checkAliases(fields, CITATION_PAIR_ALIASES, `citecheck() pairs[${i}]`, undefinedIsAbsent);
+    const wire = toWireNames(fields, CITATION_PAIR_ALIASES);
+    if (wire !== fields) changed = true;
+    return wire;
+  });
+  return changed ? out : pairs;
+}
+
+/**
+ * A batch item's value for an alias pair: the snake_case one when given, else
+ * the camelCase one, else whatever (absent) value the snake_case name holds.
+ */
+function batchItemValue(input: Record<string, unknown>, camel: string, snake: string): unknown {
+  if (!batchItemAbsent(snake, input[snake])) return input[snake];
+  if (!batchItemAbsent(snake, input[camel])) return input[camel];
+  return input[snake];
+}
+
+/**
+ * The object with each camelCase alias renamed to its wire name, at the
+ * same place in the caller's key order. An object with no alias key is
+ * returned as it is (the same object), so a 2.x input sends the same bytes.
+ * The input is never changed.
+ */
+function toWireNames(
+  input: Record<string, unknown>,
+  aliases: Readonly<Record<string, string>>,
+): Record<string, unknown> {
+  const keys = Object.keys(input);
+  if (!keys.some((k) => Object.hasOwn(aliases, k))) return input;
+  const snakes = new Set(Object.values(aliases));
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const value = input[k];
+    const camel = Object.hasOwn(aliases, k);
+    // An unset spelling of an aliased field is absent: the other one places it.
+    if (value === undefined && (camel || snakes.has(k))) continue;
+    const name = camel ? aliases[k]! : k;
+    // Both spellings given (equal, checked before): the first one places it.
+    if (Object.hasOwn(out, name)) continue;
+    out[name] = value;
+  }
+  return out;
 }
 
 /**
@@ -435,13 +1222,43 @@ function pollHintMs(progress: Progress | undefined): number | undefined {
 class VerificationsNamespace {
   constructor(private readonly client: Lenz) {}
 
-  async list({ page = 1 }: { page?: number } = {}): Promise<VerificationList> {
+  async list({
+    page = 1,
+    ...options
+  }: { page?: number } & RequestOptions = {}): Promise<VerificationList> {
+    const call = resolveCall(this.client, options, "verifications.list");
     const body = await this.client.request<VerificationList>({
       method: "GET",
       path: "/verifications",
       query: { page },
+      ...transportOf(call),
     });
     return normalizeVerificationList(body) as VerificationList;
+  }
+
+  /**
+   * Every verification of the account, newest first, across pages:
+   *
+   * ```ts
+   * for await (const v of client.verifications.listAll()) console.log(v.verification_id);
+   * ```
+   *
+   * One `list` request per page, made when the previous page has been read;
+   * starts at `page` (default 1; a page below 1 throws when called) and stops
+   * on a short or empty page, or one that reaches `total`.
+   *
+   * The request options apply to every page request; they are checked when
+   * `listAll` is called. A `signal` also stops the items of a page already
+   * read: once it fires, the next item throws `LenzAbortError`.
+   */
+  listAll({
+    page,
+    ...options
+  }: { page?: number } & RequestOptions = {}): AsyncIterable<VerificationListItem> {
+    const first = startPage(page);
+    const call = resolveCall(this.client, options, "verifications.listAll", "request", false);
+    // Every page uses the options as they were when listAll was called.
+    return walkPages((p) => this.list({ ...call.own, page: p }), first, call.signals);
   }
 
   /**
@@ -457,12 +1274,15 @@ class VerificationsNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  async get(verificationId: string): Promise<Verification> {
+  async get(verificationId: string, options?: RequestOptions): Promise<Verification> {
+    const id = requirePathId("verifications.get", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "verifications.get");
     const body = await this.client.request<Verification>({
       method: "GET",
-      path: `/verifications/${verificationId}`,
+      path: `/verifications/${id}`,
       authRequired: false,
       authOptional: true, // send the key if we have one → owner sees private rows
+      ...transportOf(call),
     });
     return normalizeVerification(body) as Verification;
   }
@@ -475,7 +1295,7 @@ class VerificationsNamespace {
    * and their own cap, so this returns YOUR certificate over this analysis
    * and never another customer's.
    *
-   * Rejects with a 404 `LenzError` when this verification carries no
+   * Rejects with {@link LenzNotFoundError} (404) when this verification carries no
    * certificate for your account — which is also what an uncovered verdict
    * returns, so check `verification.coverage?.status` first rather than using
    * a 404 here to mean "not covered".
@@ -485,22 +1305,30 @@ class VerificationsNamespace {
    * open-source checker without involving Lenz. A withdrawn certificate is
    * still served — it is the record of what was warranted.
    */
-  getCertificate(verificationId: string): Promise<Certificate> {
+  async getCertificate(verificationId: string, options?: RequestOptions): Promise<Certificate> {
+    const id = requirePathId("verifications.getCertificate", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "verifications.getCertificate");
     return this.client.request<Certificate>({
       method: "GET",
-      path: `/verifications/${verificationId}/certificate`,
+      path: `/verifications/${id}/certificate`,
+      ...transportOf(call),
     });
   }
 
-  async delete(verificationId: string): Promise<boolean> {
+  async delete(verificationId: string, options?: RequestOptions): Promise<boolean> {
+    const id = requirePathId("verifications.delete", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "verifications.delete");
     try {
       await this.client.request<unknown>({
         method: "DELETE",
-        path: `/verifications/${verificationId}`,
+        path: `/verifications/${id}`,
+        ...transportOf(call),
       });
       return true;
     } catch (exc) {
       // Idempotent DELETE: 404 after retry means the row was already gone.
+      // A 404 in another API version is not read as this one's.
+      if (exc instanceof LenzApiVersionError) throw exc;
       if (exc instanceof LenzError && exc.statusCode === 404) return true;
       throw exc;
     }
@@ -514,16 +1342,19 @@ class VerificationsNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  related(
+  async related(
     verificationId: string,
-    { limit = 5 }: { limit?: number } = {},
+    { limit = 5, ...options }: { limit?: number } & RequestOptions = {},
   ): Promise<RelatedVerifications> {
+    const id = requirePathId("verifications.related", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "verifications.related");
     return this.client.request<RelatedVerifications>({
       method: "GET",
-      path: `/verifications/${verificationId}/related`,
+      path: `/verifications/${id}/related`,
       query: { limit },
       authRequired: false,
       authOptional: true, // send the key if we have one → owner sees own rows
+      ...transportOf(call),
     });
   }
 }
@@ -536,39 +1367,54 @@ class AskNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  history(verificationId: string): Promise<AskHistory> {
+  async history(verificationId: string, options?: RequestOptions): Promise<AskHistory> {
+    const id = requirePathId("ask.history", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "ask.history");
     return this.client.request<AskHistory>({
       method: "GET",
-      path: `/ask/${verificationId}`,
+      path: `/ask/${id}`,
+      ...transportOf(call),
     });
   }
 
   /**
    * Ask a follow-up question about a verification. Paid, one credit per turn.
    *
-   * Pass `idempotencyKey` to make a retry safe: with a key, a retry of a
-   * question that already got a reply replays that reply rather than asking
-   * again. It is never generated here — see {@link AskSendInput.idempotencyKey}.
+   * Sends a random `Idempotency-Key` per call, reused across this client's
+   * own retries, so a retried question replays its reply rather than asking
+   * (and charging) again. Pin one with `idempotencyKey`, or send none with
+   * `idempotency: false`. See {@link AskSendInput.idempotencyKey}.
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  send(verificationId: string, input: AskSendInput): Promise<AskReply> {
+  async send(
+    verificationId: string,
+    input: AskSendInput,
+    options?: RequestOptions,
+  ): Promise<AskReply> {
+    const id = requirePathId("ask.send", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "ask.send");
     const body: Record<string, unknown> = { message: input.message };
     if (input.language) body.language = input.language;
+    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
-    if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.client.request<AskReply>({
       method: "POST",
-      path: `/ask/${verificationId}`,
+      path: `/ask/${id}`,
       json: body,
       headers,
+      ...transportOf(call),
     });
   }
 
-  async reset(verificationId: string): Promise<boolean> {
+  async reset(verificationId: string, options?: RequestOptions): Promise<boolean> {
+    const id = requirePathId("ask.reset", "verification_id", verificationId);
+    const call = resolveCall(this.client, options, "ask.reset");
     await this.client.request<unknown>({
       method: "DELETE",
-      path: `/ask/${verificationId}`,
+      path: `/ask/${id}`,
+      ...transportOf(call),
     });
     return true;
   }
@@ -577,7 +1423,8 @@ class AskNamespace {
 class LibraryNamespace {
   constructor(private readonly client: Lenz) {}
 
-  async list(input: LibraryListInput = {}): Promise<LibraryList> {
+  async list(input: LibraryListInput = {}, options?: RequestOptions): Promise<LibraryList> {
+    const call = resolveCall(this.client, options, "library.list");
     const body = await this.client.request<LibraryList>({
       method: "GET",
       path: "/library",
@@ -591,9 +1438,59 @@ class LibraryNamespace {
         verdict: input.verdict,
       },
       authRequired: false,
+      ...transportOf(call),
     });
     return normalizeVerificationList(body) as LibraryList;
   }
+
+  /**
+   * Every library item matching the filters, across pages: one `list`
+   * request per page, made when the previous page has been read; starts at
+   * `page` (default 1) and stops on a short or empty page, or one that
+   * reaches `total`. Throws when called for `sort: "random"`, whose pages are
+   * separate samples, not one list, and for a start page below 1.
+   *
+   * The request options apply to every page request; they are checked when
+   * `listAll` is called. A `signal` also stops the items of a page already
+   * read: once it fires, the next item throws `LenzAbortError`.
+   */
+  listAll(input: LibraryListInput = {}, options?: RequestOptions): AsyncIterable<LibraryItem> {
+    const call = resolveCall(this.client, options, "library.listAll", "request", false);
+    if (input.sort === "random") {
+      throw new Error(
+        'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
+      );
+    }
+    const first = startPage(input.page);
+    // Every page uses the options as they were when listAll was called.
+    return walkPages(
+      (page: number) => this.list({ ...input, page }, call.own),
+      first,
+      call.signals,
+    );
+  }
+}
+
+/**
+ * The body of `POST /citecheck`, after the input's own checks: exactly one of
+ * `text` and `pairs`, and `maxCitations` only with `text`.
+ */
+function citecheckBody(input: CitecheckInput): Record<string, unknown> {
+  const hasText = typeof input.text === "string" && input.text.trim() !== "";
+  if (hasText === (input.pairs !== undefined)) {
+    throw new Error("citecheck() needs exactly one of text and pairs.");
+  }
+  if (input.pairs !== undefined && input.maxCitations !== undefined) {
+    throw new Error("maxCitations goes with text: every pair is checked.");
+  }
+  const body: Record<string, unknown> = hasText
+    ? { text: input.text }
+    : { pairs: pairsToWire(input.pairs) };
+  if (input.maxCitations !== undefined) body.max_citations = input.maxCitations;
+  if (input.language) body.language = input.language;
+  if (input.webhookUrl !== undefined && input.webhookUrl !== null)
+    body.webhook_url = input.webhookUrl;
+  return body;
 }
 
 export class Lenz {
@@ -602,41 +1499,102 @@ export class Lenz {
   private timeoutMs: number;
   private maxRetries: number;
   private fetchImpl: typeof fetch;
+  private logger: LenzLogger | undefined;
 
   readonly verifications: VerificationsNamespace;
   readonly ask: AskNamespace;
   readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
+    // One rule for every per-request timeout and retry count, checked first.
+    checkTimeoutMs(opts.timeoutMs, "new Lenz()", true);
+    checkMaxRetries(opts.maxRetries, "new Lenz()", true);
     this.apiKey = opts.apiKey ?? envVar("LENZ_API_KEY") ?? "";
     this.baseUrl = (opts.baseUrl ?? envVar("LENZ_BASE_URL") ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
+    this.logger = opts.logger;
 
     this.verifications = new VerificationsNamespace(this);
     this.ask = new AskNamespace(this);
     this.library = new LibraryNamespace(this);
   }
 
-  // ── Marquee verbs ──
-
-  async verify(input: VerifyInput): Promise<TaskAccepted> {
-    return this.submit(input);
+  /**
+   * A copy of this client with request options that apply to every call made
+   * through it: a cheap object that shares the `fetch`, key, base URL and
+   * logger. `timeoutMs` and `maxRetries` replace the client's (the copy's
+   * `timeoutMs` is also the attempt timeout of a wait's polls, which a wait's
+   * own `timeoutMs`, its budget, does not set); `headers` merge over the
+   * client's copy headers; a `signal` is added to any the client already has.
+   * A call's own options win over the copy's, field by field.
+   *
+   * A copy with a `signal` is dead once it fires: every later call on it
+   * throws `LenzAbortError`. Make one per request
+   * (`client.withOptions({ signal: request.signal })`), and cancel server-side
+   * work through the client you made it from.
+   */
+  withOptions(opts: RequestOptions): this {
+    const o = checkOptions(opts, "withOptions()", "request");
+    const base = COPY_OPTIONS.get(this);
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(this) as object) as this, this);
+    if (o.timeoutMs !== undefined) copy.timeoutMs = o.timeoutMs;
+    if (o.maxRetries !== undefined) copy.maxRetries = o.maxRetries;
+    COPY_OPTIONS.set(copy, {
+      signals: o.signal
+        ? [...(base?.signals ?? NO_SIGNALS), o.signal]
+        : (base?.signals ?? NO_SIGNALS),
+      headers: mergeHeaders(base?.headers ?? NO_HEADERS, o.headers),
+    });
+    // Each namespace is copied from the one it replaces (its class and any
+    // method set on it kept) and bound to the copy.
+    const namespaces = copy as unknown as Record<"verifications" | "ask" | "library", object>;
+    for (const name of ["verifications", "ask", "library"] as const) {
+      const from = namespaces[name];
+      namespaces[name] = Object.assign(
+        Object.create(Object.getPrototypeOf(from) as object) as object,
+        from,
+        { client: copy },
+      );
+    }
+    return copy;
   }
 
-  async verifyBatch(input: VerifyBatchInput): Promise<BatchAccepted> {
+  // ── Marquee verbs ──
+
+  async verify(input: VerifyInput, options?: RequestOptions): Promise<TaskAccepted> {
+    const call = resolveCall(this, options, "verify()");
+    return this.submit(input, await callIdempotencyKey(input), transportOf(call));
+  }
+
+  async verifyBatch(input: VerifyBatchInput, options?: RequestOptions): Promise<BatchAccepted> {
+    const call = resolveCall(this, options, "verifyBatch()");
+    return this._verifyBatch(input, await callIdempotencyKey(input), call);
+  }
+
+  private async _verifyBatch(
+    input: VerifyBatchInput,
+    idempotencyKey: string | undefined,
+    call: Call,
+  ): Promise<BatchAccepted> {
     const body: Record<string, unknown> = {
       // Per-item shape passes through verbatim — `VerifyBatchItem` allows
       // any subset including a per-item `language` override.
-      claims: input.claims.map((c) => {
+      claims: input.claims.map((c, i) => {
+        // `sourceUrl` / `webhookUrl` are the camelCase names of `source_url` /
+        // `webhook_url`; the body is built in a fixed key order either way.
+        const fields = c as Record<string, unknown>;
+        checkAliases(fields, BATCH_ITEM_ALIASES, `verifyBatch() claims[${i}]`, batchItemAbsent);
+        const sourceUrl = batchItemValue(fields, "sourceUrl", "source_url");
+        const webhookUrl = batchItemValue(fields, "webhookUrl", "webhook_url");
         const item: Record<string, unknown> = {
           text: c.claim || c.text,
-          source_url: c.source_url ?? "",
+          source_url: sourceUrl ?? "",
         };
         // Omitted when unset: an omitted webhook_url means the key's default
         // URL. An empty string is never sent in its place.
-        if (c.webhook_url) item.webhook_url = c.webhook_url;
+        if (sendsWebhookUrl(webhookUrl)) item.webhook_url = webhookUrl;
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
         if (c.depth) item.depth = c.depth;
@@ -645,17 +1603,20 @@ export class Lenz {
     };
     // Batch-wide defaults — per-item values (in the claims map above) override
     // server-side when set.
-    if (input.webhookUrl) body["webhook_url"] = input.webhookUrl;
+    if (sendsWebhookUrl(input.webhookUrl)) body["webhook_url"] = input.webhookUrl;
     if (input.language) body["language"] = input.language;
     if (input.visibility) body["visibility"] = input.visibility;
     if (input.depth) body["depth"] = input.depth;
+    // One key per call, reused across its own retries, so a retried batch
+    // does not start (and charge for) its claims twice.
     const headers: Record<string, string> = {};
-    if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     const accepted = await this.request<BatchAccepted>({
       method: "POST",
       path: "/verify/batch",
       json: body,
       headers,
+      ...transportOf(call),
     });
     return normalizeBatchAccepted(accepted) as BatchAccepted;
   }
@@ -675,7 +1636,9 @@ export class Lenz {
    * `status` is `"ready"`, `"not_a_claim"` (no verifiable claim in the text
    * at all), or `"no_match"` (claims were found, none fell within `focus`).
    */
-  async extract(input: ExtractInput): Promise<ExtractedClaims> {
+  async extract(input: ExtractInput, options?: RequestOptions): Promise<ExtractedClaims> {
+    checkTimeoutMs(input.timeoutMs, "extract() input", true);
+    const call = resolveCall(this, options, "extract()");
     const body: Record<string, unknown> = { text: input.text };
     if (input.language) body.language = input.language;
     // No client-side length check on `focus`: the server's 422 is the
@@ -694,9 +1657,11 @@ export class Lenz {
       path: "/extract",
       json: body,
       headers,
-      // Never shortens a client configured with a longer timeout: the caller
-      // asked for it.
-      timeoutMs: input.timeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
+      ...transportOf(call),
+      // The floor applies to an inherited timeout only: it never shortens a
+      // client configured with a longer one, and a value given for the call
+      // (in the options, or the deprecated input field) is used as given.
+      timeoutMs: call.timeoutMs ?? input.timeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
     });
     return normalizeExtract(out, input.locate) as ExtractedClaims;
   }
@@ -709,9 +1674,10 @@ export class Lenz {
    *   `more_claims`, unchecked and free.
    * - `assess({ claims })` — up to 20 claims in one call (~15s); returns
    *   exactly one entry per item, in the order sent. This is the step after
-   *   `extract` in the ladder. A row with `verdict === "Error"` has
-   *   `error_code` and `hint` and is free; a compound item is assessed on
-   *   its main claim and lists the rest in `identified_claims`.
+   *   `extract` in the ladder. A row with `status === "failed"` has no
+   *   verdict, a `failure` saying why (`code`, `hint`) and is free; a
+   *   compound item is assessed on its main claim and lists the rest in
+   *   `more_claims`.
    *
    * ```ts
    * const out = await client.extract({ text: llmOutput });
@@ -722,7 +1688,7 @@ export class Lenz {
    * }
    * // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
    * const doubtful = quick
-   *   .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+   *   .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
    *   .map((c) => ({ claim: c.claim! }))
    *   .slice(0, 20);
    * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
@@ -746,7 +1712,21 @@ export class Lenz {
    * claim with its wrong part corrected. No extra credit; not itself
    * verified.
    */
-  async assess(input: AssessInput): Promise<AssessResponse> {
+  async assess(input: AssessInput, options?: RequestOptions): Promise<AssessResponse> {
+    checkTimeoutMs(input.timeoutMs, "assess() input", true);
+    // `claim` is the documented name; `text` the alias. Either way the wire
+    // key is `text`, which every server version accepts.
+    const single = input.claim || input.text;
+    const list = input.claims;
+    if (list && list.length > 0 && single) {
+      throw new LenzValidationError({
+        message: "assess takes one claim (`claim`) or a list (`claims`), not both.",
+        cause: "`claims` was given together with a non-empty `claim` / `text`.",
+        fix: "Send a single claim as `claim`, or up to 20 claims as `claims`.",
+        docUrl: "https://lenz.io/docs/errors",
+      });
+    }
+    const call = resolveCall(this, options, "assess()");
     // A random key per invocation, reused across this client's own retries so
     // a 5xx retry is deduped server-side rather than charged twice.
     //
@@ -757,22 +1737,13 @@ export class Lenz {
     const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-    // Never shortens a client configured with a longer timeout: the caller
-    // asked for it.
-    const timeoutMs = input.timeoutMs ?? Math.max(this.timeoutMs, ASSESS_TIMEOUT_MS);
-    // `claim` is the documented name; `text` the alias. Either way the wire
-    // key is `text`, which every server version accepts.
-    const single = input.claim || input.text;
-    const list = input.claims;
+    // The floor applies to an inherited timeout only: it never shortens a
+    // client configured with a longer one, and a value given for the call (in
+    // the options, or the deprecated input field) is used as given.
+    const timeoutMs =
+      call.timeoutMs ?? input.timeoutMs ?? Math.max(this.timeoutMs, ASSESS_TIMEOUT_MS);
+    const transport = { ...transportOf(call), timeoutMs };
     if (list && list.length > 0) {
-      if (single) {
-        throw new LenzValidationError({
-          message: "assess takes one claim (`claim`) or a list (`claims`), not both.",
-          cause: "`claims` was given together with a non-empty `claim` / `text`.",
-          fix: "Send a single claim as `claim`, or up to 20 claims as `claims`.",
-          docUrl: "https://lenz.io/docs/errors",
-        });
-      }
       const body: Record<string, unknown> = { claims: list };
       if (input.language) body.language = input.language;
       // Sent only when asked, so a request without the option (and what its
@@ -783,8 +1754,8 @@ export class Lenz {
           method: "POST",
           path: "/assess",
           json: body,
-          timeoutMs,
           headers,
+          ...transport,
         }),
       ) as AssessResponse;
     }
@@ -796,8 +1767,8 @@ export class Lenz {
         method: "POST",
         path: "/assess",
         json: body,
-        timeoutMs,
         headers,
+        ...transport,
       }),
     ) as AssessResponse;
   }
@@ -810,11 +1781,17 @@ export class Lenz {
    * per claim. Poll each via `getStatus` / `wait`. Every text must match a
    * claim offered in the prior interrupt — the server rejects anything else.
    */
-  async select(taskId: string, input: SelectInput): Promise<BatchAccepted> {
+  async select(
+    taskId: string,
+    input: SelectInput,
+    options?: RequestOptions,
+  ): Promise<BatchAccepted> {
+    const id = requirePathId("select", "task_id", taskId);
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
     if (!chosen || chosen.length === 0) {
       throw new Error("select requires a non-empty claims array");
     }
+    const call = resolveCall(this, options, "select()");
     // One key per call, reused across its own retries, so a retried select
     // does not start (and charge for) the chosen claims twice.
     const idempotencyKey = await callIdempotencyKey(input);
@@ -822,9 +1799,10 @@ export class Lenz {
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     const accepted = await this.request<BatchAccepted>({
       method: "POST",
-      path: `/verify/${taskId}/select`,
+      path: `/verify/${id}/select`,
       json: { texts: chosen },
       headers,
+      ...transportOf(call),
     });
     return normalizeBatchAccepted(accepted) as BatchAccepted;
   }
@@ -836,16 +1814,79 @@ export class Lenz {
    * account's retention period has removed the verification. A running task
    * never answers 410.
    */
-  async getStatus(taskId: string): Promise<TaskStatus> {
+  async getStatus(
+    taskId: string,
+    /**
+     * The request options, plus `deadlineAt`. The waits poll through this
+     * method and pass the per-attempt timeout, their absolute `Date.now()`
+     * deadline, and their own `signal` and `headers`. An override may ignore
+     * them; the wait still ends at its deadline, and at its signal.
+     */
+    options?: GetStatusOptions,
+  ): Promise<TaskStatus> {
+    const id = requirePathId("getStatus", "task_id", taskId);
+    const call = resolveCall(this, options, "getStatus()");
+    const deadlineAt = options?.deadlineAt;
     const body = await this.request<TaskStatus>({
       method: "GET",
-      path: `/verify/status/${taskId}`,
+      path: `/verify/status/${id}`,
+      ...transportOf(call),
+      ...(deadlineAt !== undefined ? { deadlineAt } : {}),
     });
     return normalizeTaskStatus(body) as TaskStatus;
   }
 
-  async usage(): Promise<Usage> {
-    const usage = await this.request<Usage>({ method: "GET", path: "/me/usage" });
+  /**
+   * Stop a verification. A cancelled run is not charged and saves nothing.
+   *
+   * Answers for every run of yours, whatever its state. `cancelled: true`
+   * means the run is cancelled, by this call or an earlier one (so a repeat,
+   * or a retry after a lost response, answers `true` again). `cancelled:
+   * false` means it was not cancelled and nothing changed: `status` is the
+   * run's status, normally `completed` (the verification exists and was
+   * charged as usual) or `failed`. A task that `select` already resolved
+   * answers `cancelled: false` with `needs_input`; cancel the task ids
+   * `select` returned. Cancelling is safe to repeat, so the call sends no
+   * Idempotency-Key and is retried like any other request.
+   *
+   * Throws {@link LenzNotFoundError} (404) for a task that does not exist, is
+   * not yours, or was started on the website. A review's deep check cannot be
+   * cancelled on its own: the API answers 409 with code `use_review_cancel`
+   * (a {@link LenzError}, not retryable); stop the review with
+   * {@link Lenz.cancelReview} instead. Throws {@link LenzAPIError} when a 200
+   * carries no cancel result.
+   */
+  async cancel(taskId: string, options?: RequestOptions): Promise<CancelResult> {
+    const id = requirePathId("cancel", "task_id", taskId);
+    const call = resolveCall(this, options, "cancel()");
+    const path = `/verify/${id}/cancel`;
+    const body = await this.request<unknown>({ method: "POST", path, ...transportOf(call) });
+    const result = body as Partial<CancelResult> | null;
+    if (
+      !result ||
+      typeof result !== "object" ||
+      Array.isArray(result) ||
+      result.task_id !== taskId ||
+      typeof result.cancelled !== "boolean" ||
+      typeof result.status !== "string"
+    ) {
+      throw new LenzAPIError({
+        message: `POST ${path} answered without a cancel result.`,
+        cause: "The response carries no task_id (this task's), cancelled and status.",
+        fix: "Read the run with getStatus(taskId); contact support with the request id if this persists.",
+        docUrl: "https://lenz.io/docs/errors",
+      });
+    }
+    return body as CancelResult;
+  }
+
+  async usage(options?: RequestOptions): Promise<Usage> {
+    const call = resolveCall(this, options, "usage()");
+    const usage = await this.request<Usage>({
+      method: "GET",
+      path: "/me/usage",
+      ...transportOf(call),
+    });
     // Both response shapes: `credits.extra` / `credits.bonus` (the same
     // number), `quota_resets_at`, and the per-capability blocks, recomputed
     // from `credits` and `costs` when the server sends only the pool.
@@ -868,13 +1909,15 @@ export class Lenz {
    * A resend with the same `idempotencyKey` within 24 hours returns the same
    * review; a new key is a new review.
    */
-  async review(input: ReviewInput): Promise<ReviewStarted> {
-    return this._submitReview(input);
+  async review(input: ReviewInput, options?: RequestOptions): Promise<ReviewStarted> {
+    const call = resolveCall(this, options, "review()");
+    return this._submitReview(input, await jobIdempotencyKey(input), transportOf(call));
   }
 
   private async _submitReview(
     input: ReviewInput,
-    transport: Pick<RequestOptions, "deadlineAt"> = {},
+    idempotencyKey: string,
+    transport: Partial<SendOptions> = {},
   ): Promise<ReviewStarted> {
     const body: Record<string, unknown> = { text: input.text };
     if (input.language) body.language = input.language;
@@ -896,16 +1939,13 @@ export class Lenz {
     // Sent only when asked, for the same reason.
     if (input.suggestEdits) escalate.suggest_edits = true;
     if (Object.keys(escalate).length > 0) body.escalate = escalate;
-    // Always keyed: this client retries a failed POST, and a retry without a
-    // key could start a second review. Random per call, never derived from
-    // the text: the same draft submitted again later is a new review.
-    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
     try {
       return await this.request<ReviewStarted>({
         method: "POST",
         path: "/review",
         json: body,
         headers: { "Idempotency-Key": idempotencyKey },
+        conflictReceipt: "review_id",
         ...transport,
       });
     } catch (exc) {
@@ -933,11 +1973,20 @@ export class Lenz {
    * Throws {@link LenzGoneError} (HTTP 410) when the review was purged.
    */
   getReview(reviewId: string): Promise<ReviewFull>;
-  getReview(reviewId: string, opts: { view: "issues" }): Promise<ReviewIssues>;
-  getReview(reviewId: string, opts: { view: "full" }): Promise<ReviewFull>;
-  getReview(reviewId: string, opts?: GetReviewOptions): Promise<ReviewFull | ReviewIssues>;
-  getReview(reviewId: string, opts: GetReviewOptions = {}): Promise<ReviewFull | ReviewIssues> {
-    return this._getReview(reviewId, opts);
+  getReview(reviewId: string, opts: { view: "issues" } & RequestOptions): Promise<ReviewIssues>;
+  getReview(reviewId: string, opts: { view: "full" } & RequestOptions): Promise<ReviewFull>;
+  getReview(reviewId: string, opts: { view?: undefined } & RequestOptions): Promise<ReviewFull>;
+  getReview(
+    reviewId: string,
+    opts?: GetReviewOptions & RequestOptions,
+  ): Promise<ReviewFull | ReviewIssues>;
+  async getReview(
+    reviewId: string,
+    opts: GetReviewOptions & RequestOptions = {},
+  ): Promise<ReviewFull | ReviewIssues> {
+    requirePathId("getReview", "review_id", reviewId);
+    const call = resolveCall(this, opts, "getReview()");
+    return this._getReview(reviewId, opts, transportOf(call));
   }
 
   // ── Citation check: the check on its own ──
@@ -949,33 +1998,24 @@ export class Lenz {
    * read the check with `getCitecheck`, wait with `citecheckAndWait`, or
    * receive `citecheck.completed` at your webhook.
    */
-  async citecheck(input: CitecheckInput): Promise<CitecheckStarted> {
-    return this._submitCitecheck(input);
+  async citecheck(input: CitecheckInput, options?: RequestOptions): Promise<CitecheckStarted> {
+    const body = citecheckBody(input);
+    const call = resolveCall(this, options, "citecheck()");
+    return this._submitCitecheck(body, await jobIdempotencyKey(input), transportOf(call));
   }
 
   private async _submitCitecheck(
-    input: CitecheckInput,
-    transport: Pick<RequestOptions, "deadlineAt"> = {},
+    body: Record<string, unknown>,
+    idempotencyKey: string,
+    transport: Partial<SendOptions> = {},
   ): Promise<CitecheckStarted> {
-    const hasText = typeof input.text === "string" && input.text.trim() !== "";
-    if (hasText === (input.pairs !== undefined)) {
-      throw new Error("citecheck() needs exactly one of text and pairs.");
-    }
-    if (input.pairs !== undefined && input.maxCitations !== undefined) {
-      throw new Error("maxCitations goes with text: every pair is checked.");
-    }
-    const body: Record<string, unknown> = hasText ? { text: input.text } : { pairs: input.pairs };
-    if (input.maxCitations !== undefined) body.max_citations = input.maxCitations;
-    if (input.language) body.language = input.language;
-    if (input.webhookUrl !== undefined && input.webhookUrl !== null)
-      body.webhook_url = input.webhookUrl;
-    const idempotencyKey = input.idempotencyKey ?? (await generateUuid()).replace(/-/g, "");
     try {
       return await this.request<CitecheckStarted>({
         method: "POST",
         path: "/citecheck",
         json: body,
         headers: { "Idempotency-Key": idempotencyKey },
+        conflictReceipt: "citecheck_id",
         ...transport,
       });
     } catch (exc) {
@@ -999,13 +2039,15 @@ export class Lenz {
    * Read a citation check. Throws {@link LenzGoneError} (HTTP 410) once the
    * account's retention period has removed it.
    */
-  async getCitecheck(citecheckId: string): Promise<Citecheck> {
-    return this._getCitecheck(citecheckId);
+  async getCitecheck(citecheckId: string, options?: RequestOptions): Promise<Citecheck> {
+    requirePathId("getCitecheck", "citecheck_id", citecheckId);
+    const call = resolveCall(this, options, "getCitecheck()");
+    return this._getCitecheck(citecheckId, transportOf(call));
   }
 
   private async _getCitecheck(
     citecheckId: string,
-    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
+    transport: Partial<SendOptions> = {},
   ): Promise<Citecheck> {
     return withCitecheckDefaults(await this._readCitecheck(citecheckId, transport)) as Citecheck;
   }
@@ -1013,37 +2055,81 @@ export class Lenz {
   /** The body as the server sent it, before any default is filled. */
   private async _readCitecheck(
     citecheckId: string,
-    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
+    transport: Partial<SendOptions> = {},
   ): Promise<unknown> {
-    if (!citecheckId) {
-      throw new Error("getCitecheck() requires a non-empty citecheck_id.");
-    }
+    const id = requirePathId("getCitecheck", "citecheck_id", citecheckId);
     return this.request<unknown>({
       method: "GET",
-      path: `/citechecks/${encodeURIComponent(citecheckId)}`,
+      path: `/citechecks/${id}`,
       ...transport,
     });
+  }
+
+  /**
+   * Stop a citation check. Returns the check as it stands afterwards (as
+   * `getCitecheck` returns it): `status: "cancelled"`, or unchanged
+   * (`completed`, `failed`) when it had already ended. Cancelling again is
+   * safe, so the call sends no Idempotency-Key.
+   *
+   * Throws {@link LenzNotFoundError} (404) for a check that does not exist
+   * or is not yours, and {@link LenzGoneError} (HTTP 410) once the account's
+   * retention period has removed it.
+   */
+  async cancelCitecheck(citecheckId: string, options?: RequestOptions): Promise<Citecheck> {
+    const id = requirePathId("cancelCitecheck", "citecheck_id", citecheckId);
+    const call = resolveCall(this, options, "cancelCitecheck()");
+    const body = await this.request<unknown>({
+      method: "POST",
+      path: `/citechecks/${id}/cancel`,
+      ...transportOf(call),
+    });
+    if (!isJobBody(body, "citecheck_id", citecheckId, CITECHECK_LISTS)) {
+      throw unexpectedAnswer("POST", `/citechecks/${id}/cancel`);
+    }
+    return withCitecheckDefaults(body) as Citecheck;
   }
 
   /**
    * Start a citation check and poll it until it ends; returns the completed
    * check. Polls on its `poll_after_seconds` (never tighter than 5 s) and
    * calls `onUpdate` on every poll whose body changed. Throws
-   * {@link CitecheckFailedError} when the check ends `failed` and
+   * {@link CitecheckFailedError} when the check ends `failed` or `cancelled` and
    * {@link CitecheckTimeoutError} (carrying the last body seen) at the
-   * deadline, which bounds the submit and every poll.
+   * deadline, which bounds every poll. The deadline starts after the submit
+   * (since 3.0), which makes its attempts with the client's timeout and the
+   * retries of `opts.maxRetries` (else the client's); `timeoutMs` of 0 or
+   * less reads the check once.
    */
   async citecheckAndWait(
     input: CitecheckInput,
     opts: CitecheckAndWaitOptions = {},
   ): Promise<Citecheck> {
+    // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
-    const deadline = Date.now() + timeoutMs;
-    const { citecheck_id: citecheckId } = await this._submitCitecheck(input, {
-      deadlineAt: deadline,
+    const onUpdate = opts.onUpdate;
+    const body = citecheckBody(input);
+    const call = resolveCall(this, opts, "citecheckAndWait()", "submitWait");
+    const idempotencyKey = await jobIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, async () => {
+      const started = await this._submitCitecheck(body, idempotencyKey, transportOf(call));
+      const citecheckId = acceptedId("citecheck_id", started.citecheck_id);
+      const deadline = Date.now() + timeoutMs;
+      return withAbortContext({ citecheckId }, () =>
+        this._waitCitecheck(citecheckId, deadline, timeoutMs, onUpdate, call),
+      );
     });
+  }
+
+  private _waitCitecheck(
+    citecheckId: string,
+    deadline: number,
+    timeoutMs: number,
+    onUpdate: CitecheckAndWaitOptions["onUpdate"],
+    call: Call,
+  ): Promise<Citecheck> {
     return this._waitJob<Citecheck>({
       deadline,
+      call,
       // The raw body, so the guard judges what the server sent: a default
       // filled first would let a bare `{citecheck_id, status}` pass as a result.
       read: async (transport) => {
@@ -1055,25 +2141,48 @@ export class Lenz {
       isBody: (body) => isCitecheckBody(body, citecheckId),
       failed: (check) => new CitecheckFailedError(check),
       timedOut: (last) => new CitecheckTimeoutError(citecheckId, last, timeoutMs),
-      onUpdate: opts.onUpdate,
+      onUpdate,
     });
   }
 
   private async _getReview(
     reviewId: string,
     opts: GetReviewOptions,
-    transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
+    transport: Partial<SendOptions> = {},
   ): Promise<ReviewFull | ReviewIssues> {
-    if (!reviewId) {
-      throw new Error("getReview() requires a non-empty review_id.");
-    }
+    const id = requirePathId("getReview", "review_id", reviewId);
     const body = await this.request<ReviewFull | ReviewIssues>({
       method: "GET",
-      path: `/reviews/${encodeURIComponent(reviewId)}`,
+      path: `/reviews/${id}`,
       query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
       ...transport,
     });
     return withReviewDefaults(body);
+  }
+
+  /**
+   * Stop a review, including the deep checks it started. Returns the review
+   * as it stands afterwards (the full view, as `getReview` returns it):
+   * `status: "cancelled"`, or unchanged (`completed`, `failed`) when it had
+   * already ended. Cancelling again is safe, so the call sends no
+   * Idempotency-Key.
+   *
+   * Throws {@link LenzNotFoundError} (404) for a review that does not exist
+   * or is not yours, and {@link LenzGoneError} (HTTP 410) when the review was
+   * purged.
+   */
+  async cancelReview(reviewId: string, options?: RequestOptions): Promise<ReviewFull> {
+    const id = requirePathId("cancelReview", "review_id", reviewId);
+    const call = resolveCall(this, options, "cancelReview()");
+    const body = await this.request<ReviewFull>({
+      method: "POST",
+      path: `/reviews/${id}/cancel`,
+      ...transportOf(call),
+    });
+    if (!isJobBody(body, "review_id", reviewId, REVIEW_LISTS)) {
+      throw unexpectedAnswer("POST", `/reviews/${id}/cancel`);
+    }
+    return withReviewDefaults(body) as ReviewFull;
   }
 
   /**
@@ -1082,27 +2191,39 @@ export class Lenz {
    * Polls on the review's `poll_after_seconds` (never tighter than 5 s) and
    * calls `onUpdate` with the review on every poll whose body changed, so a
    * caller can show the quick verdicts as soon as they land. Throws
-   * {@link ReviewFailedError} when the review ends `failed` and
+   * {@link ReviewFailedError} when the review ends `failed` or `cancelled` and
    * {@link ReviewTimeoutError} (carrying the last body seen) at the deadline;
    * a transient poll error is retried on the next poll, after the wait the
-   * server stated when it stated one (at most 60 s). The deadline bounds the
-   * submit and every poll; when the submit used it up, one poll still runs so
-   * the timeout can carry `partial`, and a terminal review it reads is
-   * returned or thrown as usual.
+   * server stated when it stated one (at most 60 s). The deadline starts
+   * after the submit (since 3.0; before, it bounded the submit too), and
+   * bounds every poll; the submit makes its attempts with the client's
+   * timeout and the retries of `opts.maxRetries` (else the client's). The
+   * first poll always runs, so a `timeoutMs` of 0 or less reads the review
+   * once, and a terminal review it reads is returned or thrown as usual.
    */
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
+    // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
-    const deadline = Date.now() + timeoutMs;
-    // The submit is bounded by the same deadline: its attempts are cut to
-    // what is left and a retry that would pass it is not taken.
-    const { review_id: reviewId } = await this._submitReview(input, { deadlineAt: deadline });
-    return this._waitJob<ReviewFull>({
-      deadline,
-      read: (transport) => this._getReview(reviewId, {}, transport),
-      isBody: (body) => isReviewBody(body, reviewId),
-      failed: (review) => new ReviewFailedError(review),
-      timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
-      onUpdate: opts.onUpdate,
+    const onUpdate = opts.onUpdate;
+    const call = resolveCall(this, opts, "reviewAndWait()", "submitWait");
+    const idempotencyKey = await jobIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, async () => {
+      const started = await this._submitReview(input, idempotencyKey, transportOf(call));
+      const reviewId = acceptedId("review_id", started.review_id);
+      // The wait's clock starts once the review is accepted, as every other
+      // wait's does.
+      const deadline = Date.now() + timeoutMs;
+      return withAbortContext({ reviewId }, () =>
+        this._waitJob<ReviewFull>({
+          deadline,
+          call,
+          read: (transport) => this._getReview(reviewId, {}, transport),
+          isBody: (body) => isReviewBody(body, reviewId),
+          failed: (review) => new ReviewFailedError(review),
+          timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
+          onUpdate,
+        }),
+      );
     });
   }
 
@@ -1112,13 +2233,17 @@ export class Lenz {
    */
   private async _waitJob<T extends { status: string; poll_after_seconds: number | null }>(job: {
     deadline: number;
-    read: (transport: Pick<RequestOptions, "timeoutMs" | "maxRetries">) => Promise<unknown>;
+    /** The call's signals and headers, sent with every poll. */
+    call?: Call;
+    read: (transport: Partial<SendOptions>) => Promise<unknown>;
     isBody: (body: unknown) => body is T;
     failed: (current: T) => Error;
     timedOut: (last: T | null) => Error;
     onUpdate?: (current: T) => void;
   }): Promise<T> {
     const { deadline } = job;
+    const signals = job.call?.signals ?? NO_SIGNALS;
+    const optionHeaders = job.call?.headers ?? NO_HEADERS;
     let last: T | null = null;
     let lastJson = "";
     for (let poll = 0; ; poll++) {
@@ -1133,19 +2258,21 @@ export class Lenz {
         // waits, so a retry ladder inside the request cannot outlive the
         // deadline.
         const body = await job.read({
+          signals,
+          optionHeaders,
           maxRetries: 0,
-          // Cut at what is left. Only when the submit used the whole budget
-          // does the first poll get 5 s, so `partial` can fill.
-          timeoutMs: Math.min(
-            this.timeoutMs,
-            poll === 0 && budget <= 0 ? REVIEW_POLL_FLOOR_S * 1000 : budget,
-          ),
+          // Cut at what is left. A first poll with no budget left (a
+          // `timeoutMs` of 0 or less) gets the client's own timeout, so the
+          // one read can fill `partial`.
+          timeoutMs: poll === 0 && budget <= 0 ? this.timeoutMs : Math.min(this.timeoutMs, budget),
         });
         // A 2xx that is not this job (an empty body, a proxy's error object,
         // another id, a body missing its lists) is a failed poll, never an
         // update and never `partial`.
         if (job.isBody(body)) current = body;
       } catch (exc) {
+        // The caller's abort ends the wait; it is never a transient failure.
+        rethrowIfCallerAbort(signals, exc);
         // Keep waiting through what a later poll can outlast: a 5xx, a rate
         // limit, and anything that is not a Lenz answer at all (a network
         // drop, a body that stops or does not decode). A Lenz answer that
@@ -1153,10 +2280,14 @@ export class Lenz {
         if (exc instanceof LenzError && !(exc instanceof LenzAPIError) && !isRateLimit(exc)) {
           throw exc;
         }
+        // Anything else that is not a Lenz answer or a transport failure is a
+        // programming error (the call's refusal of an id included): waiting
+        // does not change it.
+        if (!isPollableError(exc)) throw exc;
         // A wait the server stated outranks the poll hint, capped like every
         // other stated wait in this client: a maintenance 503 can state an
         // hour.
-        const retryAfter = (exc as { retryAfter?: unknown }).retryAfter;
+        const retryAfter = (exc as { retryAfter?: unknown } | null | undefined)?.retryAfter;
         if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
           statedWaitMs = Math.min(retryAfter, MAX_RETRY_AFTER_SLEEP) * 1000;
         }
@@ -1174,12 +2305,24 @@ export class Lenz {
             }
           }
         }
+        // The callback may have aborted: the abort wins over the job's own
+        // result, terminal or not.
+        throwIfAborted(signals);
         if (current.status === "completed") return current;
-        if (current.status === "failed") throw job.failed(current);
+        // `cancelled` (API version 2026-10-11) is the original shape's `failed`
+        // with failure class `cancelled`: the same error.
+        if (current.status === "failed" || current.status === "cancelled") {
+          throw job.failed(current);
+        }
       }
+      // An abort that comes with the deadline is an abort, not a timeout.
+      throwIfAborted(signals);
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw job.timedOut(last);
-      await sleep(Math.min(Math.max(reviewPollMs(current ?? last), statedWaitMs), remaining));
+      await sleep(
+        Math.min(Math.max(reviewPollMs(current ?? last), statedWaitMs), remaining),
+        signals,
+      );
     }
   }
 
@@ -1190,13 +2333,31 @@ export class Lenz {
    * Verification, or throws LenzNeedsInputError / LenzPipelineError /
    * LenzTimeoutError. By default sends an auto-generated Idempotency-Key
    * so a network retry on submit doesn't spawn a duplicate task.
+   *
+   * `opts` takes `timeoutMs` (started after the submit) and `onProgress`,
+   * as `wait` does. The same fields inside `input` still work (deprecated);
+   * `opts` wins field by field. `opts.signal` and `opts.headers` apply to the
+   * submit and every poll; `opts.maxRetries` to the submit only.
    */
-  async verifyAndWait(input: VerifyAndWaitInput): Promise<Verification> {
-    const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
-    const accepted = await this.submit(input);
-    // eslint-disable-next-line no-console
-    console.info(`[lenz-io] Submitted task: ${accepted.task_id}`);
-    return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
+  async verifyAndWait(
+    input: VerifyAndWaitInput,
+    opts: VerifyAndWaitOptions = {},
+  ): Promise<Verification> {
+    const { timeoutMs, onProgress } = waitOptions(input, opts);
+    const call = resolveCall(this, opts, "verifyAndWait()", "submitWait");
+    const idempotencyKey = await callIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, async () => {
+      const accepted = await this.submit(input, idempotencyKey, transportOf(call));
+      acceptedId("task_id", accepted.task_id);
+      this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
+      return withAbortContext({ taskId: accepted.task_id }, () =>
+        // Raced, in case an override of `wait` ignores the signal.
+        raceAbort(
+          this.wait(accepted, { timeoutMs, onProgress, ...ownOptions(call) }),
+          call.signals,
+        ),
+      );
+    });
   }
 
   /**
@@ -1204,23 +2365,28 @@ export class Lenz {
    * `Verification`. `task` is a `task_id` string OR the `TaskAccepted` returned
    * by `verify` / `select` — so `client.wait(await client.verify({claim}))`
    * reads naturally. Throws for an empty id, `LenzNeedsInputError` /
-   * `LenzPipelineError` on terminal non-success, `LenzGoneError` when the
+   * `LenzPipelineError` on terminal non-success (a task cancelled elsewhere
+   * too, with `failureClass` `"cancelled"`), `LenzGoneError` when the
    * verification was removed under its account's retention period, and
-   * `LenzTimeoutError` on deadline.
+   * `LenzTimeoutError` on deadline. `opts.signal` stops it with
+   * `LenzAbortError` (carrying the `taskId`); `opts.headers` go on every poll.
    */
   async wait(task: string | TaskAccepted, opts: WaitOptions = {}): Promise<Verification> {
     const taskId = typeof task === "string" ? task : task.task_id;
     if (!taskId) {
       throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
     }
+    requirePathId("wait", "task_id", taskId);
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
-    const { terminal, timedOut, gone } = await this._pollToTerminal(
-      [taskId],
-      timeoutMs,
-      opts.onProgress,
+    const onProgress = opts.onProgress;
+    const call = resolveCall(this, opts, "wait()", "wait");
+    const { terminal, timedOut, gone, permanent } = await withAbortContext({ taskId }, () =>
+      this._pollToTerminal([taskId], timeoutMs, onProgress, call),
     );
     const goneErr = gone.get(taskId);
     if (goneErr) throw goneErr;
+    const stopped = permanent.get(taskId);
+    if (stopped) throw stopped;
     if (timedOut.has(taskId)) {
       const err = new LenzTimeoutError({
         message: `wait timed out after ${timeoutMs}ms`,
@@ -1239,22 +2405,67 @@ export class Lenz {
    * `BatchItemResult` per task the batch accepted, in input order. Never throws
    * on a per-item outcome — a claim that fails, pauses, or times out becomes a
    * `BatchItemResult` with the matching `status`. A claim removed under the
-   * account's retention period reads `"failed"` with no `status_detail`.
-   * (Transport/auth errors on the initial submit still throw.)
+   * account's retention period reads `"failed"` with no `status_detail`, and
+   * so does a claim whose poll answered an error waiting will not change for
+   * it (404, or an answer in another API version); the other claims keep
+   * being polled. A 401 or 403 is about the key, not one claim: it throws
+   * {@link LenzAuthError} from the wait, as do transport/auth errors on the
+   * initial submit. Polls go through `getStatus` and none runs past the
+   * deadline.
+   *
+   * `opts` takes `timeoutMs` (started after the submit) and `onProgress`,
+   * as `wait` does. The same fields inside `input` still work (deprecated);
+   * `opts` wins field by field. `opts.signal` and `opts.headers` apply to the
+   * submit and every poll; `opts.maxRetries` to the submit only. An abort
+   * after the receipt carries the `batchId` and every accepted `taskIds`.
    */
-  async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
-    const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
-    const accepted = await this.verifyBatch(input);
+  async verifyBatchAndWait(
+    input: VerifyBatchAndWaitInput,
+    opts: VerifyAndWaitOptions = {},
+  ): Promise<BatchItemResult[]> {
+    const { timeoutMs, onProgress } = waitOptions(input, opts);
+    const call = resolveCall(this, opts, "verifyBatchAndWait()", "submitWait");
+    const idempotencyKey = await callIdempotencyKey(input);
+    return withIdempotencyKey(idempotencyKey, () =>
+      this._verifyBatchAndWait(input, idempotencyKey, timeoutMs, onProgress, call),
+    );
+  }
+
+  private async _verifyBatchAndWait(
+    input: VerifyBatchAndWaitInput,
+    idempotencyKey: string | undefined,
+    timeoutMs: number,
+    onProgress: OnProgress | undefined,
+    call: Call,
+  ): Promise<BatchItemResult[]> {
+    // Through the public verifyBatch, as 2.x did, so an override (a subclass,
+    // a test double) is used. The call's key rides in the input, so the
+    // override and the default both send the key this call reports; with
+    // the opt-out there is none and the input goes as given. The call's own
+    // options go as a second argument only when it has any (a 2.21 override
+    // sees the call it always saw), and the submit is raced against the
+    // signal in case an override ignores it.
+    const batchInput = idempotencyKey === undefined ? input : { ...input, idempotencyKey };
+    const submitOptions: RequestOptions = ownOptions(call);
+    if (call.maxRetries !== undefined) submitOptions.maxRetries = call.maxRetries;
+    const accepted = await raceAbort(
+      Object.keys(submitOptions).length > 0
+        ? this.verifyBatch(batchInput, submitOptions)
+        : this.verifyBatch(batchInput),
+      call.signals,
+    );
+    for (const it of accepted.items) acceptedId("task_id", it.task_id);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
-    const { terminal, timedOut, gone } = await this._pollToTerminal(
-      ids,
-      timeoutMs,
-      input.onProgress,
+    const { terminal, timedOut, gone, permanent } = await withAbortContext(
+      { batchId: accepted.batch_id, taskIds: ids },
+      () => this._pollToTerminal(ids, timeoutMs, onProgress, call),
     );
 
     return accepted.items.map((it): BatchItemResult => {
-      // Removed under the account's retention period: final, with no result.
-      if (gone.has(it.task_id)) {
+      // Removed under the account's retention period, or a poll answered an
+      // error polling again will not change (401, 403, 404): final, with no
+      // result.
+      if (gone.has(it.task_id) || permanent.has(it.task_id)) {
         return {
           task_id: it.task_id,
           claim: it.claim ?? it.claim_text,
@@ -1305,28 +2516,30 @@ export class Lenz {
 
   /**
    * Round-robin poll `taskIds` until each reaches a terminal state or the
-   * deadline elapses. Returns `{terminal, timedOut, gone}`; a timed-out task
-   * has no `TaskStatus` (`"timeout"` is client-side, never a wire status), and
-   * a task whose poll threw {@link LenzGoneError} (removed under its account's
-   * retention period) is in `gone`, final and never polled again. Any other
-   * poll error keeps the task pending.
+   * deadline elapses. Returns `{terminal, timedOut, gone, permanent}`; a
+   * timed-out task has no `TaskStatus` (`"timeout"` is client-side, never a
+   * wire status), a task whose poll threw {@link LenzGoneError} (removed under
+   * its account's retention period) is in `gone`, and one whose poll answered
+   * 404 or another API version is in `permanent`: final, never polled again.
+   * A 401/403 throws (it is the key's, not the task's). Any other poll error
+   * keeps the task pending.
    *
-   * Each round polls every still-pending id once (via `Promise.allSettled`, so
-   * one poll's transport failure doesn't abort the batch — that id stays
-   * pending and retries next round) BEFORE the deadline check, preserving the
-   * legacy `verifyAndWait` behavior of polling once more after sleeping the
-   * remaining time. Timeout is therefore approximate. Backoff reuses the
-   * existing 2/4/8/8…ms sequence; the 10s cap is currently unreachable and kept
-   * only to preserve identical timing.
+   * Each round polls every still-pending id once through `getStatus` (via
+   * `Promise.allSettled`, so one poll's transport failure doesn't abort the
+   * batch — that id stays pending and retries next round). Every poll ends by
+   * the deadline; once the deadline is spent no poll is made and the pending
+   * ids time out. Backoff reuses the existing 2/4/8/8…ms sequence.
    */
   private async _pollToTerminal(
     taskIds: string[],
     timeoutMs: number,
-    onProgress?: OnProgress,
+    onProgress: OnProgress | undefined,
+    call: Call,
   ): Promise<{
     terminal: Map<string, TaskStatus>;
     timedOut: Set<string>;
     gone: Map<string, LenzGoneError>;
+    permanent: Map<string, LenzError>;
   }> {
     let pending = [...taskIds];
     const terminal = new Map<string, TaskStatus>();
@@ -1334,17 +2547,81 @@ export class Lenz {
     // A 410 is final: the run finished and its account's retention period has
     // since removed it. Polling again would only spin to the deadline.
     const gone = new Map<string, LenzGoneError>();
+    // An answer polling again cannot change: the key is refused (401/403) or
+    // the task is not there (404). Final for that task.
+    const permanent = new Map<string, LenzError>();
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
-    while (pending.length > 0) {
-      const settled = await Promise.allSettled(pending.map((id) => this.getStatus(id)));
+    for (let round = 0; pending.length > 0; round++) {
+      const remaining = deadline - Date.now();
+      // The budget is spent: no poll past the deadline. Only a wait given no
+      // budget at all (timeoutMs <= 0) still looks once, bounded by the
+      // client's own timeout, as 2.x did.
+      if (remaining <= 0 && (round > 0 || timeoutMs > 0)) {
+        throwIfAborted(call.signals);
+        pending.forEach((id) => timedOut.add(id));
+        break;
+      }
+      const transport =
+        remaining > 0
+          ? { timeoutMs: Math.min(this.timeoutMs, remaining), deadlineAt: deadline }
+          : { timeoutMs: this.timeoutMs };
+      // Each poll is classified as it settles: a fatal answer (an id the call
+      // refused, a refused key, a programming error) ends the wait at once,
+      // and the round's own signal stops the polls still running.
+      const roundCtl = new AbortController();
+      // The round's signal follows the wait's own (with its reason), and is
+      // released when the round ends.
+      const own = call.own.signal;
+      const follow = () => roundCtl.abort(own?.reason);
+      if (own?.aborted) follow();
+      else own?.addEventListener("abort", follow, { once: true });
+      let onFatal: (exc: unknown) => void = () => {};
+      const fatal = new Promise<never>((_res, rej) => {
+        onFatal = rej;
+      });
+      fatal.catch(() => {});
+      const polls = pending.map((id) =>
+        this._pollThroughGetStatus(id, transport, call, roundCtl.signal).catch((exc: unknown) => {
+          if (isFatalPollError(exc)) onFatal(exc);
+          throw exc;
+        }),
+      );
+      const all = Promise.allSettled(polls);
+      let settled: PromiseSettledResult<TaskStatus>[];
+      try {
+        settled = await Promise.race([all, fatal]);
+      } catch (exc) {
+        roundCtl.abort();
+        await all;
+        // The caller's abort, if it came first, still wins.
+        throwIfAborted(call.signals);
+        throw exc;
+      } finally {
+        own?.removeEventListener("abort", follow);
+      }
+      // The caller's abort, before any rejection is classified: never a
+      // pending poll to try again.
+      if (firedSignal(call.signals)) {
+        const aborted = settled.find(
+          (res): res is PromiseRejectedResult =>
+            res.status === "rejected" && res.reason instanceof LenzAbortError,
+        );
+        if (aborted) throw aborted.reason;
+        throwIfAborted(call.signals);
+      }
       const stillPending: string[] = [];
       let serverHintMs: number | undefined;
       settled.forEach((res, i) => {
         const id = pending[i]!;
         if (res.status === "fulfilled") {
           const s = res.value;
-          if (s.status === "completed" || s.status === "needs_input" || s.status === "failed") {
+          if (
+            s.status === "completed" ||
+            s.status === "needs_input" ||
+            s.status === "failed" ||
+            s.status === "cancelled"
+          ) {
             terminal.set(id, s);
           } else {
             stillPending.push(id);
@@ -1366,8 +2643,25 @@ export class Lenz {
               }
             }
           }
+        } else if (res.reason instanceof InvalidIdError) {
+          // The call's own refusal of an id: waiting does not change it.
+          throw res.reason;
         } else if (res.reason instanceof LenzGoneError) {
           gone.set(id, res.reason);
+        } else if (res.reason instanceof LenzAuthError) {
+          // The key is refused: no item of this wait can be read with it.
+          throw res.reason;
+        } else if (
+          res.reason instanceof LenzApiVersionError ||
+          res.reason instanceof LenzNotFoundError
+        ) {
+          // This task's answer, which polling again will not change: another
+          // API version, or no such task. Final for this task only.
+          permanent.set(id, res.reason);
+        } else if (!isPollableError(res.reason)) {
+          // Not a Lenz answer or a transport failure: a programming error (an
+          // override's bug), which waiting does not change.
+          throw res.reason;
         } else {
           // Poll errored this round (after _request exhausted its retries) —
           // keep pending and retry next round rather than aborting the batch.
@@ -1375,20 +2669,67 @@ export class Lenz {
         }
       });
       pending = stillPending;
+      // A callback may have aborted: that is the abort, whatever this round
+      // read (a finished item, the deadline).
+      throwIfAborted(call.signals);
       if (pending.length === 0) break;
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
+      const left = deadline - Date.now();
+      if (left <= 0) {
         pending.forEach((id) => timedOut.add(id));
         break;
       }
       await sleep(
         serverHintMs === undefined
-          ? pollSleepMs(backoffIdx, remaining)
-          : Math.min(serverHintMs, Math.max(0, remaining)),
+          ? pollSleepMs(backoffIdx, left)
+          : Math.min(serverHintMs, Math.max(0, left)),
+        call.signals,
       );
       backoffIdx += 1;
     }
-    return { terminal, timedOut, gone };
+    return { terminal, timedOut, gone, permanent };
+  }
+
+  /**
+   * One poll, made through the public `getStatus` (so a subclass's or a test
+   * double's override is honoured) with the wait's budget, and cut at the
+   * wait's deadline even when an override ignores that budget: a poll that
+   * has not answered by then counts as no answer.
+   */
+  private async _pollThroughGetStatus(
+    taskId: string,
+    budget: { timeoutMs: number; deadlineAt?: number },
+    call: Call,
+    roundSignal: AbortSignal,
+  ): Promise<TaskStatus> {
+    // The wait's own headers: getStatus adds the copy's itself. An override
+    // that ignores the signal still stops at it (the race). One race, so the
+    // listeners go when any of them wins, the deadline included (an override
+    // that never settles keeps none).
+    // The round's signal goes as the poll's own `signal`: a public field an
+    // override can copy along. It fires with the wait's own signal (same
+    // reason) and when the round ends on a fatal answer.
+    const options: GetStatusOptions = { ...budget, ...ownOptions(call), signal: roundSignal };
+    const poll = this.getStatus(taskId, options);
+    const signals = [...call.signals, roundSignal];
+    const deadlineAt = budget.deadlineAt;
+    if (deadlineAt === undefined) return raceAbort(poll, signals);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cutoff = new Promise<never>((_res, rej) => {
+      timer = setTimeout(
+        () =>
+          rej(
+            new LenzRequestTimeoutError({
+              message: `GET /verify/status/${taskId} did not answer by the wait's deadline`,
+            }),
+          ),
+        Math.max(0, deadlineAt - Date.now()),
+      );
+    });
+    try {
+      return await raceAbort(poll, signals, [cutoff]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -1422,6 +2763,22 @@ export class Lenz {
       err.hint = status.hint ?? "";
       throw err;
     }
+    if (status.status === "cancelled") {
+      // Cancelled elsewhere: the original shape's `failed` with failure class
+      // `cancelled`, so the same error, with what that shape said.
+      const cancelled = new LenzPipelineError({
+        message: `Pipeline failed: ${CANCELLED_SENTENCE}`,
+        cause: CANCELLED_SENTENCE,
+        fix: "Retry with a different claim, or check status.error for the diagnostic.",
+        docUrl: "https://lenz.io/docs/errors",
+      });
+      cancelled.taskId = taskId;
+      cancelled.failureReason = "cancelled";
+      cancelled.failureClass = "cancelled";
+      cancelled.retryable = false;
+      cancelled.hint = "";
+      throw cancelled;
+    }
     // failed. `getStatus` fills `error` from `failure.detail` on the newer
     // response shape; the other fields are older fallbacks.
     const detail =
@@ -1448,7 +2805,11 @@ export class Lenz {
 
   // ── internal helpers ──
 
-  private async submit(input: VerifyInput): Promise<TaskAccepted> {
+  private async submit(
+    input: VerifyInput,
+    idempotencyKey: string | undefined,
+    transport: Partial<SendOptions> = {},
+  ): Promise<TaskAccepted> {
     const body: Record<string, unknown> = {
       // `claim` is the documented name; `text` the alias. The wire key stays
       // `text`, which every server version accepts.
@@ -1457,7 +2818,7 @@ export class Lenz {
     };
     // Omitted when unset, never sent as "": an omitted webhook_url means the
     // key's default URL.
-    if (input.webhookUrl) body.webhook_url = input.webhookUrl;
+    if (sendsWebhookUrl(input.webhookUrl)) body.webhook_url = input.webhookUrl;
     // Omit-when-empty so existing English callers keep byte-identical
     // request bodies (no extra "language": "" key on the wire).
     if (input.language) body.language = input.language;
@@ -1467,7 +2828,6 @@ export class Lenz {
     if (input.depth) body.depth = input.depth;
     // One key per call, reused across its own retries, so a network retry
     // does not start (and charge for) a second verification.
-    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.request<TaskAccepted>({
@@ -1475,12 +2835,48 @@ export class Lenz {
       path: "/verify",
       json: body,
       headers,
+      ...transport,
     });
+  }
+
+  /**
+   * A line to the caller's logger, if any. A logger that throws, or whose
+   * method returns a promise that rejects, is ignored.
+   */
+  private log(level: keyof LenzLogger, message: string): void {
+    try {
+      const out: unknown = this.logger?.[level]?.(message);
+      // An async logger's rejection must not surface as an unhandled one.
+      if (out !== null && (typeof out === "object" || typeof out === "function")) {
+        const then = (out as { then?: unknown }).then;
+        if (typeof then === "function") {
+          (then as (ok: unknown, fail: (e: unknown) => void) => unknown).call(
+            out,
+            undefined,
+            () => {},
+          );
+        }
+      }
+    } catch {
+      // A logger's bug must never break the call.
+    }
   }
 
   /** Internal: dispatch an HTTP call with auth + retry. Public so the
    *  namespace classes can use it; not part of the documented surface. */
-  async request<T>(opts: RequestOptions): Promise<T> {
+  async request<T>(opts: SendOptions): Promise<T> {
+    try {
+      return await this._send<T>(opts);
+    } catch (exc) {
+      // Every error of a keyed call carries its key: the one safe resend.
+      stampIdempotencyKey(exc, idempotencyKeyIn(opts.headers));
+      throw exc;
+    }
+  }
+
+  private async _send<T>(opts: SendOptions): Promise<T> {
+    const idempotencyKey = idempotencyKeyIn(opts.headers);
+    const signals = opts.signals ?? NO_SIGNALS;
     const authRequired = opts.authRequired !== false;
     if (authRequired && !this.apiKey) {
       throw new LenzAuthError({
@@ -1500,12 +2896,24 @@ export class Lenz {
       }
     }
 
+    // The request options' headers go after the defaults, replacing one in
+    // any casing, and before the method's own (which keep today's spread).
+    const optionHeaders = opts.optionHeaders ?? NO_HEADERS;
+    const optionNames = new Set(optionHeaders.map(([name]) => name.toLowerCase()));
+    const defaults: Record<string, string> = {};
+    if (!optionNames.has("user-agent")) defaults["User-Agent"] = `lenz-io-node/${SDK_VERSION}`;
+    if (!optionNames.has("accept")) defaults["Accept"] = "application/json";
+    for (const [name, value] of optionHeaders) defaults[name] = value;
     const headers: Record<string, string> = {
-      "User-Agent": `lenz-io-node/${SDK_VERSION}`,
-      "X-Lenz-API-Version": API_VERSION,
-      Accept: "application/json",
+      ...defaults,
       ...(opts.headers ?? {}),
     };
+    // The version is this release's, whatever a call's own headers say: set
+    // last, over any casing of the name, so a stale value cannot ride along.
+    for (const name of Object.keys(headers)) {
+      if (name.toLowerCase() === "x-lenz-api-version") delete headers[name];
+    }
+    headers["X-Lenz-API-Version"] = API_VERSION;
     if (this.apiKey && (authRequired || opts.authOptional)) {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
@@ -1518,126 +2926,265 @@ export class Lenz {
     const deadlineAt = opts.deadlineAt;
     /** A retry sleep is taken only when it ends before the deadline. */
     const fits = (ms: number): boolean => deadlineAt === undefined || Date.now() + ms < deadlineAt;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+
+    /**
+     * One attempt: its answer, or the sleep before the next one. The caller's
+     * signals are linked to the attempt's controller until it ends.
+     */
+    const once = async (
+      attempt: number,
+    ): Promise<{ done: true; value: T } | { done: false; pauseMs: number }> => {
       const controller = new AbortController();
       let attemptMs = opts.timeoutMs ?? this.timeoutMs;
       if (deadlineAt !== undefined)
         attemptMs = Math.max(0, Math.min(attemptMs, deadlineAt - Date.now()));
       const timer = setTimeout(() => controller.abort(), attemptMs);
-      let response: Response;
+      const link = linkSignals(signals, controller);
       try {
-        response = await this.fetchImpl(url.toString(), {
-          method: opts.method,
-          headers,
-          body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
-          signal: controller.signal,
-        });
-      } catch (exc) {
-        lastErr = exc;
-        clearTimeout(timer);
-        if (attempt >= maxRetries || !fits(retrySleepMs(attempt))) {
-          throw new LenzAPIError({
-            message: `${opts.method} ${opts.path} failed after ${attempt + 1} attempts: ${String(exc)}`,
-            cause: String(exc),
-            fix: "Check your network connection; verify baseUrl is reachable.",
-            docUrl: "https://lenz.io/docs/errors",
-          });
-        }
-        await sleep(retrySleepMs(attempt));
-        continue;
-      }
-      if (response.status < 400) {
-        // The attempt's timer stays armed until the body is read: headers
-        // arriving is not the response arriving, and a body that stalls
-        // after them must not hang the call.
+        let response: Response;
         try {
-          if (response.status === 204 || response.headers.get("content-length") === "0") {
-            return {} as T;
-          }
-          return (await response.json()) as T;
+          response = await this.fetchImpl(url.toString(), {
+            method: opts.method,
+            headers,
+            body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
+            signal: controller.signal,
+          });
         } catch (exc) {
-          if (controller.signal.aborted) {
-            throw new LenzAPIError({
-              message: `${opts.method} ${opts.path} timed out reading the response body`,
-              cause: String(exc),
-              fix: "Retry; if it persists, check the network between you and baseUrl.",
-              docUrl: "https://lenz.io/docs/errors",
-            });
+          lastErr = exc;
+          clearTimeout(timer);
+          // The caller's abort is never retried, and never a request timeout.
+          rethrowIfCallerAbort(signals);
+          const timedOut = controller.signal.aborted;
+          if (attempt >= maxRetries || !fits(retrySleepMs(attempt))) {
+            const attempts = `${attempt + 1} attempt${attempt === 0 ? "" : "s"}`;
+            if (timedOut) {
+              throw new LenzRequestTimeoutError(
+                {
+                  message: `${opts.method} ${opts.path} timed out after ${attemptMs}ms (${attempts}).`,
+                  cause: String(exc),
+                  fix:
+                    (idempotencyKey
+                      ? "The request may have reached the server: resend it with the same key " +
+                        "(idempotencyKey: err.idempotencyKey) so it cannot run twice; a new call " +
+                        "without it mints a new key and can. "
+                      : "Retry. ") +
+                    "If it persists, raise timeoutMs or check the network between you and baseUrl.",
+                  docUrl: "https://lenz.io/docs/errors",
+                },
+                { cause: exc },
+              );
+            }
+            throw new LenzConnectionError(
+              {
+                message: `${opts.method} ${opts.path} failed after ${attempt + 1} attempts: ${String(exc)}`,
+                cause: String(exc),
+                fix: "Check your network connection; verify baseUrl is reachable.",
+                docUrl: "https://lenz.io/docs/errors",
+              },
+              { cause: exc },
+            );
           }
-          throw exc;
+          this.log(
+            "debug",
+            `[lenz-io] Retrying ${opts.method} ${opts.path} after ${timedOut ? "a timeout" : "a network error"} in ${retrySleepMs(attempt)}ms (attempt ${attempt + 2} of ${maxRetries + 1})`,
+          );
+          return { done: false, pauseMs: retrySleepMs(attempt) };
+        }
+        const served = response.headers.get("X-Lenz-API-Version")?.trim();
+        if (served && served !== API_VERSION) {
+          // Another version's body is not read as this one's: no retry, no
+          // typed mapping. The body goes back as sent.
+          let rawBody = "";
+          try {
+            rawBody = await response.text();
+          } catch {
+            // The version is already known; an unreadable body leaves body null.
+          } finally {
+            clearTimeout(timer);
+          }
+          // A read the caller aborted is the abort, not a version error.
+          rethrowIfCallerAbort(signals);
+          let sentBody: Record<string, unknown> | null = null;
+          try {
+            const parsed: unknown = JSON.parse(rawBody);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              sentBody = parsed as Record<string, unknown>;
+            }
+          } catch {
+            // not JSON: stays null
+          }
+          const err = new LenzApiVersionError({
+            message: `The API answered in version ${served}; lenz-io 3.x reads ${API_VERSION} only.`,
+            cause: `The response carries X-Lenz-API-Version: ${served}.`,
+            fix:
+              "If this persists, contact support (https://lenz.io/contact) with the request id; " +
+              "lenz-io 2.x reads both versions.",
+            docUrl: "https://lenz.io/docs/errors",
+            requestId: response.headers.get("X-Request-ID") ?? "",
+            statusCode: response.status,
+            body: sentBody,
+          });
+          err.apiVersion = served;
+          throw err;
+        }
+        if (response.status < 400) {
+          // The attempt's timer stays armed until the body is read: headers
+          // arriving is not the response arriving, and a body that stalls
+          // after them must not hang the call.
+          try {
+            if (response.status === 204 || response.headers.get("content-length") === "0") {
+              return { done: true, value: {} as T };
+            }
+            return { done: true, value: (await response.json()) as T };
+          } catch (exc) {
+            rethrowIfCallerAbort(signals);
+            if (controller.signal.aborted) {
+              throw new LenzRequestTimeoutError(
+                {
+                  message: `${opts.method} ${opts.path} timed out reading the response body`,
+                  cause: String(exc),
+                  fix: "Retry; if it persists, check the network between you and baseUrl.",
+                  docUrl: "https://lenz.io/docs/errors",
+                },
+                { cause: exc },
+              );
+            }
+            recordTransportFailure(exc);
+            throw exc;
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        // Error path. Retry on 5xx + 429; otherwise throw. The attempt's
+        // timer stays armed while the error body is read, and is cleared
+        // before any retry sleep.
+        //
+        // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that,
+        // whether we abort or keep retrying is decided by the typed body `code`
+        // — NOT by the status number:
+        //
+        //  * 429 — throw. The /extract daily cap sends seconds-until-UTC-
+        //    midnight, so sleeping it blocks the call for most of a day, and
+        //    this sleep sits OUTSIDE the AbortController so `timeoutMs` would
+        //    not bound it. The caller gets the true retryAfter and can schedule.
+        //  * 503 carrying a Lenz code in UPSTREAM_503_CODES
+        //    (`upstream_unavailable` / `capacity`) — throw, same reasoning.
+        //    These are the server's own shed/exhaustion responses; they state
+        //    an honest 90-120s and burning the 1/2/4s ladder against them is
+        //    the opposite of what the header asks (mapResponseToError types
+        //    them LenzUpstreamUnavailableError, carrying the true retryAfter).
+        //  * every other 5xx, including an UNTYPED 503 — keep retrying on our
+        //    own backoff. A proxy / CDN / load-balancer
+        //    maintenance-or-overload 503 states a long wait and carries no Lenz
+        //    code; the server is down, not pacing us, so an hour-long
+        //    Retry-After must become backoff — not an hour-long sleep, and not
+        //    an abort of a request our ladder might still satisfy.
+        //
+        // The cloned-body reads below swallow their own errors, so the
+        // caller's signal is checked after each one returns.
+        //
+        // A request with this key still in flight (the first attempt of this
+        // call, or of an earlier one with the caller's key): ask again with the
+        // SAME key and body, never a new key, until it answers or the retries
+        // or the deadline run out.
+        if (response.status === 409 && idempotencyKey && attempt < maxRetries) {
+          const code = await bodyErrorCode(response);
+          rethrowIfCallerAbort(signals);
+          let receipt = false;
+          if (code === "idempotency_conflict" && opts.conflictReceipt) {
+            receipt = await bodyNames(response, opts.conflictReceipt);
+            rethrowIfCallerAbort(signals);
+          }
+          if (code === "idempotency_conflict" && !receipt) {
+            const stated = await statedRetryAfterSeconds(response);
+            rethrowIfCallerAbort(signals);
+            const waitMs =
+              stated !== null && stated <= MAX_RETRY_AFTER_SLEEP
+                ? stated * 1000
+                : retrySleepMs(attempt);
+            if (fits(waitMs)) {
+              clearTimeout(timer);
+              this.log(
+                "debug",
+                `[lenz-io] Retrying ${opts.method} ${opts.path} after HTTP 409 (still in flight) in ${waitMs}ms (attempt ${attempt + 2} of ${maxRetries + 1})`,
+              );
+              return { done: false, pauseMs: waitMs };
+            }
+          }
+        }
+        let throwAtOnce = false;
+        if (response.status === 429) {
+          throwAtOnce = THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
+          rethrowIfCallerAbort(signals);
+        }
+        if (
+          !throwAtOnce &&
+          attempt < maxRetries &&
+          (response.status >= 500 || response.status === 429)
+        ) {
+          const stated = await statedRetryAfterSeconds(response);
+          rethrowIfCallerAbort(signals);
+          const retryLine = (ms: number) =>
+            `[lenz-io] Retrying ${opts.method} ${opts.path} after HTTP ${response.status} in ${ms}ms (attempt ${attempt + 2} of ${maxRetries + 1})`;
+          if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
+            if (fits(stated * 1000)) {
+              clearTimeout(timer);
+              this.log("debug", retryLine(stated * 1000));
+              return { done: false, pauseMs: stated * 1000 };
+            }
+          } else {
+            const aborts = stated !== null && (await abortsOnLongStatedWait(response));
+            rethrowIfCallerAbort(signals);
+            if (!aborts && fits(retrySleepMs(attempt))) {
+              clearTimeout(timer);
+              this.log("debug", retryLine(retrySleepMs(attempt)));
+              return { done: false, pauseMs: retrySleepMs(attempt) };
+            }
+          }
+        }
+
+        let rawBody = "";
+        try {
+          rawBody = await response.text();
+        } catch (exc) {
+          rethrowIfCallerAbort(signals);
+          // A body that stalled until the timer fired: the status stands, the
+          // body is lost.
+          if (!controller.signal.aborted) {
+            recordTransportFailure(exc);
+            throw exc;
+          }
         } finally {
           clearTimeout(timer);
         }
-      }
-      // Error path. Retry on 5xx + 429; otherwise throw. The attempt's
-      // timer stays armed while the error body is read, and is cleared
-      // before any retry sleep.
-      //
-      // A stated wait is honored only up to MAX_RETRY_AFTER_SLEEP. Past that,
-      // whether we abort or keep retrying is decided by the typed body `code`
-      // — NOT by the status number:
-      //
-      //  * 429 — throw. The /extract daily cap sends seconds-until-UTC-
-      //    midnight, so sleeping it blocks the call for most of a day, and
-      //    this sleep sits OUTSIDE the AbortController so `timeoutMs` would
-      //    not bound it. The caller gets the true retryAfter and can schedule.
-      //  * 503 carrying a Lenz code in UPSTREAM_503_CODES
-      //    (`upstream_unavailable` / `capacity`) — throw, same reasoning.
-      //    These are the server's own shed/exhaustion responses; they state
-      //    an honest 90-120s and burning the 1/2/4s ladder against them is
-      //    the opposite of what the header asks (mapResponseToError types
-      //    them LenzUpstreamUnavailableError, carrying the true retryAfter).
-      //  * every other 5xx, including an UNTYPED 503 — keep retrying on our
-      //    own backoff. A Cloud Run / CDN / load-balancer
-      //    maintenance-or-overload 503 states a long wait and carries no Lenz
-      //    code; the server is down, not pacing us, so an hour-long
-      //    Retry-After must become backoff — not an hour-long sleep, and not
-      //    an abort of a request our ladder might still satisfy.
-      const throwAtOnce =
-        response.status === 429 && THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
-      if (
-        !throwAtOnce &&
-        attempt < maxRetries &&
-        (response.status >= 500 || response.status === 429)
-      ) {
-        const stated = await statedRetryAfterSeconds(response);
-        if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
-          if (fits(stated * 1000)) {
-            clearTimeout(timer);
-            await sleep(stated * 1000);
-            continue;
-          }
-        } else if (stated === null || !(await abortsOnLongStatedWait(response))) {
-          if (fits(retrySleepMs(attempt))) {
-            clearTimeout(timer);
-            await sleep(retrySleepMs(attempt));
-            continue;
-          }
-        }
-      }
-
-      let rawBody = "";
-      try {
-        rawBody = await response.text();
-      } catch (exc) {
-        // A body that stalled until the timer fired: the status stands, the
-        // body is lost.
-        if (!controller.signal.aborted) throw exc;
+        const respHeaders: Record<string, string> = {};
+        response.headers.forEach((v, k) => {
+          respHeaders[k] = v;
+        });
+        throw mapResponseToError(response.status, rawBody, respHeaders, {
+          method: opts.method,
+          path: opts.path,
+        });
       } finally {
+        // Whatever ended the attempt (an abort while an error response was
+        // inspected included), its timer and listeners go with it.
         clearTimeout(timer);
+        link.unlink();
       }
-      const respHeaders: Record<string, string> = {};
-      response.headers.forEach((v, k) => {
-        respHeaders[k] = v;
-      });
-      throw mapResponseToError(response.status, rawBody, respHeaders);
+    };
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      throwIfAborted(signals);
+      const outcome = await once(attempt);
+      if (outcome.done) return outcome.value;
+      await sleep(outcome.pauseMs, signals);
     }
 
     if (lastErr) {
-      throw new LenzAPIError({
-        message: String(lastErr),
-        cause: String(lastErr),
-      });
+      throw new LenzConnectionError(
+        { message: String(lastErr), cause: String(lastErr) },
+        { cause: lastErr },
+      );
     }
     throw new LenzAPIError({ message: `${opts.method} ${opts.path} failed without diagnostic` });
   }

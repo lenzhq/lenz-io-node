@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "Message too long (max 500 characters).",
+    "code": "validation_error",
+    "errors": [
+      {
+        "loc": ["body", "message"],
+        "msg": "Message too long (max 500 characters).",
+        "type": "validation_error"
+      }
+    ]
+  }
+}

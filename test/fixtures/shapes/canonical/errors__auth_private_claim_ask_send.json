@@ -1,0 +1,7 @@
+{
+  "status": 403,
+  "body": {
+    "detail": "This report is private.",
+    "code": "private_claim"
+  }
+}

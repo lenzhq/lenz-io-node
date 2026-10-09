@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "payload.escalate.confidence: Unknown confidence band 'certain'; use low, medium or high.",
+    "cause_": "payload.escalate.confidence: Unknown confidence band 'certain'; use low, medium or high.",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "invalid_confidence_band",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "payload", "escalate", "confidence"],
+        "msg": "Unknown confidence band 'certain'; use low, medium or high."
+      }
+    ]
+  }
+}

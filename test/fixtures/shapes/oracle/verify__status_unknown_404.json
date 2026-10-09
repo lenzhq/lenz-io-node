@@ -1,0 +1,29 @@
+{
+  "getStatus": {
+    "error": {
+      "class": "LenzError",
+      "message": "Task not found.",
+      "cause_": "Task not found.",
+      "fix": "Retry; if the error persists, file an issue with the Request ID.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 404,
+      "code": "",
+      "name": "LenzError"
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzTimeoutError",
+      "message": "wait timed out after 50ms",
+      "cause_": "Pipeline still running server-side.",
+      "fix": "Resume via client.getStatus('t') later.",
+      "docUrl": "https://lenz.io/docs/verify#timeout",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzTimeoutError",
+      "taskId": "t"
+    }
+  }
+}

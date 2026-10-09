@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": { "lenz-io": ["./src/index.ts"] }
+  },
+  "include": ["examples/**/*.ts"]
+}

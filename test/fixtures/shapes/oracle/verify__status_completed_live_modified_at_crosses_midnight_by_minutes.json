@@ -2,9 +2,9 @@
   "getStatus": {
     "value": {
       "status": "completed",
-      "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+      "task_id": "d546a54e28ebeed022aca934135e67d2",
       "result": {
-        "verification_id": "0508bbf8",
+        "verification_id": "33e90bfb",
         "claim": "The Earth is round.",
         "visibility": "private",
         "depth": "standard",
@@ -88,7 +88,7 @@
   },
   "wait": {
     "value": {
-      "verification_id": "0508bbf8",
+      "verification_id": "33e90bfb",
       "claim": "The Earth is round.",
       "visibility": "private",
       "depth": "standard",

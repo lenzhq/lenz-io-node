@@ -9,9 +9,9 @@
     "statusCode": 402,
     "code": "no_credits",
     "name": "LenzQuotaExceededError",
-    "upgradeUrl": "https://lenz.io/plans?wall=bc5bd140-b822-0842-6d24-9a938053610f",
+    "upgradeUrl": "https://lenz.io/plans?wall=1a95c97e-e016-43bb-80ed-0c77e981b3e0",
     "remaining": 3,
-    "resetsAt": "2026-03-10T12:02:02+00:00",
+    "resetsAt": "2026-03-14T09:02:02+00:00",
     "requested": 5,
     "creditBalance": 30,
     "cost": 50

@@ -1,0 +1,29 @@
+{
+  "getReview": {
+    "error": {
+      "class": "LenzError",
+      "message": "Review not found.",
+      "cause_": "Review not found.",
+      "fix": "Retry; if the error persists, file an issue with the Request ID.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 404,
+      "code": "not_found",
+      "name": "LenzError"
+    }
+  },
+  "getReviewIssues": {
+    "error": {
+      "class": "LenzError",
+      "message": "Review not found.",
+      "cause_": "Review not found.",
+      "fix": "Retry; if the error persists, file an issue with the Request ID.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 404,
+      "code": "not_found",
+      "name": "LenzError"
+    }
+  },
+  "reviewAndWait": null
+}

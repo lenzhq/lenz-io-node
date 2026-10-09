@@ -99,8 +99,8 @@ export interface EntityRef {
 export interface SimilarVerification {
   verification_id?: string;
   claim?: string;
-  verdict?: string;
-  confidence?: string;
+  verdict?: Verdict | (string & NonNullable<unknown>);
+  confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null;
   url?: string;
   distance?: number;
@@ -139,8 +139,8 @@ export interface Verification {
   entities?: EntityRef[];
   presumed_intent?: string;
   // Verdict block (flat)
-  verdict?: string; // "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
-  confidence?: string; // "high" | "medium" | "low"
+  verdict?: Verdict | (string & NonNullable<unknown>);
+  confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null; // integer 1–10
   /**
    * The analysis's key finding: one declarative sentence stating the
@@ -154,8 +154,7 @@ export interface Verification {
   audit?: Audit;
   created_at?: string | null;
   /**
-   * When the verification finished. Sent by the API's newer response shape;
-   * absent from the original shape, which sends `modified_at` instead.
+   * When the verification finished.
    */
   completed_at?: string | null;
   /**
@@ -305,8 +304,8 @@ export interface VerificationListItem {
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
-  verdict?: string;
-  confidence?: string;
+  verdict?: Verdict | (string & NonNullable<unknown>);
+  confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null;
   /** The analysis's key finding (2.6.0). See `Verification.key_finding`. */
   key_finding?: string;
@@ -421,8 +420,7 @@ export interface ExtractedClaims {
   status?: ExtractStatus;
   /**
    * Every claim found, in order: one entry for one claim, `[]` for none.
-   * Each carries `positions` (see {@link ClaimLocation}). Filled from
-   * `claim` / `identified_claims` / `locations` when the server sends those.
+   * Each carries `positions` (see {@link ClaimLocation}).
    */
   claims?: ExtractedClaim[];
   /** @deprecated Read `claims[0].claim`. The first claim, `""` for none. */
@@ -450,9 +448,10 @@ export interface ExtractedClaims {
    * Optional only so a response from an API that predates the field still
    * fits; read it as `out.locations ?? null`.
    *
-   * @deprecated Read `claims[i].positions`. Computed from `claims` when the
-   * server sends only that; it then reads `null`, not `[]`, when every claim
-   * was left out.
+   * @deprecated Read `claims[i].positions`. When the server sends only
+   * `claims`, this is built from them: one entry per claim, in order, if
+   * every claim has `positions`; `[]` if the call set `locate: true` and no
+   * claim came back; otherwise `null`.
    */
   locations?: ClaimLocation[] | null;
 }
@@ -481,9 +480,9 @@ export interface AssessClaim {
    * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
    * `"Error"` on a failed row (kept for existing code: read `status`).
    */
-  verdict?: string;
+  verdict?: Verdict | (string & NonNullable<unknown>);
   /** "high" | "medium" | "low"; `"low"` on a failed row (read `status`). */
-  confidence?: string;
+  confidence?: Confidence | (string & NonNullable<unknown>);
   /**
    * Why a failed row has no verdict: `code` (`no_checkable_claim`,
    * `framing_failed`, `upstream_unavailable`, `timeout`, an open set),
@@ -522,9 +521,10 @@ export interface AssessClaim {
    */
   suggested_rewrite?: string | null;
   /**
-   * Why this row has no verdict — set only when `verdict === "Error"`:
-   * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`.
-   * `null` on a verdict row. Error rows are free.
+   * Why this row has no verdict — set only when `status === "failed"`:
+   * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`
+   * (`failure.code` says `no_checkable_claim` for the first).
+   * `null` on a verdict row. Failed rows are free.
    *
    * An OPEN set, deliberately typed `string` rather than a union: the API may
    * add a cause in a minor version, so branch on the ones you know and fall
@@ -552,8 +552,11 @@ export interface AssessClaim {
    * One sentence on what to send next. Set on every Error row and on a
    * row with non-empty `identified_claims`; `null` on a plain verdict row.
    *
-   * @deprecated Read `failure.hint`. Computed from it when the server sends
-   * only `failure`; a row with a verdict then reads `null`.
+   * @deprecated On a failed row read `failure.hint`; on a completed row that
+   * assessed only the main claim of a compound item, read `more_claims`
+   * (the claims left unassessed). When the server sends neither this field
+   * nor the old one, it is built from those: the failure's hint, a fixed
+   * sentence for a row with `more_claims`, else `null`.
    */
   hint?: string | null;
 }
@@ -565,24 +568,22 @@ export interface AssessClaim {
  * input — up to 20, at 1 credit each. A text that makes more claims than one
  * call checks gets its most check-worthy 20 checked and the rest listed in
  * `more_claims`, unchecked and free: send them back with `assess({ claims })`,
- * 20 a call, to check them. `error` is set when the input holds no checkable
+ * 20 a call, to check them. `failure` is set when the input holds no checkable
  * claim.
  *
  * List form (`claims`): exactly one entry per item sent, in the order
  * sent. An item that could not be given a verdict is still in position,
- * with `verdict: "Error"` and `error_code` / `hint` saying why; `error`
- * is `null`.
+ * with `status: "failed"` and a `failure` (`code`, `hint`) saying why; the
+ * body's `failure` is `null`.
  *
- * When `claims` is empty (single form), `error_code` is `'no_claim'`: the
- * input holds no checkable claim (a vague input is assessed on its most
- * likely reading instead). It is optional, so older servers that don't send
- * it degrade to the plain `error` message.
+ * When `claims` is empty (single form), `failure.code` is
+ * `'no_checkable_claim'`: the input holds no checkable claim (a vague input
+ * is assessed on its most likely reading instead).
  */
 export interface AssessResponse {
   /**
    * `"ok"` (at least one row has a verdict), `"error"`, or, when the input
-   * holds nothing checkable, `"no_checkable_claim"` (`"not_a_claim"` on the
-   * API's original response shape). Passed through as the server sent it;
+   * holds nothing checkable, `"no_checkable_claim"`. Passed through as the server sent it;
    * absent from servers older than the field.
    */
   status?: string;
@@ -647,8 +648,27 @@ export interface Progress {
   poll_after_seconds?: number;
 }
 
+/**
+ * What `cancel(taskId)` returns. `cancelled: true` means the run is cancelled,
+ * by this call or an earlier one (a repeat answers `true` again), with
+ * `status: "cancelled"`. `cancelled: false` means it was not cancelled and
+ * nothing changed: `status` is the run's status, normally `completed` or
+ * `failed`. A task that `select` already resolved answers `cancelled: false`
+ * with `needs_input`; cancel the task ids `select` returned.
+ */
+export interface CancelResult {
+  task_id: string;
+  cancelled: boolean;
+  status: TaskStatus["status"];
+}
+
 export interface TaskStatus {
-  status: "processing" | "needs_input" | "completed" | "failed";
+  /**
+   * `cancelled` is terminal: the task was stopped elsewhere (the website's
+   * Stop button, another process). The original API shape reports the same as
+   * `failed` with failure class `cancelled`.
+   */
+  status: "processing" | "needs_input" | "completed" | "failed" | "cancelled";
   /**
    * Echoed on every status shape since 2026-09, so a caller polling several
    * verifications in one loop can tell the replies apart. Older servers
@@ -667,19 +687,18 @@ export interface TaskStatus {
   claims?: CandidateClaim[];
   /**
    * @deprecated Always empty: its producer was retired and the API no longer
-   * sends it. Removal is planned for **2026-11-29**; read `claims` instead.
+   * sends it. Read `claims`.
    */
   candidates?: string[];
   /**
    * @deprecated Always empty: the API never raised `duplicate_found` for API
-   * tasks and no longer sends it. Removal is planned for **2026-11-29**.
+   * tasks and no longer sends it. No replacement.
    */
   similar_claims?: SimilarVerification[];
   /**
    * On a `failed` status, why: `code` (e.g. `no_checkable_claim`,
    * `research_empty`), `detail` (one sentence), `hint`, `failure_class`,
-   * `retryable`, `docs_url`. Built from the flat fields below when the
-   * server sends those.
+   * `retryable`, `docs_url`.
    */
   failure?: ReviewFailureBlock | null;
   /**
@@ -688,23 +707,40 @@ export interface TaskStatus {
    * failure_reason`.
    */
   error?: string;
+  /**
+   * @deprecated Read `failure.code`. The same cause in its original words
+   * (`not_a_claim` where `failure.code` says `no_checkable_claim`).
+   */
   failure_reason?: string;
+  /**
+   * @deprecated Read `failure.detail`. The diagnostic sentence on a `failed`
+   * status.
+   */
   failure_detail?: string;
   /**
    * WHY it failed — closed set (`upstream_unavailable` |
    * `insufficient_evidence` | `invalid_input` | `cancelled` | `internal`) —
    * and the derived retry signal (true iff `upstream_unavailable`). Rows
    * predating 2026-08 omit both.
+   *
+   * @deprecated On a `failed` status read `failure.failure_class`.
    */
   failure_class?: FailureClass;
+  /** @deprecated On a `failed` status read `failure.retryable`. */
   retryable?: boolean;
-  /** On a `failed` status: the page explaining that `failure_class`. */
+  /**
+   * On a `failed` status: the page explaining that `failure_class`.
+   *
+   * @deprecated On a `failed` status read `failure.docs_url`.
+   */
   docs_url?: string;
   /**
    * One sentence on how to resolve the interrupt: what was unclear and that
-   * `select` resolves it. Sent on a `multi_claim` `needs_input` and on a
-   * `failed` status whose `failure_reason` is `not_a_claim`. Older servers
-   * omit it.
+   * `select` resolves it. This is the field to read on a `multi_claim`
+   * `needs_input`; older servers omit it.
+   *
+   * On a `failed` status the same field repeats `failure.hint`, and in that
+   * role it is deprecated: read `failure.hint` there.
    */
   hint?: string;
 }
@@ -1018,8 +1054,8 @@ export interface VerifyInput {
    */
   language?: string;
   /**
-   * "standard" (server default) or "low". "low" runs a shallower check —
-   * fewer sources, faster. Same models, same quota cost. Omitted from the
+   * "standard" (server default, 10 credits) or "low" (5 credits). "low"
+   * runs a shallower check — fewer sources, faster, same models. Omitted from the
    * request body when unset. The completed `Verification.depth` echoes the
    * depth the verdict was actually produced with, which can be "standard"
    * for a "low" request served from cache.
@@ -1044,6 +1080,11 @@ export interface VerifyInput {
  * plain objects at runtime — this interface exists purely for IDE
  * autocompletion (mirrors Python's `VerifyBatchItem` TypedDict).
  *
+ * Fields are camelCase (`sourceUrl`, `webhookUrl`); the 2.x snake_case names
+ * still work and are deprecated. Giving both spellings with different values
+ * throws before anything is sent. A value 2.x ignored counts as not given:
+ * `undefined` or `null`, an empty `sourceUrl`, an empty or blank `webhookUrl`.
+ *
  * Precedence on conflicting language: per-item `language` overrides the
  * batch-wide `language` on `VerifyBatchInput`, which overrides the
  * implicit English default. SDK forwards both verbatim; server is
@@ -1059,8 +1100,21 @@ export interface VerifyBatchItem {
   text?: string | null;
   /** Output language (ISO 639-1). `"auto"` is not accepted. */
   language?: string;
+  /** The page the claim came from, if any. */
+  sourceUrl?: string;
+  /**
+   * Where this item's webhook goes; overrides the batch-wide `webhookUrl`.
+   * An empty or blank value is not sent (the credential's default URL).
+   */
+  webhookUrl?: string;
+  /** @deprecated Use `sourceUrl`. Still sent as before; must equal `sourceUrl` if both are given. */
   source_url?: string;
+  /** @deprecated Use `webhookUrl`. Still sent as before; must equal `webhookUrl` if both are given. */
   webhook_url?: string;
+  /**
+   * @deprecated Has no effect: it is not sent. The batch is keyed as a whole
+   * (`VerifyBatchInput.idempotencyKey`, generated per call by default).
+   */
   idempotency_key?: string;
   /** Per-item "private" | "unlisted"; overrides the batch-wide default. */
   visibility?: "private" | "unlisted";
@@ -1078,6 +1132,18 @@ export interface VerifyBatchInput {
   visibility?: "private" | "unlisted";
   /** Batch-wide "standard" | "low" default; per-item `depth` overrides. */
   depth?: "standard" | "low";
+  /**
+   * Send an `Idempotency-Key` for the whole batch, so a retry after a network
+   * drop or a client timeout replays the first receipt instead of starting
+   * (and charging for) every claim again. Defaults to `true`, generating a
+   * random key per call that is reused across this client's own retries.
+   * Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
   idempotencyKey?: string;
 }
 
@@ -1119,6 +1185,8 @@ export interface ExtractInput {
    * Per-call HTTP timeout. When omitted, `extract` waits at least 150s rather
    * than the client's default: a long input can take more than 30s to
    * extract.
+   * @deprecated Pass it in the options argument: `extract(input, { timeoutMs })`.
+   * Still honoured; the options argument wins when both are given.
    */
   timeoutMs?: number;
   /**
@@ -1185,6 +1253,8 @@ export interface AssessInput {
    * than the client's default: the server finds the claims and runs a
    * 3-model panel inside one request (typically ~15s; a long text can take
    * up to 90s).
+   * @deprecated Pass it in the options argument: `assess(input, { timeoutMs })`.
+   * Still honoured; the options argument wins when both are given.
    */
   timeoutMs?: number;
 }
@@ -1198,17 +1268,19 @@ export interface AskSendInput {
    */
   language?: string;
   /**
-   * Pin an `Idempotency-Key` so a retry of a question that already got a
+   * Send an `Idempotency-Key` so a retry of a question that already got a
    * reply replays that reply instead of spending a second credit and leaving
-   * the question plus a second answer in the conversation. A retry sent while
-   * the first call is still running gets a 409 — there is no reply to replay
-   * yet.
-   *
-   * Never generated for you and never derived from the message, unlike
-   * `assess`: a reply depends on the conversation so far, so asking the same
-   * question again is a normal thing to do, and a key you did not choose would
-   * replay a stale answer. Without one, the call behaves exactly as before:
-   * a retry asks again.
+   * the question plus a second answer in the conversation. Defaults to
+   * `true`, generating a random key per call that is reused across this
+   * client's own retries only: asking the same question again in a new call
+   * is a new turn. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`. A retry sent while the first call
+   * is still running gets a 409: there is no reply to replay yet. Never
+   * derived from the message.
    */
   idempotencyKey?: string;
 }
@@ -1259,25 +1331,109 @@ export interface LibraryListInput {
 export type OnProgress = (taskId: string, progress: Progress) => void;
 
 export interface VerifyAndWaitInput extends VerifyInput {
-  /** Deadline for polling to a terminal state. Default 300s. */
+  /**
+   * Deadline for polling to a terminal state. Default 300s.
+   * @deprecated Pass it in the second argument: `verifyAndWait(input, { timeoutMs })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   timeoutMs?: number;
-  /** See {@link OnProgress}. The only way to see the stage during the ~90s wait. */
+  /**
+   * See {@link OnProgress}. The only way to see the stage during the ~90s wait.
+   * @deprecated Pass it in the second argument: `verifyAndWait(input, { onProgress })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   onProgress?: OnProgress;
 }
 
 export interface VerifyBatchAndWaitInput extends VerifyBatchInput {
-  /** Overall deadline for polling every item to a terminal state. Default 300s. */
+  /**
+   * Overall deadline for polling every item to a terminal state. Default 300s.
+   * @deprecated Pass it in the second argument: `verifyBatchAndWait(input, { timeoutMs })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   timeoutMs?: number;
-  /** See {@link OnProgress}. Fires per still-running item per round. */
+  /**
+   * See {@link OnProgress}. Fires per still-running item per round.
+   * @deprecated Pass it in the second argument: `verifyBatchAndWait(input, { onProgress })`.
+   * Still honoured; the second argument wins when both are given.
+   */
   onProgress?: OnProgress;
 }
 
-/** Options for `wait()`. */
-export interface WaitOptions {
-  /** Deadline before raising `LenzTimeoutError`. Default 300s. */
+/**
+ * Per-call request options, taken by every method (in its options argument,
+ * or merged into the options object it already takes).
+ *
+ * Precedence, per field: the call's value, then a value the input still
+ * carries (`timeoutMs` on `extract` / `assess`, deprecated), then the
+ * `withOptions` copy's, then the client's, then the defaults. Headers merge;
+ * the others replace.
+ */
+export interface RequestOptions {
+  /**
+   * Stops the call: every request it makes, every retry sleep and every
+   * poll. The call then throws `LenzAbortError`. Nothing is cancelled on the
+   * server. `AbortSignal.timeout(ms)` bounds a whole call, retries included.
+   */
+  signal?: AbortSignal;
+  /**
+   * The timeout of ONE HTTP attempt, in ms (a finite number above 0): a
+   * retried request gets it again for each attempt. On `extract` / `assess`
+   * it replaces the 150 s / 100 s floor, even below it. On the waits
+   * (`wait`, `*AndWait`) `timeoutMs` stays the wait's whole budget; set the
+   * attempt timeout of their requests with `withOptions({ timeoutMs })`.
+   */
   timeoutMs?: number;
-  /** See {@link OnProgress}. */
+  /** How many times a failed request is retried (a whole number, 0 or more). */
+  maxRetries?: number;
+  /**
+   * Extra request headers. Merged without regard to case over the
+   * `withOptions` copy's; `null` removes one the copy set, `undefined` is
+   * ignored. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+   * `Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host`
+   * and `Transfer-Encoding` are refused.
+   */
+  headers?: Record<string, string | null | undefined>;
+}
+
+/** The options of `getStatus`: the request options, plus the waits' deadline. */
+export interface GetStatusOptions extends RequestOptions {
+  /**
+   * Absolute `Date.now()` bound for the call: each attempt's timeout is cut
+   * to what is left, and a retry that would pass it is not taken. Set by the
+   * waits, which poll through `getStatus`.
+   */
+  deadlineAt?: number;
+}
+
+/** Options for `wait()`, `verifyAndWait()` and `verifyBatchAndWait()`. */
+export interface WaitOptions {
+  /**
+   * Deadline before raising `LenzTimeoutError` (a batch marks its unfinished
+   * items `timeout` instead). Default 300s. `verifyAndWait` and
+   * `verifyBatchAndWait` start it after the submit. `0` or less polls once.
+   * The wait's whole budget, not one request's timeout (see
+   * {@link RequestOptions.timeoutMs}).
+   */
+  timeoutMs?: number;
+  /** See {@link OnProgress}. Fires per still-running item per poll. */
   onProgress?: OnProgress;
+  /** See {@link RequestOptions.signal}: stops the submit, every poll and every sleep. */
+  signal?: AbortSignal;
+  /** See {@link RequestOptions.headers}: sent on every request of the call. */
+  headers?: Record<string, string | null | undefined>;
+}
+
+/**
+ * Options for `verifyAndWait()` and `verifyBatchAndWait()`: the wait options,
+ * plus the submit's retries.
+ */
+export interface VerifyAndWaitOptions extends WaitOptions {
+  /**
+   * Retries of the submit (a whole number, 0 or more). The polls keep the
+   * client's.
+   */
+  maxRetries?: number;
 }
 
 // ── Review (`POST /review`, `GET /reviews/{review_id}`) ──
@@ -1289,10 +1445,32 @@ export type VerdictLabel = "True" | "Mostly True" | "Mixed" | "Mostly False" | "
 export type ConfidenceBand = "low" | "medium" | "high";
 
 /**
- * Where a review stands. `verifying` is skipped when no deep check was
- * planned; `completed` and `failed` are terminal.
+ * A verdict as read on a verification or an assess row: one of the five
+ * labels, or `"Error"` on a failed assess row. Fields typed with it also take
+ * any other string (`Verdict | (string & {})`), so a value a later API adds
+ * still reads.
  */
-export type ReviewStatus = "queued" | "assessing" | "verifying" | "completed" | "failed";
+export type Verdict = VerdictLabel | "Error";
+
+/** A confidence as read on a verification or an assess row (same as `ConfidenceBand`). */
+export type Confidence = ConfidenceBand;
+
+/** A check's depth: `"standard"` (10 credits) or `"low"` (5 credits, fewer sources). */
+export type Depth = "standard" | "low";
+
+/**
+ * Where a review stands. `verifying` is skipped when no deep check was
+ * planned; `completed`, `failed` and `cancelled` are terminal (`cancelled`: it
+ * was stopped elsewhere; the original API shape says `failed` with failure
+ * class `cancelled`).
+ */
+export type ReviewStatus =
+  | "queued"
+  | "assessing"
+  | "verifying"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /**
  * The one field to branch on once a review is terminal (`null` before):
@@ -1483,7 +1661,12 @@ export interface ReviewAssessment {
   more_claims?: string[];
   /** @deprecated Read `more_claims`; the same list. */
   identified_claims: string[];
-  /** One sentence on what to send next (a compound item); else `null`. */
+  /**
+   * One sentence on what to send next (a compound item); else `null`.
+   *
+   * @deprecated Read `failure.hint`. Computed from it when the server sends
+   * only `failure`; a row with a verdict then reads the compound-item sentence or `null`.
+   */
   hint: string | null;
   /**
    * With `suggestEdits: true`: the claim with its wrong part corrected, from
@@ -1530,7 +1713,7 @@ export interface ReviewVerification {
   suggested_rewrite: string | null;
   warnings: string[];
   created_at: string | null;
-  /** When the deep check finished; absent from the API's original response shape. */
+  /** When the deep check finished. */
   completed_at?: string | null;
   /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
   modified_at: string | null;
@@ -1950,6 +2133,13 @@ export interface GetReviewOptions {
  * One statement and the source it cites, for `citecheck({ pairs })`:
  * `statement` (1 to 1,000 characters) and exactly one of `url` (http or
  * https) and `doi` (the DOI alone, like `10.1038/nature12373`).
+ *
+ * Fields are camelCase (`citedTitle`, `citedAuthors`, `citedYear`,
+ * `citedJournal`); the 2.x snake_case names still work and are deprecated.
+ * The pair's own enumerable keys are read, as when it is serialized.
+ * Giving both spellings with different values (compared with `Object.is`,
+ * arrays element by element) throws before anything is sent; `undefined`
+ * counts as not given, `null` is a value (it is sent).
  */
 export interface CitationPair {
   statement: string;
@@ -1958,12 +2148,20 @@ export interface CitationPair {
   /** Up to 3 excerpts the statement quotes from the source, each 15 to 500 characters and words of the statement. */
   quotes?: string[];
   /** With `doi`: the title the reference gives. */
-  cited_title?: string;
+  citedTitle?: string;
   /** With `doi`: the authors, family names, at most 10. */
-  cited_authors?: string[];
+  citedAuthors?: string[];
   /** With `doi`: the year the reference gives, four digits. */
-  cited_year?: string;
+  citedYear?: string;
   /** With `doi`: the journal the reference gives. */
+  citedJournal?: string;
+  /** @deprecated Use `citedTitle`. Still sent as before; must equal `citedTitle` if both are given. */
+  cited_title?: string;
+  /** @deprecated Use `citedAuthors`. Still sent as before; must equal `citedAuthors` if both are given. */
+  cited_authors?: string[];
+  /** @deprecated Use `citedYear`. Still sent as before; must equal `citedYear` if both are given. */
+  cited_year?: string;
+  /** @deprecated Use `citedJournal`. Still sent as before; must equal `citedJournal` if both are given. */
   cited_journal?: string;
 }
 
@@ -2023,9 +2221,11 @@ export interface CitecheckSummary {
 }
 
 /**
- * Where a citation check stands. `completed` and `failed` are terminal.
+ * Where a citation check stands. `completed`, `failed` and `cancelled` are
+ * terminal (`cancelled`: it was stopped elsewhere; the original API shape says
+ * `failed` with failure class `cancelled`).
  */
-export type CitecheckStatus = "queued" | "checking" | "completed" | "failed";
+export type CitecheckStatus = "queued" | "checking" | "completed" | "failed" | "cancelled";
 
 /** `GET /citechecks/{id}`: a citation check, with the review's citation rows. */
 export interface Citecheck {
@@ -2058,18 +2258,38 @@ export interface Citecheck {
 }
 
 export interface CitecheckAndWaitOptions {
-  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  /**
+   * Deadline for the wait, started after the submit (since 3.0; before, it
+   * included the submit). Default 600,000 ms (10 min). `0` or less reads the
+   * check once.
+   */
   timeoutMs?: number;
   /** Called with the check on every poll whose body changed. A throw inside it is swallowed. */
   onUpdate?: (check: Citecheck) => void;
+  /** See {@link RequestOptions.signal}: stops the submit, every poll and every sleep. */
+  signal?: AbortSignal;
+  /** See {@link RequestOptions.headers}: sent on every request of the call. */
+  headers?: Record<string, string | null | undefined>;
+  /** Retries of the submit (a whole number, 0 or more). Each poll is one attempt. */
+  maxRetries?: number;
 }
 
 export interface ReviewAndWaitOptions {
-  /** Deadline for the whole wait, submit included. Default 600,000 ms (10 min). */
+  /**
+   * Deadline for the wait, started after the submit (since 3.0; before, it
+   * included the submit). Default 600,000 ms (10 min). `0` or less reads the
+   * review once.
+   */
   timeoutMs?: number;
   /**
    * Called with the review on every poll whose body changed. A throw inside
    * it is swallowed and never breaks the wait.
    */
   onUpdate?: (review: ReviewFull) => void;
+  /** See {@link RequestOptions.signal}: stops the submit, every poll and every sleep. */
+  signal?: AbortSignal;
+  /** See {@link RequestOptions.headers}: sent on every request of the call. */
+  headers?: Record<string, string | null | undefined>;
+  /** Retries of the submit (a whole number, 0 or more). Each poll is one attempt. */
+  maxRetries?: number;
 }

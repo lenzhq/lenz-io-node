@@ -1,14 +1,39 @@
 {
   "value": {
     "event": "verification.failed",
-    "taskId": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "taskId": "abbf9ef7492b675f71569a2da93dd5cf",
     "attempt": 1,
-    "deliveredAt": "2026-03-10T12:02:02.002222+00:00",
+    "deliveredAt": "2026-03-14T09:02:02.000456+00:00",
     "verificationId": null,
     "batchId": null,
     "status": "failed",
     "error": "framing_failed",
     "failureClass": "upstream_unavailable",
-    "retryable": true
+    "retryable": true,
+    "failure": {
+      "code": "framing_failed",
+      "detail": null,
+      "hint": null,
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "docs_url": null,
+      "failure_reason": "framing_failed"
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "abbf9ef7492b675f71569a2da93dd5cf",
+      "failure_reason": "framing_failed",
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "failure": {
+        "code": "framing_failed",
+        "detail": null,
+        "hint": null,
+        "failure_class": "upstream_unavailable",
+        "retryable": true,
+        "docs_url": null,
+        "failure_reason": "framing_failed"
+      }
+    }
   }
 }

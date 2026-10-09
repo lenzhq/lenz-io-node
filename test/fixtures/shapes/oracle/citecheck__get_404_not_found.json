@@ -1,0 +1,16 @@
+{
+  "getCitecheck": {
+    "error": {
+      "class": "LenzError",
+      "message": "Citation check not found.",
+      "cause_": "Citation check not found.",
+      "fix": "Retry; if the error persists, file an issue with the Request ID.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 404,
+      "code": "not_found",
+      "name": "LenzError"
+    }
+  },
+  "citecheckAndWait": null
+}

@@ -1,11 +1,11 @@
 {
   "getCitecheck": {
     "value": {
-      "citecheck_id": "c4ee0497",
+      "citecheck_id": "721f96d8",
       "status": "failed",
       "outcome": "unchecked",
-      "created_at": "2026-03-10T12:02:02.002222Z",
-      "completed_at": "2026-03-10T12:03:03.003333Z",
+      "created_at": "2026-03-14T09:02:02.000456Z",
+      "completed_at": "2026-03-14T09:03:03.000456Z",
       "language": "en",
       "poll_after_seconds": null,
       "policy": {
@@ -38,7 +38,7 @@
   "citecheckAndWait": {
     "error": {
       "class": "CitecheckFailedError",
-      "message": "Citation check c4ee0497 failed: no_citations",
+      "message": "Citation check 721f96d8 failed: no_citations",
       "cause_": "no_citations",
       "fix": "The text has no citation to check: no link, DOI or numbered reference with one.",
       "docUrl": "https://lenz.io/docs/errors#invalid-input",
@@ -51,14 +51,14 @@
       "failureClass": "invalid_input",
       "retryable": false,
       "hint": "The text has no citation to check: no link, DOI or numbered reference with one.",
-      "citecheckId": "c4ee0497",
+      "citecheckId": "721f96d8",
       "errorCode": "no_citations",
       "citecheck": {
-        "citecheck_id": "c4ee0497",
+        "citecheck_id": "721f96d8",
         "status": "failed",
         "outcome": "unchecked",
-        "created_at": "2026-03-10T12:02:02.002222Z",
-        "completed_at": "2026-03-10T12:03:03.003333Z",
+        "created_at": "2026-03-14T09:02:02.000456Z",
+        "completed_at": "2026-03-14T09:03:03.000456Z",
         "language": "en",
         "poll_after_seconds": null,
         "policy": {

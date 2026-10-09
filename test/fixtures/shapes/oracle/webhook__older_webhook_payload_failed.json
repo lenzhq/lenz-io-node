@@ -9,6 +9,31 @@
     "status": "failed",
     "error": "conclusion_failed",
     "failureClass": "upstream_unavailable",
-    "retryable": true
+    "retryable": true,
+    "failure": {
+      "code": "conclusion_failed",
+      "detail": null,
+      "hint": null,
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "docs_url": null,
+      "failure_reason": "conclusion_failed"
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "tsk_abc123",
+      "failure_reason": "conclusion_failed",
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "failure": {
+        "code": "conclusion_failed",
+        "detail": null,
+        "hint": null,
+        "failure_class": "upstream_unavailable",
+        "retryable": true,
+        "docs_url": null,
+        "failure_reason": "conclusion_failed"
+      }
+    }
   }
 }

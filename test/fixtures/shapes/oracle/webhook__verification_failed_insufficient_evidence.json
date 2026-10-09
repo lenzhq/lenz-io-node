@@ -1,0 +1,39 @@
+{
+  "value": {
+    "event": "verification.failed",
+    "taskId": "aa473108b68ad3157a807f2c90f52c10",
+    "attempt": 1,
+    "deliveredAt": "2026-03-14T09:02:02.000456+00:00",
+    "verificationId": null,
+    "batchId": null,
+    "status": "failed",
+    "error": "research_insufficient",
+    "failureClass": "insufficient_evidence",
+    "retryable": false,
+    "failure": {
+      "code": "research_insufficient",
+      "detail": null,
+      "hint": null,
+      "failure_class": "insufficient_evidence",
+      "retryable": false,
+      "docs_url": null,
+      "failure_reason": "research_insufficient"
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "aa473108b68ad3157a807f2c90f52c10",
+      "failure_reason": "research_insufficient",
+      "failure_class": "insufficient_evidence",
+      "retryable": false,
+      "failure": {
+        "code": "research_insufficient",
+        "detail": null,
+        "hint": null,
+        "failure_class": "insufficient_evidence",
+        "retryable": false,
+        "docs_url": null,
+        "failure_reason": "research_insufficient"
+      }
+    }
+  }
+}

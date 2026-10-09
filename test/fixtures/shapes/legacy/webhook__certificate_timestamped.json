@@ -1,8 +1,8 @@
 {
   "payload": {
     "event": "certificate.timestamped",
-    "verification_id": "c4ee0497",
-    "task_id": "0508bbf8d1f3b56db7d56df41a6bee4e",
+    "verification_id": "f8cc1e0c",
+    "task_id": "964cc3338e10380beca3acc5f2000e2e",
     "batch_id": null,
     "status": "completed",
     "result": null,
@@ -10,8 +10,8 @@
     "coverage": {
       "status": "covered",
       "reasons": [],
-      "certificate_id": "3f0a3b05d2f4ae94b617c3759c31238e",
-      "certificate_url": "https://lenz.io/certificate/3f0a3b05d2f4ae94b617c3759c31238e",
+      "certificate_id": "ce99b87fa4937005d99115a36148358a",
+      "certificate_url": "https://lenz.io/certificate/ce99b87fa4937005d99115a36148358a",
       "as_of": "2026-09-03T10:00:00+00:00",
       "currency": "EUR",
       "cap": 10000,
@@ -20,6 +20,6 @@
     },
     "error": null,
     "attempt": 1,
-    "delivered_at": "2026-03-10T12:04:04.004444+00:00"
+    "delivered_at": "2026-03-14T09:04:04.000456+00:00"
   }
 }

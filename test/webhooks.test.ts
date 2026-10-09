@@ -376,3 +376,40 @@ describe("LenzWebhooks — review events with citations", () => {
     expect(r.review.summary.citation_issues).toBe(0);
   });
 });
+
+describe("verification.completed, newer shape with a sparse result", () => {
+  const SHAPES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "shapes");
+  const recorded = JSON.parse(
+    readFileSync(
+      join(SHAPES, "canonical", "webhook__verification_completed_sparse_result.json"),
+      "utf-8",
+    ),
+  ) as { payload: Record<string, unknown> };
+  const body = Buffer.from(
+    JSON.stringify({ ...recorded.payload, delivered_at: new Date().toISOString() }),
+  );
+  const hooks = new LenzWebhooks({ secret: SECRET });
+  const event = hooks.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationCompleted;
+
+  it("gives verification.result the defaults that result has", () => {
+    expect(event.verification).toBeDefined();
+    const nested = event.verification!.result as unknown as Record<string, unknown>;
+    expect(nested["claim"]).toBe("The Eiffel Tower is in Berlin.");
+    expect(nested).toMatchObject({
+      verdict: "",
+      confidence: "low",
+      lenz_score: null,
+      sources: [],
+      warnings: [],
+      modified_at: null,
+    });
+    expect(nested).toEqual(event.result);
+  });
+
+  it("leaves raw as the sender wrote it", () => {
+    const sent = (recorded.payload["verification"] as { result: Record<string, unknown> }).result;
+    const raw = (event.raw["verification"] as { result: Record<string, unknown> }).result;
+    expect(raw).toEqual(sent);
+    expect(Object.keys(raw)).not.toContain("verdict");
+  });
+});

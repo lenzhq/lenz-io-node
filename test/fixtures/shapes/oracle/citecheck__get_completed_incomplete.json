@@ -1,11 +1,11 @@
 {
   "getCitecheck": {
     "value": {
-      "citecheck_id": "c4ee0497",
+      "citecheck_id": "0843d8c8",
       "status": "completed",
       "outcome": "incomplete",
-      "created_at": "2026-03-10T12:02:02.002222Z",
-      "completed_at": "2026-03-10T12:03:03.003333Z",
+      "created_at": "2026-03-14T09:02:02.000456Z",
+      "completed_at": "2026-03-14T09:03:03.000456Z",
       "language": "en",
       "poll_after_seconds": null,
       "policy": {
@@ -122,11 +122,11 @@
   },
   "citecheckAndWait": {
     "value": {
-      "citecheck_id": "c4ee0497",
+      "citecheck_id": "0843d8c8",
       "status": "completed",
       "outcome": "incomplete",
-      "created_at": "2026-03-10T12:02:02.002222Z",
-      "completed_at": "2026-03-10T12:03:03.003333Z",
+      "created_at": "2026-03-14T09:02:02.000456Z",
+      "completed_at": "2026-03-14T09:03:03.000456Z",
       "language": "en",
       "poll_after_seconds": null,
       "policy": {

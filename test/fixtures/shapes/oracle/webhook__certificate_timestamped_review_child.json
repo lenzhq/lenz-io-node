@@ -1,0 +1,22 @@
+{
+  "value": {
+    "event": "certificate.timestamped",
+    "taskId": "63e8889e4de23948d1d59e48570b0bb4",
+    "attempt": 1,
+    "deliveredAt": "2026-03-14T09:04:04.000456+00:00",
+    "verificationId": "c2706240",
+    "batchId": null,
+    "status": "completed",
+    "coverage": {
+      "status": "covered",
+      "reasons": [],
+      "certificate_id": "81b6e3ccc4e7740813aea271aa311e55",
+      "certificate_url": "https://lenz.io/certificate/81b6e3ccc4e7740813aea271aa311e55",
+      "as_of": "2026-09-03T10:00:00+00:00",
+      "currency": "EUR",
+      "cap": 10000,
+      "aggregate": 500000,
+      "terms_version": "v1"
+    }
+  }
+}

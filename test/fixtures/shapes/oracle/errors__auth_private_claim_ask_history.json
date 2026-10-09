@@ -1,0 +1,13 @@
+{
+  "error": {
+    "class": "LenzAuthError",
+    "message": "This report is private.",
+    "cause_": "This report is private.",
+    "fix": "This key doesn't have access to that resource.",
+    "docUrl": "https://lenz.io/docs/auth",
+    "requestId": "",
+    "statusCode": 403,
+    "code": "private_claim",
+    "name": "LenzAuthError"
+  }
+}

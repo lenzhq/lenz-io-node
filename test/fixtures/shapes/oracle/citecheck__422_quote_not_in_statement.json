@@ -1,0 +1,19 @@
+{
+  "error": {
+    "class": "LenzValidationError",
+    "message": "payload.pairs.0: Each quote must be words of its statement.",
+    "cause_": "payload.pairs.0: Each quote must be words of its statement.",
+    "fix": "Check the request body against the OpenAPI spec.",
+    "docUrl": "https://lenz.io/docs/errors/validation",
+    "requestId": "",
+    "statusCode": 422,
+    "code": "quote_not_in_statement",
+    "name": "LenzValidationError",
+    "errors": [
+      {
+        "loc": ["body", "payload", "pairs", 0],
+        "msg": "Each quote must be words of its statement."
+      }
+    ]
+  }
+}

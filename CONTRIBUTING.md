@@ -38,7 +38,7 @@ pass: `release.yml` runs them through `smoke.yml`, which fails when
 
 ```bash
 npm run build       # tsup → dist/index.{js,cjs,d.ts,d.cts}
-npm run type        # tsc --noEmit
+npm run type        # tsc --noEmit, then the examples (tsconfig.examples.json)
 npm run lint        # eslint + prettier
 ```
 
@@ -67,6 +67,14 @@ shapes across languages.
 (anything exported from `src/index.ts`) require a major version bump.
 The `X-Lenz-API-Version` header is pinned per SDK release so old SDK
 clients keep working against the API version they shipped against.
+
+A release that asks for a newer API version keeps every field, type and
+error of the release before it: each old name stays, computed from the newer
+response with its old meaning (`src/compat.ts`). `test/two-x-values.test.ts`
+checks this against what the previous release returned for every recorded
+response (`test/fixtures/shapes/`, refreshed with `scripts/import-shapes.mjs`
+and `test/shapes/make-oracles.test.ts`), and `test/type-compat.test.ts`
+checks that code typed against the previous release still compiles.
 
 ## License
 

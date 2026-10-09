@@ -1,12 +1,13 @@
 /**
- * The newer field names read the same from both response shapes, and the
- * request bodies say what they must about `webhook_url`.
+ * The newer field names read off a recording of the response shape this
+ * release asks for (`2026-10-11`), and the request bodies say what they must
+ * about `webhook_url`.
  *
- * `read-both-shapes.test.ts` pins the ORIGINAL names to what the previous
- * release returned. This file reads the NEWER names (`claims`, `claim`,
- * `more_claims`, `status`, `failure`, `completed_at`, `claim_limit_exceeded`,
- * `citation_limit_exceeded`, ...) off a recording in each shape, so code
- * written against the newer names works whichever shape the server sends.
+ * `two-x-values.test.ts` pins the ORIGINAL names to what the previous release
+ * returned. This file reads the NEWER names (`claims`, `claim`, `more_claims`,
+ * `status`, `failure`, `completed_at`, `claim_limit_exceeded`,
+ * `citation_limit_exceeded`, ...). Webhook events still arrive in either
+ * shape, so their tests run on both.
  */
 
 import { readFileSync } from "node:fs";
@@ -35,6 +36,7 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "shapes");
 const SHAPES = ["legacy", "canonical"] as const;
+const SHAPE = "canonical";
 const SDK = sdk as unknown as SdkUnderTest;
 
 function recorded(shape: string, name: string): Recorded {
@@ -55,7 +57,8 @@ async function thrown(shape: string, name: string, key?: string): Promise<Record
   return picked.error as Record<string, unknown>;
 }
 
-describe.each(SHAPES)("newer names, %s shape", (shape) => {
+describe("newer names", () => {
+  const shape = SHAPE;
   it("assess rows: status, failure and more_claims", async () => {
     const mixed = await value<AssessResponse>(shape, "assess__list_mixed_rows");
     expect(mixed.claims.map((r) => r.status)).toEqual(["completed", "failed", "failed", "failed"]);
@@ -200,7 +203,9 @@ describe.each(SHAPES)("newer names, %s shape", (shape) => {
     const err = await thrown(shape, "review__get_failed_no_claim", "reviewAndWait");
     expect(err).toMatchObject({ class: "ReviewFailedError", errorCode: "no_claim" });
   });
+});
 
+describe.each(SHAPES)("newer names on webhook events, %s shape", (shape) => {
   it("verification.failed webhook: failure and the original error", async () => {
     const ev = await value<Record<string, unknown>>(
       shape,
@@ -252,10 +257,16 @@ describe("webhook_url in request bodies", () => {
     const client = new sdk.Lenz({ apiKey: "lenz_t", fetch });
     await client.verify({ claim: "a" });
     await client.verify({ claim: "a", webhookUrl: "" });
+    // Blank is omitted too: the API version 3.0 asks for reads it as "no
+    // webhook", 2.x's server as the credential's default.
+    await client.verify({ claim: "a", webhookUrl: "   " });
+    await client.verifyBatch({ claims: [{ claim: "b", webhook_url: " " }], webhookUrl: "\t" });
     await client.verify({ claim: "a", webhookUrl: "https://example.com/h" });
     expect(bodies).toEqual([
       { text: "a", source_url: "" },
       { text: "a", source_url: "" },
+      { text: "a", source_url: "" },
+      { claims: [{ text: "b", source_url: "" }] },
       { text: "a", source_url: "", webhook_url: "https://example.com/h" },
     ]);
   });
@@ -293,56 +304,7 @@ describe("webhook_url in request bodies", () => {
   });
 });
 
-describe("an original-shape body keeps every key and value it had", () => {
-  function clientFor(status: number, body: unknown): sdk.Lenz {
-    const fetchImpl = (async () =>
-      new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
-    return new sdk.Lenz({ apiKey: "lenz_t", fetch: fetchImpl, maxRetries: 0 });
-  }
-
-  it("an assess row without error_code or hint does not gain them", async () => {
-    const out = await clientFor(200, {
-      claims: [{ claim: "c", verdict: "True", confidence: "high" }],
-      error: null,
-    }).assess({ claims: ["c"] });
-    const row = out.claims[0] as Record<string, unknown>;
-    expect("error_code" in row).toBe(false);
-    expect("hint" in row).toBe(false);
-    expect("identified_claims" in row).toBe(false);
-    expect("candidate_claims" in out).toBe(false);
-    // Only the newer names are added.
-    expect(row["status"]).toBe("completed");
-    expect(out.status).toBe("ok");
-  });
-
-  it("an extract body without locations does not gain it", async () => {
-    const out = await clientFor(200, {
-      status: "ready",
-      claim: "c",
-      identified_claims: [],
-    }).extract({ text: "c" });
-    expect("locations" in out).toBe(false);
-    expect(out.claims).toEqual([{ claim: "c", positions: null }]);
-  });
-
-  it("a 409 reads its flat fields even beside a nested failure", async () => {
-    const err = mapResponseToError(
-      409,
-      JSON.stringify({
-        code: "verification_failed",
-        failure_reason: "research_empty",
-        failure_class: "insufficient_evidence",
-        retryable: null,
-        failure: { code: "x", failure_class: "upstream_unavailable", retryable: true },
-      }),
-    ) as sdk.LenzPipelineError;
-    expect([err.failureReason, err.failureClass, err.retryable]).toEqual([
-      "research_empty",
-      "insufficient_evidence",
-      null,
-    ]);
-  });
-
+describe("bodies keep what they had", () => {
   it("a 429 with doc_url and retry_after keeps resetInSeconds null", () => {
     const err = mapResponseToError(
       429,
@@ -369,7 +331,7 @@ describe("an original-shape body keeps every key and value it had", () => {
 
   it("citecheckAndWait does not add more_citations to a body without it", async () => {
     const body = JSON.parse(
-      readFileSync(join(ROOT, "older", "citecheck__get_older_completed.json"), "utf-8"),
+      readFileSync(join(ROOT, "canonical", "citecheck__get_completed_clean.json"), "utf-8"),
     ).body as Record<string, unknown>;
     delete body["more_citations"];
     const fetchImpl = (async (_u: string | URL, init?: RequestInit) =>

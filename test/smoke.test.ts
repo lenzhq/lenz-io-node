@@ -4,14 +4,20 @@
  * Skipped unless LENZ_E2E_KEY is set; the release workflow runs this
  * file via `npm run test:smoke`.
  *
- * Exercises the four-primitive ladder + webhook signing + /me/usage.
+ * Exercises the four-primitive ladder + cancel + webhook signing + /me/usage.
  */
 
 import { createHmac } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { Lenz, LenzWebhooks, verifySignature } from "../src/index.js";
+import {
+  Lenz,
+  LenzAbortError,
+  LenzPipelineError,
+  LenzWebhooks,
+  verifySignature,
+} from "../src/index.js";
 
 const LENZ_E2E_KEY = process.env["LENZ_E2E_KEY"] ?? "";
 const LENZ_BASE_URL = process.env["LENZ_BASE_URL"] ?? "";
@@ -40,6 +46,35 @@ maybe("smoke", () => {
     expect(v.verdict).toBeTruthy();
   }, 160_000);
 
+  // Stopping a run. A cheap claim at low depth, cancelled at once. If
+  // the call cancelled it (`cancelled: true`), cancelling again answers true
+  // again and a wait ends on the cancelled status. Otherwise the run had
+  // already finished (e.g. an answer the verdict cache served): `completed` or
+  // `failed`, never `cancelled`. Either way is a pass, so the step does not
+  // depend on how fast the run is.
+  it("cancel stops a run, or reports the status it had already reached", async () => {
+    const client = makeClient();
+    // A claim no other test checks, so the verdict cache rarely answers it
+    // before the cancel lands.
+    const accepted = await client.verify({
+      claim: "The Great Wall of China is visible from the Moon with the naked eye",
+      depth: "low",
+    });
+    const out = await client.cancel(accepted.task_id);
+    expect(out.task_id).toBe(accepted.task_id);
+    if (out.cancelled) {
+      expect(out.status).toBe("cancelled");
+      const again = await client.cancel(accepted.task_id);
+      expect(again).toEqual({ task_id: accepted.task_id, cancelled: true, status: "cancelled" });
+      const err = await client.wait(accepted.task_id, { timeoutMs: 30_000 }).catch((e) => e);
+      expect(err).toBeInstanceOf(LenzPipelineError);
+      expect((err as LenzPipelineError).failureClass).toBe("cancelled");
+    } else {
+      expect(out.cancelled).toBe(false);
+      expect(["completed", "failed"]).toContain(out.status);
+    }
+  }, 60_000);
+
   it("assess returns typed claims", async () => {
     const client = makeClient();
     const out = await client.assess({ text: "Sharks don't get cancer" });
@@ -49,6 +84,35 @@ maybe("smoke", () => {
     expect(typeof first.verdict).toBe("string");
     expect(["high", "medium", "low"]).toContain(first.confidence);
   }, 20_000);
+
+  it("assess takes a per-call timeout", async () => {
+    const client = makeClient();
+    const out = await client.assess({ claim: "Sharks don't get cancer" }, { timeoutMs: 100_000 });
+    expect(out.claims.length).toBeGreaterThan(0);
+  }, 110_000);
+
+  // A wait aborted after the receipt: the error carries the task id, and the
+  // run is cancelled through the client whose signal did not fire.
+  it("an aborted verifyAndWait carries its task id; the root client cancels it", async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    const err = await client
+      .verifyAndWait(
+        // Its own claim, for the same reason as the cancel test's.
+        { claim: "Honey found in ancient Egyptian tombs was still edible", depth: "low" },
+        { signal: controller.signal, onProgress: () => controller.abort() },
+      )
+      .catch((e: unknown) => e);
+    if (!(err instanceof LenzAbortError)) {
+      // A verdict cache hit can answer before the first progress: nothing to abort.
+      expect((err as { verdict?: unknown }).verdict).toBeTruthy();
+      return;
+    }
+    expect(err.taskId).toBeTruthy();
+    expect(err.idempotencyKey).toBeTruthy();
+    const out = await client.cancel(err.taskId!);
+    expect(out.task_id).toBe(err.taskId);
+  }, 60_000);
 
   it("webhook signature roundtrip", () => {
     const secret = "whsec_smoke_fixed";

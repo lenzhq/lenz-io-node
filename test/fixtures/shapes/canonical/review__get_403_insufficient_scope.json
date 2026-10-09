@@ -1,0 +1,8 @@
+{
+  "status": 403,
+  "body": {
+    "detail": "The access token does not allow this call.",
+    "code": "insufficient_scope",
+    "scope": "history:read"
+  }
+}

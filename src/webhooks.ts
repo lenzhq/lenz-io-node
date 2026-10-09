@@ -16,234 +16,220 @@
  * Lenz repo; both sides MUST produce byte-identical signatures.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { Buffer } from "node:buffer";
-
 import { LenzWebhookSignatureError } from "./errors.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
-import { normalizeOptions, normalizeTaskStatus, normalizeVerification } from "./compat.js";
-import type {
-  Citecheck,
-  Coverage,
-  FailureClass,
-  ReviewFailureBlock,
-  ReviewFull,
-  TaskStatus,
-} from "./types.js";
+import {
+  normalizeOptions,
+  normalizeWebhookStatus,
+  normalizeVerification,
+  webhookResultDefaults,
+} from "./compat.js";
+import { asObject, has } from "./events.js";
+import type { WebhookEvent, WebhookEventBase } from "./events.js";
+import type { Citecheck, Coverage, ReviewFailureBlock, ReviewFull, TaskStatus } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
 export const DEFAULT_REPLAY_WINDOW_SECONDS = 300;
 
-type RawBody = string | Buffer | Uint8Array;
+/**
+ * The raw request body: a string (encoded as UTF-8), or bytes. A Node
+ * `Buffer` is a `Uint8Array`.
+ */
+type RawBody = string | Uint8Array;
 
-function toBuffer(body: RawBody): Buffer {
-  if (Buffer.isBuffer(body)) return body;
-  if (body instanceof Uint8Array) return Buffer.from(body);
-  // String — encode as UTF-8 bytes. WARNING: only safe if the original
-  // body was ASCII / valid UTF-8 and no proxy mangled it. Prefer Buffer.
-  return Buffer.from(body, "utf-8");
+/** Request headers: a `Headers`, or a plain object (Node's `req.headers`, whose values may be arrays). */
+type HeaderBag = Record<string, string | string[] | undefined> | Headers;
+
+/** What the WebCrypto path also takes: the `ArrayBuffer` a `Request` reads. */
+type RawBodyAsync = RawBody | ArrayBuffer;
+
+const encoder = new TextEncoder();
+// `ignoreBOM: true` keeps a byte-order mark in the text, as Node's
+// `Buffer#toString("utf-8")` does, so both paths read the same body.
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+const NOT_BYTES =
+  "The webhook body must be the raw request body: a string, bytes (a Uint8Array or Node buffer) or an " +
+  "ArrayBuffer. A body parser ran before LenzWebhooks and replaced it (an object, null or " +
+  "undefined): use express.raw({ type: 'application/json' }) in Express, or " +
+  "`await request.arrayBuffer()` (or `unwrap(request)`) with a Request.";
+
+/**
+ * A private copy of the body, taken once and before any `await`: the bytes that
+ * are verified are the bytes that are parsed, whatever the caller does to its
+ * buffer in between. Anything that is not a string or bytes is a `TypeError`.
+ */
+function snapshot(body: unknown): Uint8Array {
+  if (typeof body === "string") {
+    // Encoded as UTF-8. WARNING: only safe if the original body was valid
+    // UTF-8 and no proxy mangled it. Prefer the bytes (or `unwrap(request)`).
+    return encoder.encode(body);
+  }
+  if (ArrayBuffer.isView(body)) {
+    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength).slice();
+  }
+  if (Object.prototype.toString.call(body) === "[object ArrayBuffer]") {
+    return new Uint8Array(body as ArrayBuffer).slice();
+  }
+  throw new TypeError(NOT_BYTES);
 }
 
-function sign(body: Buffer, secret: string): string {
-  const mac = createHmac("sha256", secret).update(body).digest("hex");
+function requireSecret(secret: string): void {
+  if (!secret) {
+    throw new Error(
+      "Webhook verification requires a non-empty secret. Get it from /api-credentials.",
+    );
+  }
+}
+
+function hex(bytes: Uint8Array): string {
+  let out = "";
+  for (const b of bytes) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
+/** The two errors a bad signature raises, built once for both paths. */
+function missingSignature(): LenzWebhookSignatureError {
+  return new LenzWebhookSignatureError({
+    message: "Missing webhook signature",
+    cause: `No ${SIGNATURE_HEADER} header on the request.`,
+    fix: "Inspect the webhook delivery in /api-credentials to confirm the secret is set.",
+    docUrl: "https://lenz.io/docs/webhooks",
+  });
+}
+
+function signatureMismatch(): LenzWebhookSignatureError {
+  return new LenzWebhookSignatureError({
+    message: "Webhook signature mismatch",
+    cause: "HMAC of the raw body using your secret does not match X-Lenz-Signature.",
+    fix: "Verify the secret in /api-credentials matches the one you configured here.",
+    docUrl: "https://lenz.io/docs/webhooks",
+  });
+}
+
+/**
+ * Node's `crypto`, resolved when the synchronous path first needs it. The
+ * module is never imported at load, so the package loads on runtimes that have
+ * none (Workers without Node compatibility, Deno, edge bundlers).
+ * `process.getBuiltinModule` is in every Node the package supports.
+ */
+type NodeCrypto = Pick<typeof import("node:crypto"), "createHmac" | "timingSafeEqual">;
+
+let nodeCrypto: NodeCrypto | undefined;
+
+function loadNodeCrypto(): NodeCrypto {
+  if (nodeCrypto) return nodeCrypto;
+  const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+  const mod =
+    typeof proc?.getBuiltinModule === "function"
+      ? (proc.getBuiltinModule("crypto") as NodeCrypto | undefined)
+      : undefined;
+  if (!mod) {
+    throw new Error(
+      "LenzWebhooks.parse() is synchronous and needs Node's crypto module, which this " +
+        "runtime does not provide (it is there on Node 22.12 or later). Use " +
+        "`await webhooks.unwrap(request)` or `await webhooks.parseAsync(rawBody, headers)`, " +
+        "which verify with WebCrypto and run anywhere.",
+    );
+  }
+  nodeCrypto = mod;
+  return mod;
+}
+
+function sign(body: Uint8Array, secret: string): string {
+  const mac = loadNodeCrypto().createHmac("sha256", secret).update(body).digest("hex");
   return `${SIGNATURE_PREFIX}${mac}`;
 }
 
-export function verifySignature(rawBody: RawBody, signature: string, secret: string): true {
-  if (!signature) {
-    throw new LenzWebhookSignatureError({
-      message: "Missing webhook signature",
-      cause: `No ${SIGNATURE_HEADER} header on the request.`,
-      fix: "Inspect the webhook delivery in /api-credentials to confirm the secret is set.",
-      docUrl: "https://lenz.io/docs/webhooks",
-    });
-  }
-
-  const buf = toBuffer(rawBody);
-  const expected = sign(buf, secret);
-
-  // timingSafeEqual requires equal-length buffers; pad if needed.
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signature);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    throw new LenzWebhookSignatureError({
-      message: "Webhook signature mismatch",
-      cause: "HMAC of the raw body using your secret does not match X-Lenz-Signature.",
-      fix: "Verify the secret in /api-credentials matches the one you configured here.",
-      docUrl: "https://lenz.io/docs/webhooks",
-    });
+function verifyBytes(bytes: Uint8Array, signature: string, secret: string): true {
+  const expected = encoder.encode(sign(bytes, secret));
+  const given = encoder.encode(signature);
+  // timingSafeEqual requires equal-length buffers.
+  if (expected.length !== given.length || !loadNodeCrypto().timingSafeEqual(expected, given)) {
+    throw signatureMismatch();
   }
   return true;
 }
 
-// ── Typed events ─────────────────────────────────────────────────────────
+export function verifySignature(rawBody: RawBody, signature: string, secret: string): true {
+  requireSecret(secret);
+  if (!signature) throw missingSignature();
+  return verifyBytes(snapshot(rawBody), signature, secret);
+}
 
-export type WebhookEventKind =
-  | "verification.completed"
-  | "verification.failed"
-  | "verification.needs_input"
-  | "certificate.timestamped"
-  | "review.completed"
-  | "review.failed"
-  | "citecheck.completed"
-  | "citecheck.failed"
-  // The `string & NonNullable<unknown>` trick preserves the autocomplete
-  // hints from the literal union while still permitting any future
-  // event-kind string the server adds. `(string & {})` reads cleaner but
-  // trips @typescript-eslint/ban-types.
-  | (string & NonNullable<unknown>);
+/** Equal-length byte strings, compared without stopping at the first difference. */
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
+}
 
-export interface WebhookEventBase {
-  event: WebhookEventKind;
-  /**
-   * The verification's `task_id`. On `review.*` / `citecheck.*` it is the
-   * delivery's identity, not pollable, and `""` when the payload carries none.
-   */
-  taskId: string;
-  attempt: number;
-  deliveredAt: string;
-  verificationId: string | null;
-  batchId: string | null;
-  status: string;
-  /** The payload exactly as delivered, in whichever shape the server sent. */
-  raw: Record<string, unknown>;
+async function signAsync(body: Uint8Array, secret: string): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error("LenzWebhooks needs WebCrypto (globalThis.crypto.subtle), which is missing.");
+  }
+  const key = await subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = new Uint8Array(await subtle.sign("HMAC", key, new Uint8Array(body)));
+  return `${SIGNATURE_PREFIX}${hex(mac)}`;
+}
+
+async function verifyBytesAsync(
+  bytes: Uint8Array,
+  signature: string,
+  secret: string,
+): Promise<true> {
+  const expected = encoder.encode(await signAsync(bytes, secret));
+  if (!constantTimeEqual(expected, encoder.encode(signature))) throw signatureMismatch();
+  return true;
 }
 
 /**
- * The verification as `client.getStatus` returns it: on the newer payload
- * shape the event carries it as `verification`; on the original shape it is
- * built from the flat fields. `undefined` only when neither is there.
+ * `verifySignature` with WebCrypto: resolves `true` or rejects with the same
+ * `LenzWebhookSignatureError`. Works wherever `crypto.subtle` does.
  */
-interface VerificationEventBody {
-  verification?: TaskStatus;
+export async function verifySignatureAsync(
+  rawBody: RawBodyAsync,
+  signature: string,
+  secret: string,
+): Promise<true> {
+  requireSecret(secret);
+  if (!signature) throw missingSignature();
+  // Copied before the first await: see `snapshot`.
+  const bytes = snapshot(rawBody);
+  return verifyBytesAsync(bytes, signature, secret);
 }
 
-export interface VerificationCompleted extends WebhookEventBase, VerificationEventBody {
-  event: "verification.completed";
-  result: Record<string, unknown>;
-}
-
-export interface VerificationFailed extends WebhookEventBase, VerificationEventBody {
-  event: "verification.failed";
-  /**
-   * @deprecated Read `failure.code`. The failure code, with its original
-   * words (`not_a_claim` where `failure.code` says `no_checkable_claim`).
-   */
-  error: string;
-  /** Why it failed: `code`, `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. */
-  failure?: ReviewFailureBlock | null;
-  /** WHY it failed — the closed `FailureClass` set; "" when an older server omits it. */
-  failureClass: FailureClass;
-  /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
-  retryable: boolean | null;
-}
-
-export interface VerificationNeedsInput extends WebhookEventBase, VerificationEventBody {
-  event: "verification.needs_input";
-  needsInput: Record<string, unknown>;
-  /**
-   * One sentence on what was unclear and how `select` resolves it (on a
-   * `multi_claim` pause); "" when the server sent none.
-   */
-  hint: string;
-}
-
-/**
- * `event=certificate.timestamped` — the qualified timestamp landed.
- *
- * **This is the event to publish on, not `verification.completed`.** The
- * warranty requires the certificate's timestamp to PRECEDE what you publish
- * or send, so a pipeline that publishes on `completed` races the anchor and
- * can put the statement out before cover exists. `completed` says a verdict
- * was produced; this says the qualified timestamp is in hand and cover is in
- * force.
- *
- * Carries `coverage` INSTEAD of `result`: the event reports that a timestamp
- * landed, not that a verdict was produced, so `result` is null here and
- * reading it will not give you the verification.
- */
-export interface CertificateTimestamped extends WebhookEventBase {
-  event: "certificate.timestamped";
-  coverage: Coverage;
-}
-
-/**
- * `event=review.completed` / `review.failed` — a review ended.
- *
- * `review` is the whole review (`view: "full"`), exactly as
- * `client.getReview` returns it. **Dedupe on `eventId`**: it is stable for
- * the review and event across every retry, while `attempt` changes. A
- * review's own deep checks fire no `verification.*` events.
- *
- * `taskId` is the delivery's identity, not a task you can poll on
- * `/verify/status`; read the review with `client.getReview(reviewId)`. In the
- * API's newer payload shape, which sends no `task_id`, it is the `reviewId`.
- */
-export interface ReviewEventBase extends WebhookEventBase {
-  event: "review.completed" | "review.failed";
-  eventId: string;
-  reviewId: string;
-  review: ReviewFull;
-}
-
-export interface ReviewCompleted extends ReviewEventBase {
-  event: "review.completed";
-}
-
-/** The review's `failure` block says why; `review.outcome` is `unchecked` or `incomplete`. */
-export interface ReviewFailed extends ReviewEventBase {
-  event: "review.failed";
-}
-
-/** Either review event. */
-export type ReviewEvent = ReviewCompleted | ReviewFailed;
-
-/**
- * `event=citecheck.completed` / `citecheck.failed` — a citation check ended.
- * `citecheck` is the whole check, as `client.getCitecheck` returns it.
- * **Dedupe on `eventId`**: it is stable across every retry, while `attempt`
- * changes. `taskId` is the delivery's identity, not pollable (the
- * `citecheckId` in the API's newer payload shape, which sends no `task_id`).
- */
-export interface CitecheckEventBase extends WebhookEventBase {
-  event: "citecheck.completed" | "citecheck.failed";
-  eventId: string;
-  citecheckId: string;
-  citecheck: Citecheck;
-}
-
-export interface CitecheckCompleted extends CitecheckEventBase {
-  event: "citecheck.completed";
-}
-
-/** The check's `failure` block says why. */
-export interface CitecheckFailed extends CitecheckEventBase {
-  event: "citecheck.failed";
-}
-
-/** Either citation-check event. */
-export type CitecheckEvent = CitecheckCompleted | CitecheckFailed;
-
-/**
- * Every event `parse` returns, discriminated on `event`. Ignore an event you
- * do not recognise: new kinds are added without a major release and arrive
- * as the base shape.
- */
-export type WebhookEvent =
-  | ReviewCompleted
-  | ReviewFailed
-  | CitecheckCompleted
-  | CitecheckFailed
-  | VerificationCompleted
-  | VerificationFailed
-  | VerificationNeedsInput
-  | CertificateTimestamped
-  | WebhookEventBase; // catch-all for forward compatibility
-
-function asObject(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
+export type {
+  CertificateTimestamped,
+  CitecheckCancelled,
+  CitecheckCompleted,
+  CitecheckEvent,
+  CitecheckEventBase,
+  CitecheckFailed,
+  ReviewCancelled,
+  ReviewCompleted,
+  ReviewEvent,
+  ReviewEventBase,
+  ReviewFailed,
+  VerificationCancelled,
+  VerificationCompleted,
+  VerificationFailed,
+  VerificationNeedsInput,
+  WebhookEvent,
+  WebhookEventBase,
+  WebhookEventKind,
+  WebhookEventMap,
+} from "./events.js";
+export { isEvent } from "./events.js";
 
 /**
  * The verification body of a `verification.*` event: the newer shape's
@@ -251,10 +237,10 @@ function asObject(v: unknown): Record<string, unknown> | null {
  */
 function verificationBody(event: string, payload: Record<string, unknown>): TaskStatus | undefined {
   const nested = asObject(payload["verification"]);
-  if (nested) return normalizeTaskStatus(nested) as TaskStatus;
+  if (nested) return normalizeWebhookStatus(nested) as TaskStatus;
   const taskId = payload["task_id"];
   if (event === "verification.completed") {
-    return normalizeTaskStatus({
+    return normalizeWebhookStatus({
       status: "completed",
       task_id: taskId,
       result: payload["result"],
@@ -267,7 +253,7 @@ function verificationBody(event: string, payload: Record<string, unknown>): Task
     for (const key of ["failure_class", "retryable"]) {
       if (payload[key] !== undefined) flat[key] = payload[key];
     }
-    const status = normalizeTaskStatus(flat) as Record<string, unknown>;
+    const status = normalizeWebhookStatus(flat) as Record<string, unknown>;
     // `error` here was never a sentence: drop the copy made from it.
     const failure = asObject(status["failure"]);
     if (failure) status["failure"] = { ...failure, detail: null };
@@ -276,7 +262,7 @@ function verificationBody(event: string, payload: Record<string, unknown>): Task
   }
   if (event === "verification.needs_input") {
     const ni = asObject(payload["needs_input"]) ?? {};
-    return normalizeTaskStatus({ status: "needs_input", task_id: taskId, ...ni }) as TaskStatus;
+    return normalizeWebhookStatus({ status: "needs_input", task_id: taskId, ...ni }) as TaskStatus;
   }
   return undefined;
 }
@@ -304,13 +290,28 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     status: String(payload["status"] ?? ""),
     raw: payload,
   };
+  if (typeof payload["event_id"] === "string") base.eventId = payload["event_id"];
   if (event === "verification.completed") {
-    const result = payload["result"] ?? verification?.result;
+    // The newer event's result has only the fields stored; the original
+    // event carried every field, with its default where none was stored.
+    const result = has(payload, "result")
+      ? payload["result"]
+      : webhookResultDefaults(verification?.result);
+    // `verification.result` reads with the same defaults as `result`;
+    // `raw` is the payload as sent.
+    const nestedResult = verification?.result;
+    const withDefaults =
+      verification && nestedResult && typeof nestedResult === "object"
+        ? ({
+            ...verification,
+            result: webhookResultDefaults(nestedResult),
+          } as unknown as TaskStatus)
+        : verification;
     return {
       ...base,
       event: "verification.completed",
       result: (normalizeVerification(result) as Record<string, unknown>) ?? {},
-      verification,
+      verification: withDefaults,
     };
   }
   if (event === "verification.failed") {
@@ -328,6 +329,9 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       failure,
       verification,
     };
+  }
+  if (event === "verification.cancelled") {
+    return { ...base, event: "verification.cancelled", verification };
   }
   if (event === "verification.needs_input") {
     let needsInput = (payload["needs_input"] as Record<string, unknown>) ?? null;
@@ -360,7 +364,7 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       coverage: (payload["coverage"] as Coverage) ?? {},
     };
   }
-  if (event === "review.completed" || event === "review.failed") {
+  if (event === "review.completed" || event === "review.failed" || event === "review.cancelled") {
     const review = payload["review"];
     // A review event without its review is not one we can type; hand it
     // over as the base shape rather than as a half-built event.
@@ -374,7 +378,11 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
       };
     }
   }
-  if (event === "citecheck.completed" || event === "citecheck.failed") {
+  if (
+    event === "citecheck.completed" ||
+    event === "citecheck.failed" ||
+    event === "citecheck.cancelled"
+  ) {
     const check = payload["citecheck"];
     if (check && typeof check === "object" && !Array.isArray(check)) {
       return {
@@ -406,11 +414,59 @@ export class LenzWebhooks {
     this.replayWindow = opts.replayWindowSeconds ?? DEFAULT_REPLAY_WINDOW_SECONDS;
   }
 
-  parse(rawBody: RawBody, headers: Record<string, string> | Headers): WebhookEvent {
+  /**
+   * Verify and parse a delivery, synchronously, with Node's `crypto`.
+   *
+   * For Node servers that hand you the raw body (Express with `express.raw`).
+   * It throws on a runtime without Node's `crypto` (Workers, Deno, edge
+   * runtimes): use {@link unwrap} or {@link parseAsync} there.
+   */
+  parse(rawBody: RawBody, headers: HeaderBag): WebhookEvent {
     const sig = this.lookupHeader(headers, SIGNATURE_HEADER);
-    verifySignature(rawBody, sig, this.secret);
+    requireSecret(this.secret);
+    if (!sig) throw missingSignature();
+    const bytes = snapshot(rawBody);
+    verifyBytes(bytes, sig, this.secret);
+    return this.finish(bytes);
+  }
 
-    const text = toBuffer(rawBody).toString("utf-8");
+  /**
+   * `parse` with WebCrypto, for any runtime: Workers, Deno, Bun, Node, edge
+   * bundles. Same checks, same events, same errors. The body is copied before
+   * the first `await`, so the bytes that are verified are the bytes parsed even
+   * if the caller reuses its buffer meanwhile.
+   */
+  async parseAsync(rawBody: RawBodyAsync, headers: HeaderBag): Promise<WebhookEvent> {
+    const sig = this.lookupHeader(headers, SIGNATURE_HEADER);
+    requireSecret(this.secret);
+    if (!sig) throw missingSignature();
+    const bytes = snapshot(rawBody);
+    await verifyBytesAsync(bytes, sig, this.secret);
+    return this.finish(bytes);
+  }
+
+  /**
+   * Verify and parse a delivery from a standard `Request`: reads the raw body
+   * once and the `X-Lenz-Signature` header, then behaves as {@link parseAsync}.
+   * For Workers, Deno, Bun, Next.js route handlers, Hono and the like. Call it
+   * before anything else reads the body.
+   */
+  async unwrap(request: Request): Promise<WebhookEvent> {
+    if (request.bodyUsed) {
+      throw new Error(
+        "LenzWebhooks.unwrap(request) found the body already read. Call unwrap before reading " +
+          "the body (request.json(), request.text(), a middleware): the signature covers the raw bytes.",
+      );
+    }
+    const rawBody = await request.arrayBuffer();
+    return this.parseAsync(rawBody, request.headers);
+  }
+
+  // ── helpers ──
+
+  /** Everything after the signature: JSON, object check, replay window, event. */
+  private finish(bytes: Uint8Array): WebhookEvent {
+    const text = decoder.decode(bytes);
     let payload: unknown;
     try {
       payload = JSON.parse(text);
@@ -437,15 +493,15 @@ export class LenzWebhooks {
     return buildEvent(obj);
   }
 
-  // ── helpers ──
-
-  private lookupHeader(headers: Record<string, string> | Headers, name: string): string {
+  private lookupHeader(headers: HeaderBag, name: string): string {
     if (typeof (headers as Headers).get === "function") {
       const v = (headers as Headers).get(name);
       return v ? String(v) : "";
     }
-    const h = headers as Record<string, string>;
-    return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()] ?? "";
+    const h = headers as Record<string, string | string[] | undefined>;
+    const v = h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()];
+    // A header sent twice may arrive as an array: the first value is the one.
+    return (Array.isArray(v) ? v[0] : v) ?? "";
   }
 
   private checkReplay(payload: Record<string, unknown>): void {

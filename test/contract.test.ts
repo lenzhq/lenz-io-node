@@ -52,6 +52,7 @@ function loadFixture(name: string): Record<string, unknown> {
 // Runtime keysets — parallel to `src/types.ts`. Keep in sync.
 // Each entry is the set of top-level keys defined on that interface.
 const KEYSETS: Record<string, ReadonlySet<string>> = {
+  CancelResult: new Set(["task_id", "cancelled", "status"]),
   ExtractedClaims: new Set([
     "status",
     "claims",
@@ -1208,6 +1209,9 @@ describe("contract, both response shapes", () => {
     ["verify__verification_200", "Verification"],
     ["review__get_", "ReviewFull"],
     ["citecheck__get_", "Citecheck"],
+    ["verify__cancel_200", "CancelResult"],
+    ["review__cancel_200", "ReviewFull"],
+    ["citecheck__cancel_200", "Citecheck"],
     ["account__me_usage_", "Usage"],
   ];
   for (const shape of ["legacy", "canonical"]) {

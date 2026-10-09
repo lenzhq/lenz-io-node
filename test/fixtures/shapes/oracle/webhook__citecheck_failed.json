@@ -1,20 +1,20 @@
 {
   "value": {
     "event": "citecheck.failed",
-    "taskId": "3f0a3b05d2f4ae94b617c3759c31238e",
+    "taskId": "57a138b0b7f290a572df84766a7285f3",
     "attempt": 1,
-    "deliveredAt": "2026-03-10T12:06:06.006666+00:00",
+    "deliveredAt": "2026-03-14T09:06:06.000456+00:00",
     "verificationId": null,
     "batchId": null,
     "status": "failed",
-    "eventId": "evt_c4ee0497cadc2f23b3fe8047",
-    "citecheckId": "0508bbf8",
+    "eventId": "evt_b00d5b7babff8dc2344bd527",
+    "citecheckId": "adc536dc",
     "citecheck": {
-      "citecheck_id": "0508bbf8",
+      "citecheck_id": "adc536dc",
       "status": "failed",
       "outcome": "unchecked",
-      "created_at": "2026-03-10T12:04:04.004444Z",
-      "completed_at": "2026-03-10T12:05:05.005555Z",
+      "created_at": "2026-03-14T09:04:04.000456Z",
+      "completed_at": "2026-03-14T09:05:05.000456Z",
       "language": "en",
       "poll_after_seconds": null,
       "policy": {
@@ -26,7 +26,8 @@
         "citation_limit": 20,
         "citation_limit_reached": null,
         "citation_checks": null,
-        "citation_issues": 0
+        "citation_issues": 0,
+        "citation_limit_exceeded": null
       },
       "credits": {
         "charged": 0
@@ -39,7 +40,9 @@
         "failure_class": "invalid_input",
         "retryable": false,
         "hint": "The text has no citation to check: no link, DOI or numbered reference with one.",
-        "docs_url": "https://lenz.io/docs/errors#invalid-input"
+        "docs_url": "https://lenz.io/docs/errors#invalid-input",
+        "code": "no_citations",
+        "detail": null
       },
       "more_citations": null
     }

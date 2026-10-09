@@ -1,17 +1,17 @@
 {
   "payload": {
     "event": "review.failed",
-    "event_id": "evt_c4ee0497cadc2f23b3fe8047",
-    "review_id": "0508bbf8",
-    "task_id": "3f0a3b05d2f4ae94b617c3759c31238e",
+    "event_id": "evt_bdde05a7582ff208391f15dd",
+    "review_id": "d5bcd0e4",
+    "task_id": "106bbf98cda52dd3daa44d55e7b60d00",
     "status": "failed",
     "review": {
-      "review_id": "0508bbf8",
+      "review_id": "d5bcd0e4",
       "view": "full",
       "status": "failed",
       "outcome": "unchecked",
-      "created_at": "2026-03-10T12:04:04.004444Z",
-      "completed_at": "2026-03-10T12:05:05.005555Z",
+      "created_at": "2026-03-14T09:04:04.000456Z",
+      "completed_at": "2026-03-14T09:05:05.000456Z",
       "language": "en",
       "policy": {
         "verdicts": ["False", "Mostly False", "Mixed"],
@@ -60,6 +60,6 @@
       "more_citations": null
     },
     "attempt": 1,
-    "delivered_at": "2026-03-10T12:06:06.006666+00:00"
+    "delivered_at": "2026-03-14T09:06:06.000456+00:00"
   }
 }

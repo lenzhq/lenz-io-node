@@ -1,0 +1,8 @@
+{
+  "payload": {
+    "event": "review.completed",
+    "event_id": "evt_c89baa6e43ff27ca9775632d",
+    "review_id": "991e49d5",
+    "status": "completed"
+  }
+}

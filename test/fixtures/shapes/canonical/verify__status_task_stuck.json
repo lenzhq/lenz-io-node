@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "status": "failed",
+    "task_id": "97e58f22413ed67970e2d080ce36799b",
+    "failure": {
+      "code": "task_stuck",
+      "detail": "The check stopped responding before it finished.",
+      "hint": null,
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
+    }
+  }
+}

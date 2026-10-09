@@ -1,0 +1,31 @@
+{
+  "getStatus": {
+    "value": {
+      "status": "failed",
+      "task_id": "97e58f22413ed67970e2d080ce36799b",
+      "error": "The task was never completed and has been marked failed.",
+      "failure_reason": "task_stuck",
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
+    }
+  },
+  "wait": {
+    "error": {
+      "class": "LenzPipelineError",
+      "message": "Pipeline failed: The task was never completed and has been marked failed.",
+      "cause_": "The task was never completed and has been marked failed.",
+      "fix": "Transient provider outage — retry the same request after a short wait.",
+      "docUrl": "https://lenz.io/docs/errors",
+      "requestId": "",
+      "statusCode": 0,
+      "code": "",
+      "name": "LenzPipelineError",
+      "taskId": "t",
+      "failureReason": "task_stuck",
+      "failureClass": "upstream_unavailable",
+      "retryable": true,
+      "hint": ""
+    }
+  }
+}

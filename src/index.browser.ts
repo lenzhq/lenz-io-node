@@ -2,16 +2,15 @@
  * Browser entry point for `lenz-io`.
  *
  * Identical to the main entry (`./index.ts`) EXCEPT it omits the webhook
- * *value* exports (`LenzWebhooks`, `verifySignature`, …). Those live in
- * `./webhooks.ts`, which imports `node:crypto` / `node:buffer` — Node-only
- * modules that break a browser bundle. Webhook signature verification is a
- * server-only concern, so browser consumers never need it.
+ * signature *value* exports (`LenzWebhooks`, `verifySignature`, …): signature
+ * verification needs the account's webhook secret, which never belongs in a
+ * browser. The `isEvent` guard, which needs no secret, is exported here too.
  *
  * Bundlers targeting the browser (Vite, webpack, Rollup with the browser
  * condition) resolve `lenz-io` to this file via the `"browser"` export
- * condition in package.json. Node keeps the full `./index.ts`, so
- * `import { LenzWebhooks } from "lenz-io"` still works server-side — this is
- * additive, not a breaking change.
+ * condition in package.json. Edge runtimes (the `workerd`, `edge-light` and `deno`
+ * conditions, listed before `browser`) and Node resolve the full `./index.ts`,
+ * which has the webhook receiver and imports no Node built-in.
  *
  * Webhook *types* are still re-exported here (they erase at compile time and
  * carry no runtime `node:` imports), so `import type { WebhookEvent }` works
@@ -19,18 +18,24 @@
  */
 
 export { API_VERSION, DEFAULT_BASE_URL, Lenz } from "./client.js";
-export type { LenzOptions } from "./client.js";
+export type { LenzLogger, LenzOptions } from "./client.js";
 
 export {
   LenzAPIError,
+  LenzAbortError,
+  LenzApiVersionError,
   LenzAuthError,
+  LenzConnectionError,
   LenzError,
   LenzGoneError,
   LenzNeedsInputError,
+  LenzNotFoundError,
   LenzPipelineError,
   LenzQuotaExceededError,
   LenzRateLimitError,
+  LenzRequestTimeoutError,
   LenzTimeoutError,
+  LenzUpstreamUnavailableError,
   LenzValidationError,
   LenzVerificationNotReadyError,
   LenzWebhookSignatureError,
@@ -42,27 +47,37 @@ export {
   mapResponseToError,
 } from "./errors.js";
 
+// `isEvent` and the event types live in `./events.ts`, which needs no crypto.
+export { isEvent } from "./events.js";
+export type { LenzWebhooksOptions } from "./webhooks.js";
 export type {
-  LenzWebhooksOptions,
   CertificateTimestamped,
+  CitecheckCancelled,
   CitecheckCompleted,
   CitecheckEvent,
   CitecheckEventBase,
   CitecheckFailed,
+  ReviewCancelled,
   ReviewCompleted,
   ReviewEvent,
   ReviewEventBase,
   ReviewFailed,
+  VerificationCancelled,
   VerificationCompleted,
   VerificationFailed,
   VerificationNeedsInput,
   WebhookEvent,
   WebhookEventBase,
   WebhookEventKind,
-} from "./webhooks.js";
+  WebhookEventMap,
+} from "./events.js";
 
 export type {
+  CancelResult,
   ConfidenceBand,
+  Confidence,
+  Depth,
+  Verdict,
   Escalation,
   EscalationDisposition,
   EscalationPolicy,
@@ -75,6 +90,7 @@ export type {
   CitecheckStatus,
   CitecheckSummary,
   GetReviewOptions,
+  GetStatusOptions,
   ReviewAndWaitOptions,
   ReviewAssessment,
   ReviewAssessmentCounts,
@@ -149,8 +165,11 @@ export type {
   VerifyAndWaitInput,
   VerifyBatchAndWaitInput,
   VerifyBatchInput,
+  VerifyBatchItem,
   VerifyInput,
   WaitOptions,
+  RequestOptions,
+  VerifyAndWaitOptions,
 } from "./types.js";
 
 export { VERSION } from "./_version.js";

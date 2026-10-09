@@ -16,9 +16,28 @@ generators, deep-research products, due-diligence platforms, vertical
 agents producing structured deliverables. Not chat AI, not voice AI,
 not real-time copilots — pipeline runs are the wrong shape for those.
 
+## First call
+
 ```bash
 npm install lenz-io
+export LENZ_API_KEY=lenz_...   # from https://lenz.io/api-credentials (a free account comes with credits)
 ```
+
+```ts
+import { Lenz } from "lenz-io";
+
+const client = new Lenz(); // reads LENZ_API_KEY
+
+const { claims } = await client.assess({ claim: "The Eiffel Tower is in Berlin." });
+for (const row of claims) {
+  if (row.status === "failed") console.log("No verdict:", row.failure?.hint);
+  else console.log(row.verdict, row.confidence, row.claim); // False high The Eiffel Tower is in Berlin.
+}
+```
+
+`assess` is the quick check: a verdict and a confidence for each claim in
+about 15-20 seconds, 1 credit a claim. For sources and a 1-10 score, deep-check
+a claim with `verify` (below); to check a whole draft, `review` it.
 
 ## Review a draft
 
@@ -155,17 +174,20 @@ const edited = chars.join("");
 `reviewAndWait` polls on the review's own `poll_after_seconds` and takes
 `{ timeoutMs, onUpdate }`: `onUpdate(review)` fires on every poll that changed
 the review, so you can show the quick verdicts as they land. It throws
-`ReviewFailedError` (`errorCode`, `hint`, `review`) when the review fails and
+`ReviewFailedError` (`hint`, `review`, whose `failure.code` says why) when the review fails and
 `ReviewTimeoutError` (`reviewId`, `partial`) at the deadline (10 minutes by
 default); the review keeps running, so read it later with
 `client.getReview(reviewId)`. Without waiting: `client.review(...)` returns
 `{ review_id }`, and `client.getReview(reviewId, { view: "issues" })` returns
 the review without its `claims`.
 
-Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check;
+Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check,
+plus 1 per checked citation;
 `review.credits.charged` says what the review cost. A resend with the same
 `idempotencyKey` within 24 hours returns the same review; a new key is a new
 review.
+
+A runnable version is in [`examples/core/review-draft.ts`](examples/core/review-draft.ts).
 
 ## Check a draft's citations
 
@@ -179,7 +201,8 @@ const check = await client.citecheckAndWait({ text: draft, maxCitations: 10 });
 console.log(check.outcome); // clean | issues_found | incomplete | unchecked
 for (const c of check.citation_issues) console.log(c.finding, c.cited_url ?? c.doi, c.statement);
 
-// Pairs: each checked as it is (maxCitations does not apply)
+// Pairs: each checked as it is (maxCitations does not apply). A DOI pair can
+// carry what the reference gives: citedTitle, citedAuthors, citedYear, citedJournal.
 await client.citecheckAndWait({
   pairs: [
     {
@@ -189,7 +212,7 @@ await client.citecheckAndWait({
     {
       statement: "Diamond sensors can measure temperature in a living cell.",
       doi: "10.1038/nature12373",
-      cited_year: "2013",
+      citedYear: "2013",
     },
   ],
 });
@@ -202,6 +225,7 @@ The body carries the same rows as a review's: `citations`, `citation_issues`,
 `citecheckAndWait` throws `CitecheckFailedError` when the check fails and
 `CitecheckTimeoutError` at the deadline. `citecheck.completed` and
 `citecheck.failed` webhooks parse into `CitecheckCompleted` / `CitecheckFailed`.
+A runnable version is in [`examples/core/citecheck.ts`](examples/core/citecheck.ts).
 
 ## Quickstart — the canonical integration
 
@@ -230,7 +254,7 @@ for (const c of quick) {
 // 3. verify — escalate the low-confidence rows to the full panel + citations
 // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
 const doubtful = quick
-  .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+  .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
   .map((c) => ({ claim: c.claim! }))
   .slice(0, 20);
 const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
@@ -241,21 +265,23 @@ for (const r of results) {
   }
 }
 
-// 4. ask — follow-up grounded on a verification
+// 4. ask — a follow-up question on a completed deep check, when there is one
 const deep = results.find((r) => r.status === "completed")?.verification;
-const reply = await client.ask.send(deep!.verification_id!, {
-  message: "Which source is strongest?",
-});
-console.log(reply.content);
+if (deep?.verification_id) {
+  const reply = await client.ask.send(deep.verification_id, {
+    message: "Which source is strongest?",
+  });
+  console.log(reply.content);
+}
 ```
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
-one row per item, in the order sent. A row with `verdict === "Error"` had no
-verdict: `error_code` says why (`no_claim`, `framing_failed`,
+one row per item, in the order sent. A row with `status === "failed"` had no
+verdict: `failure.code` says why (`no_checkable_claim`, `framing_failed`,
 `upstream_unavailable`, or `timeout` — an open set; the last two are the ones
-worth resending as-is) and `hint` says what to send next. Error rows are
-free. A compound item is assessed on its main claim and lists the rest in
-`identified_claims` — send those as their own items to check them. The
+worth resending as-is) and `failure.hint` says what to send next. Failed rows
+are free. A compound item is assessed on its main claim and lists the rest in
+`more_claims` — send those as their own items to check them. The
 single form, `assess({ claim })`, takes one text and answers with a row per
 claim found in it, up to 20, at 1 credit each; a text that makes more claims
 gets its 20 most check-worthy checked and the rest in `more_claims`, unchecked
@@ -318,17 +344,24 @@ your own claims. Use webhooks for production async flows.
 
 ## What you get on the client
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
+Inputs are camelCase; outputs keep the API's names. (The 2.x snake_case
+inputs, `source_url` / `webhook_url` on a batch item and `cited_title` /
+`cited_authors` / `cited_year` / `cited_journal` on a citation pair, still
+work and are deprecated. A citation pair's own enumerable keys are read, as
+when it is serialized. Giving both spellings of a field with different values
+throws an `Error` naming both before anything is sent.)
+
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
-- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
+- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` in the options argument (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
-- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
-- **`client.library.list(...)`** → browse the public catalog (no API key needed).
+- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll()) …`), one request a page. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
+- **`client.library.list(...)`** → browse the public catalog (no API key needed). `library.listAll(filters)` iterates every page of a filtered list (any `sort` but `"random"`).
 - **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
@@ -351,30 +384,35 @@ never throws because a single claim failed — inspect each item's `status`:
 
 ```ts
 const results = await client.verifyBatchAndWait({
-  claims: [{ text: "Sharks don't get cancer" }, { text: "The Eiffel Tower is 330m tall" }],
+  claims: [
+    { text: "Sharks don't get cancer" },
+    { text: "The Eiffel Tower is 330m tall", sourceUrl: "https://example.com/paris-guide" },
+  ],
 });
 for (const r of results) {
   if (r.status === "completed") {
-    console.log(r.claim_text, "→", r.verification!.verdict);
+    console.log(r.claim, "→", r.verification!.verdict);
   } else {
-    console.log(r.claim_text, "→", r.status); // needs_input | failed | timeout
+    console.log(r.claim, "→", r.status); // needs_input | failed | timeout
   }
 }
 ```
 
-A `failed` item with no `status_detail` is a verification its account's
-retention period has removed (HTTP 410, see [Retention](#retention)); every
-other failure carries a `status_detail`.
+A `failed` item with no `status_detail` is one whose poll answered something
+waiting will not change for that claim: the verification was removed under its
+account's retention period (HTTP 410, see [Retention](#retention)), the task
+was not found (404), or the answer came in another API version. Every other
+failure carries a `status_detail`.
 
 A verify takes ~90 seconds, so show your users where it is. `onProgress` fires
 once per poll while the run is going — it takes the `taskId` as well, because
 the batch helper round-robins several ids in one loop:
 
 ```ts
-await client.verifyAndWait({
-  claim: "Sharks don't get cancer",
-  onProgress: (taskId, p) => console.log(`${p.step} — step ${p.index} of ${p.total}`),
-});
+await client.verifyAndWait(
+  { claim: "Sharks don't get cancer" },
+  { onProgress: (taskId, p) => console.log(`${p.step} — step ${p.index} of ${p.total}`) },
+);
 // framing — step 1 of 5
 // research — step 2 of 5
 // ...
@@ -385,10 +423,108 @@ await client.verifyAndWait({
 work — the stages are uneven, so a bar driven by it sits on `research` for
 roughly half the run. A throw inside your callback never breaks the poll.
 
+Every waiter takes its wait options as the second argument:
+
+```ts
+await client.wait(task, { timeoutMs: 180_000, onProgress });
+await client.verifyAndWait({ claim }, { timeoutMs: 180_000, onProgress });
+await client.verifyBatchAndWait({ claims }, { timeoutMs: 180_000, onProgress });
+await client.reviewAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate });
+await client.citecheckAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate });
+```
+
+`timeoutMs` is the wait's deadline: 300 s by default for verifications, 10
+minutes for reviews and citation checks. Every wait starts it after the submit
+(review and citation waits since 3.0; before, their budget included the
+submit). With `0` or less a wait submits normally and polls once.
+The verification waits call `onProgress(taskId, progress)`; review and citation
+waits call `onUpdate(body)` with the whole changed body. Passing `timeoutMs` /
+`onProgress` inside the `verifyAndWait` / `verifyBatchAndWait` input, as 2.x
+did, still works and is deprecated; when both are given, the second argument
+wins field by field.
+
 Prefer **webhooks** for production async flows (no long-lived HTTP connection);
 prefer **polling** for scripts and request/response handlers where awaiting is
 fine. For full control over the loop, call `getStatus(taskId)` yourself — it's a
 single non-blocking poll.
+
+## Stopping a run
+
+Stop a run you no longer need: three calls, one per kind of work. None sends a
+body or an `Idempotency-Key`; cancelling is safe to repeat, so a failed attempt
+is retried like any other request.
+
+```ts
+const accepted = await client.verify({ claim: "..." });
+const out = await client.cancel(accepted.task_id); // { task_id, cancelled, status }
+
+const review = await client.cancelReview(reviewId); // the review, as getReview returns it
+const check = await client.cancelCitecheck(citecheckId); // the check, as getCitecheck returns it
+```
+
+- **`cancel(taskId)`** answers for every run of yours, whatever its state.
+  `cancelled: true` means the run is cancelled (`status: "cancelled"`), by this
+  call or an earlier one, so a repeat, or a retry after a lost response,
+  answers `true` again. `cancelled: false` means it was not cancelled and
+  nothing changed: `status` is the run's status, normally `completed` (the
+  verification exists and was charged as usual) or `failed` (not charged). A
+  task that `select` already resolved answers `cancelled: false` with
+  `needs_input`: cancel the task ids `select` returned. A cancelled
+  verification is not charged and saves nothing. Reading it afterwards with
+  `getStatus` returns the status `"cancelled"`, and `wait` throws the error
+  for a failed run with `failureClass` `"cancelled"` and `retryable` `false`.
+- **`cancelReview(reviewId)`** stops the review and the deep checks it
+  started, and returns the full view with `status: "cancelled"`; a review that
+  had already finished is returned unchanged. A review's deep checks cannot be
+  cancelled on their own: `cancel` on one throws a `LenzError` with
+  `statusCode` 409 and `code` `"use_review_cancel"` (not retryable). Cancel
+  the review instead.
+- **`cancelCitecheck(citecheckId)`** does the same for a citation check.
+
+A review is charged only for what it delivered before the cancel (the quick
+checks it served, the deep checks that finished, the citations it checked); the
+rest is refunded or never charged. A citation check is charged only for the
+citations it checked; the rest are refunded.
+
+An unknown id, another account's, or (for `cancel`) the task of a run started
+on the website throws `LenzNotFoundError` (404); a purged review or check
+throws `LenzGoneError` (410). An empty id, `.` or `..` throws before any request
+is sent.
+
+### Aborting a call
+
+Every method takes a `signal` (see [Configuration](#configuration)). When it
+fires, the call stops where it is (a request, a retry sleep, a poll, the items
+of a `listAll`) and throws `LenzAbortError`:
+
+```ts
+import { LenzAbortError } from "lenz-io";
+
+try {
+  await client.verifyAndWait({ claim }, { signal: AbortSignal.timeout(60_000) });
+} catch (e) {
+  if (e instanceof LenzAbortError && e.taskId) await client.cancel(e.taskId);
+  else throw e;
+}
+```
+
+- `LenzAbortError` is not a `LenzError` (an abort is your decision, not an API
+  answer), its `name` is `"AbortError"`, and its `cause` is the signal's
+  `reason` (a `TimeoutError` for `AbortSignal.timeout(ms)`, which bounds a
+  whole call, retries and polls included).
+- **Nothing is cancelled on the server.** Work the server accepted keeps
+  running and is charged if it completes. Stop it with `cancel`,
+  `cancelReview` or `cancelCitecheck`, as above.
+- It carries what the call knew: `idempotencyKey` when the request was keyed
+  (resend with it to get the same answer, or the submit's receipt, back
+  instead of starting the work again), and once the work was accepted,
+  `taskId`, `batchId` and `taskIds` (every accepted task, in input order),
+  `reviewId` or `citecheckId`. A call with `idempotency: false` carries no
+  key; if it was aborted during the submit, there is no safe way to find the
+  task (`verifications.list` may show it).
+- A client copy made with a signal (`withOptions({ signal })`) is dead once the
+  signal fires: every later call on it throws `LenzAbortError`. Make such a
+  copy per request, and cancel through the client you made it from.
 
 ## Response shape — the unified vocabulary
 
@@ -403,10 +539,17 @@ Every claim-shaped response shares these fields at top level:
 
 ### Newer field names
 
-Responses carry newer names beside the original ones. Both are filled
-whichever form of the response the API sends (except `completed_at`, which
-only the newer form carries), so code written against either keeps working; the original names are deprecated (struck through in editors)
-and kept for existing code.
+Since 3.0 the SDK asks for API version `2026-10-11` (`X-Lenz-API-Version`),
+the response shape with one name for each field, and reads only that shape
+for its own calls (webhooks of both shapes are still parsed). Responses carry
+the newer names beside the 2.x ones, which keep their 2.x values and are
+deprecated (struck through in editors) but still there, so code written
+against 2.x keeps compiling and reading the same fields, except for the
+differences listed under Breaking in the [changelog](CHANGELOG.md) and the
+steps under its Migrating section (the API must answer `2026-10-11`; code
+that reads raw bodies, and webhook receivers on lenz-io older than 2.21.0,
+need updating first). The raw bodies (`LenzError.body`, a
+webhook event's `raw`) show the response as sent.
 
 | Read this                                          | Instead of (deprecated)                             |
 | -------------------------------------------------- | --------------------------------------------------- |
@@ -418,9 +561,10 @@ and kept for existing code.
 | `completed_at` on a verification                   | `modified_at` (set only on a later calendar day)    |
 | `claim_limit_exceeded`, `citation_limit_exceeded`  | `claim_limit_reached`, `citation_limit_reached`     |
 
-A failure's `code` says `no_checkable_claim` where the original fields say
-`not_a_claim` (`verify`, `extract`) or `no_claim` (`assess`, `review`).
-`extract`'s `status` keeps reading `not_a_claim`.
+The full list is under "Deprecated" in the 3.0.0 entry of the
+[changelog](CHANGELOG.md). A failure's `code` says `no_checkable_claim` where
+the 2.x fields say `not_a_claim` (`verify`, `extract`) or `no_claim`
+(`assess`, `review`). `extract`'s `status` keeps reading `not_a_claim`.
 
 ### Coverage reasons
 
@@ -452,69 +596,111 @@ if (rewrite) {
 
 ### Webhooks
 
+Lenz signs each delivery with HMAC-SHA256 over the raw body. `LenzWebhooks`
+verifies the signature, rejects a payload outside the replay window, and
+returns a typed event. Two ways to call it, by runtime:
+
+- **`await webhooks.unwrap(request)`** takes a standard `Request` and verifies
+  with WebCrypto. Use it on Cloudflare Workers, Deno, Bun, Vercel Edge,
+  Next.js route handlers, Hono, and any other framework that gives you a
+  `Request`. It needs no Node built-in. `await webhooks.parseAsync(rawBody,
+headers)` is the same for a framework that hands you the body (a string or
+  bytes) and the headers instead.
+- **`webhooks.parse(rawBody, headers)`** is synchronous and uses Node's
+  `crypto`. Use it on Node servers that give you the raw body (Express with
+  `express.raw`). On a runtime without Node's `crypto` it throws an error that
+  points you to `unwrap`.
+
+Both throw the same `LenzWebhookSignatureError` for a missing or wrong
+signature, a body that is not a JSON object, or a stale `delivered_at`.
+
 ```ts
+// Next.js: app/api/lenz-webhook/route.ts
 import { LenzWebhooks } from "lenz-io";
-import type {
-  ReviewCompleted,
-  VerificationCompleted,
-  VerificationFailed,
-  VerificationNeedsInput,
-} from "lenz-io";
+
+export async function POST(request: Request) {
+  // Built inside the handler: `next build` imports this module without the secret.
+  const webhooks = new LenzWebhooks({ secret: process.env.LENZ_WEBHOOK_SECRET! });
+  const event = await webhooks.unwrap(request); // throws LenzWebhookSignatureError
+  // ...handle the event (below)...
+  return Response.json({ received: "ok" });
+}
+```
+
+```ts
+// Hono, on Workers, Deno or Bun
+app.post("/webhook", async (c) => {
+  const event = await new LenzWebhooks({ secret: c.env.LENZ_WEBHOOK_SECRET }).unwrap(c.req.raw);
+  // ...
+  return c.json({ received: "ok" });
+});
+```
+
+Do not read the body (`request.json()`, `request.text()`) before `unwrap`: the
+signature covers the exact bytes sent, and a body can be read once.
+
+Handling the event, here on Node with Express:
+
+```ts
+import { LenzWebhooks, isEvent } from "lenz-io";
 
 const webhooks = new LenzWebhooks({ secret: "whsec_..." });
 
 // In your Express handler (use express.raw() to get rawBody as Buffer):
 app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) => {
   const event = webhooks.parse(req.body, req.headers as Record<string, string>);
-  switch (event.event) {
-    case "verification.completed": {
-      const completed = event as VerificationCompleted;
-      const r = completed.result as Record<string, unknown>;
-      // r.verdict, r.lenz_score, r.confidence, ...
-      break;
+  // isEvent narrows on the event name AND the member it promises, so a
+  // malformed payload under a known name is never taken for a real one.
+  if (isEvent(event, "verification.completed")) {
+    const r = event.verification.result;
+    // r.verdict, r.lenz_score, r.confidence, ...
+  } else if (isEvent(event, "verification.needs_input")) {
+    // …surface candidate claims, call client.select(taskId, ...) to resolve
+  } else if (isEvent(event, "verification.failed")) {
+    // failure.code is WHERE the pipeline stopped; failure_class is WHY
+    // (closed set) and retryable tells you what to do about it.
+    if (event.failure?.retryable) {
+      resubmitLater(event.taskId); // transient provider outage
+    } else {
+      logPermanentFailure(event.taskId, event.failure?.code);
     }
-    case "verification.needs_input": {
-      const ni = event as VerificationNeedsInput;
-      // …surface candidate claims, call client.select(taskId, ...) to resolve
-      break;
+  } else if (isEvent(event, "verification.cancelled")) {
+    // Stopped elsewhere (the website's Stop button, another process): nothing
+    // to retry. Sent for work submitted under 2026-10-11; older work arrives
+    // as verification.failed with failure class "cancelled".
+    markCancelled(event.taskId);
+  } else if (isEvent(event, "review.completed")) {
+    // Dedupe on eventId: a retry of the same delivery keeps it.
+    if (!alreadyHandled(event.eventId)) {
+      for (const i of event.review.issues) flagIssue(i.claim, i.verdict, i.suggested_rewrite);
     }
-    case "verification.failed": {
-      const failed = event as VerificationFailed;
-      // failed.error is WHERE the pipeline stopped; failed.failureClass is
-      // WHY (closed set) and failed.retryable tells you what to do about it.
-      if (failed.retryable) {
-        resubmitLater(failed.taskId); // transient provider outage
-      } else {
-        logPermanentFailure(failed.taskId, failed.error);
-      }
-      break;
-    }
-    case "review.completed": {
-      const done = event as ReviewCompleted;
-      // Dedupe on eventId: a retry of the same delivery keeps it.
-      if (alreadyHandled(done.eventId)) break;
-      for (const i of done.review.issues) flagIssue(i.claim, i.verdict, i.suggested_rewrite);
-      break;
-    }
-    default:
-      // An event you do not recognise: ignore it. New kinds are added
-      // without a major release.
-      break;
+  } else if (isEvent(event, "citecheck.completed")) {
+    for (const c of event.citecheck.citation_issues) flagCitation(c);
   }
+  // Any other event (one you do not recognise, or a malformed one): ignore
+  // it. New kinds are added without a major release.
   res.status(200).send();
 });
 ```
 
+`verification.cancelled`, `review.cancelled` and `citecheck.cancelled` (a task
+cancelled elsewhere) narrow with `isEvent`; each carries the cancelled
+`verification` / `review` / `citecheck` and its `eventId`, nothing more. They are sent only for work submitted under API version
+2026-10-11; a cancellation of older work keeps arriving as `*.failed` with
+failure class `cancelled`.
+
 `review.completed` and `review.failed` carry the whole review under `review`,
-as `client.getReview` returns it; a review's own deep checks fire no
-`verification.*` events. Dedupe on `eventId`, which stays the same across
-retries while `attempt` changes.
+as `client.getReview` returns it, and `citecheck.*` the whole check under
+`citecheck`; a review's own deep checks fire no `verification.*` events.
+Dedupe on `eventId`, which stays the same across retries while `attempt`
+changes. Every event carries `eventId` when its payload does (all of them,
+for work started with 3.x); the original shape of `verification.*` events
+has none.
 
-Signature verification is HMAC-SHA256 over the raw bytes; the SDK does it for
-you and rejects tampered or replayed payloads.
-
-See [`examples/core/express-webhook.ts`](examples/core/express-webhook.ts)
-for a runnable receiver and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
+See [`examples/core/nextjs-webhook.ts`](examples/core/nextjs-webhook.ts) (Next.js),
+[`examples/core/hono-webhook.ts`](examples/core/hono-webhook.ts) (Hono) and
+[`examples/core/express-webhook.ts`](examples/core/express-webhook.ts) (Express)
+for runnable receivers, and [`examples/core/verify-llm-output.ts`](examples/core/verify-llm-output.ts)
 for the headline assess-then-escalate pattern.
 
 ## Credits
@@ -593,11 +779,22 @@ business plan a new warranty certificate, charged at the depth you requested.
 ## Errors
 
 Every error subclass is typed and carries a `requestId` you can quote on
-support tickets:
+support tickets, and `retryable`: `true` when sending the same request again
+later can succeed (a network failure, a transport timeout, a 429, a 5xx, a
+409 `idempotency_conflict` or `verification_not_ready`), `false` when it
+cannot (any other 4xx), `null` when unknown.
+
+An error from a call that sent an `Idempotency-Key` carries it as
+`idempotencyKey` (`undefined` otherwise). Sending the same request again is
+safe only with that key: pass `idempotencyKey: exc.idempotencyKey` back. A
+plain new call mints a new key, and if the first one reached the server, the
+work runs (and is charged) twice.
 
 ```ts
 import {
   LenzAuthError,
+  LenzConnectionError,
+  LenzNotFoundError,
   LenzQuotaExceededError,
   LenzRateLimitError,
   LenzUpstreamUnavailableError,
@@ -633,6 +830,15 @@ try {
     for (const fieldErr of exc.errors) {
       console.error(fieldErr["loc"], fieldErr["msg"]);
     }
+  } else if (exc instanceof LenzNotFoundError) {
+    // HTTP 404: nothing with that id is visible to this key. Check the id;
+    // retrying will not help.
+  } else if (exc instanceof LenzConnectionError) {
+    // No HTTP answer after the automatic retries: a network failure, or
+    // (LenzRequestTimeoutError, a subclass) one attempt ran past timeoutMs.
+    // exc.cause is the underlying fetch error. The request may have reached
+    // the server: resend with the same key so it cannot run twice.
+    await client.verifyAndWait({ claim: "...", idempotencyKey: exc.idempotencyKey });
   } else if (exc instanceof LenzUpstreamUnavailableError) {
     // HTTP 503, code "upstream_unavailable" (model/search providers
     // exhausted) or "capacity" (submissions shed at the door). Nothing was
@@ -650,12 +856,43 @@ A failed _verification_ (as opposed to a failed HTTP call) throws
 `failureClass` (closed set: `upstream_unavailable` | `insufficient_evidence`
 | `invalid_input` | `cancelled` | `internal`) and `retryable` — `true` means
 a transient provider-side exhaustion where resubmitting the same claim is the
-right move; older servers leave it `null`.
+right move; older servers leave it `null`. A verification, review or citation
+check cancelled elsewhere (the website's Stop button, another process) ends a
+wait the same way: `failureClass` is `"cancelled"` and `retryable` is `false`.
+Reading it with `getStatus` / `getReview` / `getCitecheck` returns the status
+`"cancelled"` and does not throw.
+
+`LenzConnectionError` and `LenzUpstreamUnavailableError` are subclasses of
+`LenzAPIError`, so a 2.x handler for it still catches them. A
+`LenzRequestTimeoutError` (one HTTP attempt took too long) is not a
+`LenzTimeoutError`, which means a wait (`wait`, `*AndWait`) reached its
+deadline while the job kept running on the server: read it later, do not
+resubmit it.
+
+`wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once when a poll
+answers an error waiting cannot change: `wait` throws it (401, 403, 404,
+`LenzApiVersionError`). In a batch, a 404 or an answer in another API version
+for one claim makes that claim read `"failed"` while the others keep being
+polled; a 401 or 403 is about the key, so `verifyBatchAndWait` throws it. A
+5xx, a 429 or a network drop is polled through. No poll runs past the wait's
+`timeoutMs`; once it is spent, the claims still running read `"timeout"`
+(`wait` throws `LenzTimeoutError`).
 
 A read of a verification removed under its account's retention period throws
 `LenzGoneError` (HTTP 410, `code` `"purged"`, with `purgedAt`), and `wait` /
 `verifyAndWait` stop on it instead of polling to the deadline. See
 [Retention](#retention).
+
+A response that names an API version other than `2026-10-11` in its
+`X-Lenz-API-Version` header (for example `2026-05-13`, as an older stored
+replay of an idempotent call can) is not parsed: the call throws
+`LenzApiVersionError` with `apiVersion` (the version named), `statusCode` and
+`body` (as sent). If it persists, contact support with the request id;
+lenz-io 2.x reads both versions. An idempotent request first sent with 2.x
+(before lenz.io served `2026-10-11`) and replayed with the same key is
+answered this way: finish such work with 2.x, and never change the key to
+get past it, which would run the call again. A response with no such header is not
+checked, and neither are webhook events.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
@@ -672,7 +909,7 @@ process dies mid-poll, the pipeline keeps running. The exception carries the
 import { LenzTimeoutError } from "lenz-io";
 
 try {
-  await client.verifyAndWait({ claim: "...", timeoutMs: 30000 });
+  await client.verifyAndWait({ claim: "..." }, { timeoutMs: 30000 });
 } catch (exc) {
   if (exc instanceof LenzTimeoutError) {
     console.error("resume later via:", exc.taskId);
@@ -715,18 +952,16 @@ covered verification is kept and can still be downloaded.
 
 ## Idempotency
 
-`verify`, `verifyAndWait`, `select`, `assess` and `extract` send an
-auto-generated `Idempotency-Key` on every call by default: a random key per
-call, reused across that call's own retries, so a network drop or a client
-timeout doesn't spawn a duplicate verification or charge a second credit. The
-key is never derived from the request. Override with `idempotencyKey: "..."`
-to pin a specific key, or `idempotency: false` to opt out.
-
-`review` always sends one: a random key per call unless you pass
-`idempotencyKey`. A resend with the same key within 24 hours returns the same
-review; a new key is a new review.
-
-`ask.send` takes a key too, but only pins one you choose:
+Every call that runs or charges for work sends an `Idempotency-Key` by
+default: `verify`, `verifyAndWait`, `verifyBatch`, `verifyBatchAndWait`,
+`select`, `assess`, `extract`, `ask.send`, `review` and `citecheck`. The key
+is random per call and reused across that call's own retries, so a network
+drop or a client timeout doesn't start a duplicate verification or charge a
+second credit. It is never derived from the request: the same text sent again
+in a new call is a new request. Pin a key with `idempotencyKey: "..."` (so a
+retry from another process replays too), or opt out with
+`idempotency: false` (not available on `review` and `citecheck`, which always
+send one).
 
 ```ts
 const reply = await client.ask.send(verificationId, {
@@ -735,15 +970,23 @@ const reply = await client.ask.send(verificationId, {
 });
 ```
 
-With a key, a retry of a question that already got a reply replays that reply
-instead of spending a second credit and leaving the question plus a second
-answer in the conversation. A retry sent while the first call is still running
-gets a 409 (`LenzError`, `statusCode` 409) — there is no reply to replay yet.
+A resend with the same key within 24 hours replays the first answer (the same
+receipt, review or reply) instead of running the call again. A resend while
+the first call is still running is answered 409 (`body.code`
+`idempotency_conflict`); the client waits and asks again with the same key
+and body, within the call's retries and timeout. If the first call is still
+running after that, it throws that `LenzError` (`statusCode` 409,
+`retryable: true`): send it again later with the same key
+(`idempotencyKey: err.idempotencyKey`), never with a new one, which would run
+the call a second time.
 
-No key is ever generated for you here, and none is derived from the message: a
-reply depends on the conversation so far, so asking the same question again is
-a normal thing to do. Without a key the call behaves exactly as before — a
-retry asks again, and pays again.
+`cancel`, `cancelReview` and `cancelCitecheck` send none: cancelling again
+returns the run as it stands, so a repeat is harmless.
+
+Every error of a call that sent a key carries it as `err.idempotencyKey`,
+including the timeout of a `*AndWait` (resending it with that key returns the
+work already started). A plain new call mints a new key and can run twice. On `ask.send`,
+asking the same question again in a new call is a new turn.
 
 ## Steering extract
 
@@ -768,7 +1011,7 @@ At most 300 characters. A longer focus is rejected with a 422 rather than
 truncated, so you never get a subset you did not ask for.
 
 When the document has claims but none fall within your focus, `status` is
-`"no_match"` and `identified_claims` is empty. The unfocused list is never
+`"no_match"` and `claims` is empty. The unfocused list is never
 substituted — widen the focus and call again.
 
 ```ts
@@ -787,20 +1030,19 @@ to your text, with where the text makes each one:
 ```ts
 const out = await client.extract({ text: draft, locate: true });
 
-for (const location of out.locations ?? []) {
-  for (const p of location.positions ?? []) {
+for (const found of out.claims ?? []) {
+  for (const p of found.positions ?? []) {
     if (p.start === null || p.end === null) continue; // the text was a URL
     // Offsets are code points: slice with Array.from, not text.slice.
     const passage = Array.from(draft).slice(p.start, p.end).join("");
-    console.log(location.claim, "->", passage); // passage === p.text
+    console.log(found.claim, "->", passage); // passage === p.text
   }
 }
 ```
 
 A claim found nowhere in the text, or found with a different figure, is left
-out; if none is left, `status` is `"not_a_claim"`. `locations` has one entry
-per returned claim, in the order of `identified_claims` (one entry for a single
-`claim`), and each entry lists every place the text makes the claim, in text
+out; if none is left, `status` is `"not_a_claim"`. `claims` has one entry
+per returned claim, and each entry's `positions` lists every place the text makes the claim, in text
 order (1 to 10). Locating adds a few seconds.
 
 `start` and `end` (exclusive) count Unicode **code points** in the text as you
@@ -811,10 +1053,9 @@ returned, so there is nothing to index); `text` is always the passage as it
 appears. The same `Position` shape marks a claim in a review and a citation's
 statement (where `text` is `null`: the row carries the statement).
 
-`locations` is `[]` when every claim was left out (`status` is then
-`"not_a_claim"`), and `null` when `locate` was not set, when the extraction
-found no claims, or
-when the claims could not be located, in which case the list is returned
+`claims` is `[]` when every claim was left out (`status` is then
+`"not_a_claim"`). Each claim's `positions` is `null` when `locate` was not set
+or when the claims could not be located, in which case the list is returned
 unfiltered. `locate` defaults to `false`.
 
 ## Multi-language output
@@ -883,22 +1124,99 @@ new Lenz({
   timeoutMs: 30000,
   maxRetries: 3,
   fetch: customFetch, // inject for tests
+  logger: console, // optional: retries (debug) and verifyAndWait's task id (info); silent without one
 });
 ```
+
+`timeoutMs` (a finite number of ms above 0) is the timeout of one HTTP attempt;
+`maxRetries` (a whole number, 0 or more) is how many times a failed request is
+retried. Any other value throws an `Error` when the client is made.
 
 Environment variables:
 
 - `LENZ_API_KEY` — read if `apiKey` is not passed
 - `LENZ_BASE_URL` — read if `baseUrl` is not passed
 
+### Per-call options
+
+Every method takes request options for one call: in its options argument
+(`verify(input, options)`, `getStatus(taskId, options)`, `usage(options)`, …),
+or merged into the options object it already takes (the waits' options,
+`getReview`'s `{ view }`, `verifications.list`'s `{ page }`,
+`verifications.related`'s `{ limit }`):
+
+```ts
+await client.assess({ claim }, { timeoutMs: 20_000, maxRetries: 0 });
+await client.verify({ claim }, { signal, headers: { "X-Trace-Id": traceId } });
+await client.getReview(reviewId, { view: "issues", signal });
+```
+
+| Option       | What it does                                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `signal`     | Stops the call: every request, retry sleep and poll it makes. Throws `LenzAbortError` (see [Aborting a call](#aborting-a-call)).                   |
+| `timeoutMs`  | The timeout of one HTTP attempt, in ms; each retry gets it again.                                                                                  |
+| `maxRetries` | How many times a failed request is retried.                                                                                                        |
+| `headers`    | Extra request headers. A `User-Agent` or `Accept` here replaces the client's. `null` removes one a `withOptions` copy set; `undefined` is ignored. |
+
+What the options bound, per method:
+
+| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                  | `maxRetries`                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                   | each request's retries                                                                                                                          |
+| `extract`, `assess`                                                                                                                                                              | each attempt; used as given, even below the 150 s / 100 s these wait at least when the timeout is inherited  | each request's retries                                                                                                                          |
+| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
+| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                 | each page request's retries                                                                                                                     |
+| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                             | every call made through the copy                                                                                                                |
+
+For one call, the call's value wins, then the deprecated `timeoutMs` inside an
+`extract` / `assess` input, then a `withOptions` copy's, then the client's.
+Headers merge (case does not matter; the call's value wins), the others
+replace. A per-call `timeoutMs` below the `extract` / `assess` floor can end a
+call the server is still running; a retry with the same idempotency key then
+replays it rather than running it twice. Invalid values (a `timeoutMs` that is
+not a finite number above 0, a `maxRetries` that is not a whole number from 0,
+a timeout above 2,147,483,647 ms (the longest a timer can hold), a header name
+that is not a valid token, a header value that is not a string or `null`, or
+one that is not visible ASCII with spaces and tabs only between visible
+characters) throw an `Error` before any request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+`Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host` and
+`Transfer-Encoding` cannot be set as options.
+
+`client.withOptions(options)` returns a copy of the client whose options apply
+to every call made through it. The copy is cheap: it shares the `fetch`, key,
+base URL and logger, keeps your subclass and any method you replaced, and
+leaves the original untouched. A copy's `timeoutMs` is also the attempt timeout
+of its waits' polls. A copy of a copy starts from the first copy's options: its
+headers merge over them, its signal is added to the first copy's, and its
+`timeoutMs` / `maxRetries` replace them. A call reads its options once, when it
+is made: changing the objects you passed afterwards changes nothing, for every
+page of a `listAll` and every poll of a wait too.
+
+A copy is made without running your constructor, so it cannot carry
+JavaScript `#private` fields: a subclass method that reads one throws a
+`TypeError` on a copy (a wait then ends with that error). A subclass that
+keeps state in `#private` fields should not be copied with `withOptions`;
+pass the options per call instead, or keep that state in ordinary properties.
+
+```ts
+const quick = client.withOptions({ timeoutMs: 10_000, maxRetries: 1 });
+
+// One copy per incoming request: the call stops when the caller goes away.
+export async function POST(request: Request): Promise<Response> {
+  const { claim } = (await request.json()) as { claim: string };
+  const perRequest = client.withOptions({ signal: request.signal });
+  return Response.json(await perRequest.assess({ claim }));
+}
+```
+
 An OAuth access token for the Lenz API works wherever the API key goes: pass it as `apiKey` or in `LENZ_API_KEY`.
 
 ## Compatibility
 
-- Node 20.19+, 22, 24
+- Node 22.12+ (22, 24)
 - ESM + CJS dual exports
 - TypeScript types included
-- Works in Cloudflare Workers / edge runtimes — pass a `fetch` polyfill if `globalThis.fetch` isn't available
+- Runs on Node 22.12+ and on edge runtimes with no Node built-ins: the `workerd`, `edge-light` and `deno` export conditions resolve to the main build, which imports none, ahead of the `browser` one (which has no webhook receiver). Tested: Cloudflare Workers (`workerd`, without the Node compatibility flag), Deno and Bun. Vercel Edge and Next.js edge runtime are supported through the `edge-light` condition but not tested in a real Next.js build. Verify webhooks there with `await webhooks.unwrap(request)`; the synchronous `parse` needs Node. Bun and Node use the main build. The client needs `globalThis.fetch` (every runtime above has it; pass `fetch` in the options otherwise)
 
 ## Contributing
 

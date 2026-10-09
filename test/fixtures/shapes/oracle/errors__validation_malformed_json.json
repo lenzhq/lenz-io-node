@@ -1,0 +1,13 @@
+{
+  "error": {
+    "class": "LenzError",
+    "message": "Cannot parse request body (Expecting property name enclosed in double quotes: line 1 column 2 (char 1))",
+    "cause_": "Cannot parse request body (Expecting property name enclosed in double quotes: line 1 column 2 (char 1))",
+    "fix": "Retry; if the error persists, file an issue with the Request ID.",
+    "docUrl": "https://lenz.io/docs/errors",
+    "requestId": "",
+    "statusCode": 400,
+    "code": "",
+    "name": "LenzError"
+  }
+}

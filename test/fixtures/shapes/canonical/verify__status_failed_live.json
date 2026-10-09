@@ -2,7 +2,7 @@
   "status": 200,
   "body": {
     "status": "failed",
-    "task_id": "c4ee0497cadc2f23b3fe8047e3f801ff",
+    "task_id": "76be0e746d5a5c500a8324c20bbf685c",
     "failure": {
       "code": "research_empty",
       "detail": "No sources about the claim were found.",
