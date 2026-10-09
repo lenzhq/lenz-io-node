@@ -15,14 +15,16 @@ import { Lenz } from "lenz-io";
 async function main(): Promise<void> {
   const client = new Lenz();
 
-  const results = await client.verifyBatchAndWait({
-    claims: [
-      { text: "Sharks don't get cancer" },
-      { text: "The Eiffel Tower is 330m tall" },
-      { text: "Humans only use 10% of their brains" },
-    ],
-    timeoutMs: 180_000,
-  });
+  const results = await client.verifyBatchAndWait(
+    {
+      claims: [
+        { text: "Sharks don't get cancer" },
+        { text: "The Eiffel Tower is 330m tall" },
+        { text: "Humans only use 10% of their brains" },
+      ],
+    },
+    { timeoutMs: 180_000 },
+  );
 
   for (const r of results) {
     if (r.status === "completed" && r.verification) {

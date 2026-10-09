@@ -200,7 +200,8 @@ const check = await client.citecheckAndWait({ text: draft, maxCitations: 10 });
 console.log(check.outcome); // clean | issues_found | incomplete | unchecked
 for (const c of check.citation_issues) console.log(c.finding, c.cited_url ?? c.doi, c.statement);
 
-// Pairs: each checked as it is (maxCitations does not apply)
+// Pairs: each checked as it is (maxCitations does not apply). A DOI pair can
+// carry what the reference gives: citedTitle, citedAuthors, citedYear, citedJournal.
 await client.citecheckAndWait({
   pairs: [
     {
@@ -210,7 +211,7 @@ await client.citecheckAndWait({
     {
       statement: "Diamond sensors can measure temperature in a living cell.",
       doi: "10.1038/nature12373",
-      cited_year: "2013",
+      citedYear: "2013",
     },
   ],
 });
@@ -342,6 +343,11 @@ your own claims. Use webhooks for production async flows.
 
 ## What you get on the client
 
+Inputs are camelCase; outputs keep the API's names. (The 2.x snake_case
+inputs, `source_url` / `webhook_url` on a batch item and `cited_title` /
+`cited_authors` / `cited_year` / `cited_journal` on a citation pair, still
+work and are deprecated.)
+
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
@@ -375,7 +381,10 @@ never throws because a single claim failed — inspect each item's `status`:
 
 ```ts
 const results = await client.verifyBatchAndWait({
-  claims: [{ text: "Sharks don't get cancer" }, { text: "The Eiffel Tower is 330m tall" }],
+  claims: [
+    { text: "Sharks don't get cancer" },
+    { text: "The Eiffel Tower is 330m tall", sourceUrl: "https://example.com/paris-guide" },
+  ],
 });
 for (const r of results) {
   if (r.status === "completed") {
@@ -395,10 +404,10 @@ once per poll while the run is going — it takes the `taskId` as well, because
 the batch helper round-robins several ids in one loop:
 
 ```ts
-await client.verifyAndWait({
-  claim: "Sharks don't get cancer",
-  onProgress: (taskId, p) => console.log(`${p.step} — step ${p.index} of ${p.total}`),
-});
+await client.verifyAndWait(
+  { claim: "Sharks don't get cancer" },
+  { onProgress: (taskId, p) => console.log(`${p.step} — step ${p.index} of ${p.total}`) },
+);
 // framing — step 1 of 5
 // research — step 2 of 5
 // ...
@@ -408,6 +417,24 @@ await client.verifyAndWait({
 `adjudication` / `conclusion`. `p.index` is stage **position**, not elapsed
 work — the stages are uneven, so a bar driven by it sits on `research` for
 roughly half the run. A throw inside your callback never breaks the poll.
+
+Every waiter takes its wait options as the second argument:
+
+```ts
+await client.wait(task, { timeoutMs: 180_000, onProgress });
+await client.verifyAndWait({ claim }, { timeoutMs: 180_000, onProgress });
+await client.verifyBatchAndWait({ claims }, { timeoutMs: 180_000, onProgress });
+await client.reviewAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate });
+await client.citecheckAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate });
+```
+
+`timeoutMs` is the wait's deadline (300 s by default for verifications, 10
+minutes for reviews and citation checks); `0` or less polls once. The
+verification waits call `onProgress(taskId, progress)`; review and citation
+waits call `onUpdate(body)` with the whole changed body. Passing `timeoutMs` /
+`onProgress` inside the `verifyAndWait` / `verifyBatchAndWait` input, as 2.x
+did, still works and is deprecated; when both are given, the second argument
+wins field by field.
 
 Prefer **webhooks** for production async flows (no long-lived HTTP connection);
 prefer **polling** for scripts and request/response handlers where awaiting is
@@ -738,7 +765,7 @@ process dies mid-poll, the pipeline keeps running. The exception carries the
 import { LenzTimeoutError } from "lenz-io";
 
 try {
-  await client.verifyAndWait({ claim: "...", timeoutMs: 30000 });
+  await client.verifyAndWait({ claim: "..." }, { timeoutMs: 30000 });
 } catch (exc) {
   if (exc instanceof LenzTimeoutError) {
     console.error("resume later via:", exc.taskId);

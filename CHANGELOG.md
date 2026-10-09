@@ -18,6 +18,9 @@ below. Some upgrades need a change first: see "Migrating".
 > request first sent with 2.x with 2.x (its replay answers
 > `LenzApiVersionError` in 3.x; never change the key to get past it). May:
 > move off the deprecated names, which keep working. Details: "Migrating".
+> The 2.x input forms (wait options inside the `verifyAndWait` /
+> `verifyBatchAndWait` input, snake_case batch-item and citation-pair fields)
+> still work and are deprecated.
 
 ### Breaking
 
@@ -147,6 +150,19 @@ differently:
 
 ### Added
 
+- **`verifyAndWait(input, opts)` and `verifyBatchAndWait(input, opts)`** take
+  their wait options (`WaitOptions`: `timeoutMs`, `onProgress`) as a second
+  argument, as `wait`, `reviewAndWait` and `citecheckAndWait` already did.
+  Same meaning as the in-input fields (the deadline starts after the submit;
+  `0` or less polls once); when both are given, the second argument wins
+  field by field. Nothing new is sent.
+- **camelCase batch-item and citation-pair inputs**: a `verifyBatch` /
+  `verifyBatchAndWait` item takes `sourceUrl` and `webhookUrl`; a `citecheck`
+  pair takes `citedTitle`, `citedAuthors`, `citedYear` and `citedJournal`.
+  Inputs are camelCase; outputs keep the API's names. Each camelCase field is
+  sent under its API name, so the request is the one the snake_case form
+  sends. Giving both spellings of a field with different values throws an
+  `Error` naming both before anything is sent; equal values are fine.
 - **`LenzNotFoundError`** (404), **`LenzConnectionError`** and
   **`LenzRequestTimeoutError`** (see Changed). `LenzRequestTimeoutError` is
   one HTTP attempt that took too long; `LenzTimeoutError` remains a wait that
@@ -251,6 +267,9 @@ replacement).
 |                                                                                    | `ReviewFailedError.errorCode`                                      | `review.failure.code`                                                            |
 |                                                                                    | `CitecheckFailedError.errorCode`                                   | `citecheck.failure.code`                                                         |
 | `verifyBatch` items                                                                | `idempotency_key` (never sent; no effect)                          | `idempotencyKey` on the batch                                                    |
+|                                                                                    | `source_url`, `webhook_url`                                        | `sourceUrl`, `webhookUrl`                                                        |
+| `citecheck` pairs                                                                  | `cited_title`, `cited_authors`, `cited_year`, `cited_journal`      | `citedTitle`, `citedAuthors`, `citedYear`, `citedJournal`                        |
+| `verifyAndWait` / `verifyBatchAndWait` input                                       | `timeoutMs`, `onProgress`                                          | the same fields in the second argument                                           |
 
 `creditsRemaining`, which earlier releases said would be removed in 3.0, is
 kept, and its one-time console warning now says "a future major release".

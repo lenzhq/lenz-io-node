@@ -40,6 +40,11 @@ async function main(): Promise<void> {
           statement: "Water boils at 100 degrees Celsius at sea level.",
           url: "https://en.wikipedia.org/wiki/Boiling_point",
         },
+        {
+          statement: "Diamond sensors can measure temperature in a living cell.",
+          doi: "10.1038/nature12373",
+          citedYear: "2013",
+        },
       ],
     });
     console.log(`Pairs outcome: ${pairs.outcome}`);

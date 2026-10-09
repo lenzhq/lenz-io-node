@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     .slice(0, 20);
   console.log(`Escalating ${doubtful.length} low-confidence claims to full verification:\n`);
   const results = doubtful.length
-    ? await client.verifyBatchAndWait({ claims: doubtful, timeoutMs: 180_000 })
+    ? await client.verifyBatchAndWait({ claims: doubtful }, { timeoutMs: 180_000 })
     : [];
   for (const r of results) {
     if (r.status !== "completed") {
