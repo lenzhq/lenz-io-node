@@ -131,12 +131,73 @@ describe("B8: library.listAll", () => {
     }
   });
 
-  it("refuses sort: random before any request", async () => {
+  it("refuses sort: random when called, before any request", () => {
     const { fetch, urls } = pages({ ids: ["a"], page: 1, page_size: 1 });
     const client = new Lenz({ fetch });
-    await expect(collect(client.library.listAll({ sort: "random" }))).rejects.toThrow(
+    expect(() => client.library.listAll({ sort: "random" })).toThrow(
       'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
     );
+    expect(urls).toHaveLength(0);
+  });
+});
+
+describe("S5: listAll stops on every end signal", () => {
+  function raw(...bodies: Array<Record<string, unknown>>) {
+    const urls: string[] = [];
+    const queue = [...bodies];
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      urls.push(String(url));
+      const next = queue.shift();
+      if (!next) throw new Error("fetched past the end");
+      return new Response(JSON.stringify(next), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    return { fetch, urls };
+  }
+  const rows = (...xs: string[]) => xs.map((id) => ({ verification_id: id }));
+
+  it("stops when page * page_size reaches total (a full last page)", async () => {
+    const { fetch, urls } = raw(
+      { items: rows("a", "b"), total: 4, page: 1, page_size: 2 },
+      { items: rows("c", "d"), total: 4, page: 2, page_size: 2 },
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    expect(ids(await collect(client.verifications.listAll()))).toEqual(["a", "b", "c", "d"]);
+    expect(urls).toHaveLength(2);
+  });
+
+  it.each([[undefined], [0], [-1], ["20"]])(
+    "stops after a page whose page_size is %s",
+    async (pageSize) => {
+      const { fetch, urls } = raw({
+        items: rows("a", "b"),
+        total: 99,
+        page: 1,
+        page_size: pageSize,
+      });
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      expect(ids(await collect(client.verifications.listAll()))).toEqual(["a", "b"]);
+      expect(urls).toHaveLength(1);
+    },
+  );
+
+  it("stops, yielding nothing more, when the server answers another page than asked", async () => {
+    const { fetch, urls } = raw(
+      { items: rows("a", "b"), total: 99, page: 1, page_size: 2 },
+      { items: rows("a", "b"), total: 99, page: 1, page_size: 2 },
+    );
+    const client = new Lenz({ fetch });
+    expect(ids(await collect(client.library.listAll()))).toEqual(["a", "b"]);
+    expect(urls).toHaveLength(2);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])("refuses start page %s when called", (page) => {
+    const { fetch, urls } = raw();
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    expect(() => client.verifications.listAll({ page })).toThrow(/page/);
+    expect(() => client.library.listAll({ page })).toThrow(/page/);
     expect(urls).toHaveLength(0);
   });
 });

@@ -366,23 +366,39 @@ const REVIEW_STATUSES: readonly string[] = [
 
 /**
  * Every item of a paginated list, one page request at a time, from the page
- * `first` asks for. The page size is read from each response; the walk stops
- * on a short or empty page. Nothing is fetched before the first item is
- * asked for, and no page ahead of the one being read.
+ * `first` asks for. Stops after a page that is short or empty, that reaches
+ * `total` (`page * page_size >= total`), or that states no usable
+ * `page_size`; a response for another page than the one asked for (a server
+ * that clamps a page past the end) ends the walk without yielding it. Nothing
+ * is fetched before the first item is asked for, and no page ahead of the
+ * one being read.
  */
 async function* walkPages<T>(
-  read: (page: number) => Promise<{ items?: T[]; page_size?: number }>,
+  read: (
+    page: number,
+  ) => Promise<{ items?: T[]; page_size?: number; page?: number; total?: number }>,
   first: number,
 ): AsyncGenerator<T, void, undefined> {
   for (let page = first; ; page++) {
     const body = await read(page);
+    if (typeof body.page === "number" && body.page !== page) return;
     const items = Array.isArray(body.items) ? body.items : [];
     yield* items;
     const size = body.page_size;
-    if (items.length === 0 || (typeof size === "number" && size > 0 && items.length < size)) {
+    if (items.length === 0 || typeof size !== "number" || !(size > 0) || items.length < size) {
       return;
     }
+    if (typeof body.total === "number" && page * size >= body.total) return;
   }
+}
+
+/** The start page of a `listAll`: a whole number from 1, checked when it is called. */
+function startPage(page: number | undefined): number {
+  const first = page ?? 1;
+  if (!Number.isInteger(first) || first < 1) {
+    throw new Error(`listAll needs a whole start page of 1 or more (got ${String(page)}).`);
+  }
+  return first;
 }
 
 function isPlainObject(v: unknown): boolean {
@@ -575,10 +591,11 @@ class VerificationsNamespace {
    * ```
    *
    * One `list` request per page, made when the previous page has been read;
-   * starts at `page` (default 1) and stops on a short or empty page.
+   * starts at `page` (default 1; a page below 1 throws when called) and stops
+   * on a short or empty page, or one that reaches `total`.
    */
-  listAll({ page = 1 }: { page?: number } = {}): AsyncIterable<VerificationListItem> {
-    return walkPages((p) => this.list({ page: p }), page);
+  listAll({ page }: { page?: number } = {}): AsyncIterable<VerificationListItem> {
+    return walkPages((p) => this.list({ page: p }), startPage(page));
   }
 
   /**
@@ -739,19 +756,18 @@ class LibraryNamespace {
   /**
    * Every library item matching the filters, across pages: one `list`
    * request per page, made when the previous page has been read; starts at
-   * `page` (default 1) and stops on a short or empty page. Throws for
-   * `sort: "random"`, whose pages are separate samples, not one list.
+   * `page` (default 1) and stops on a short or empty page, or one that
+   * reaches `total`. Throws when called for `sort: "random"`, whose pages are
+   * separate samples, not one list, and for a start page below 1.
    */
   listAll(input: LibraryListInput = {}): AsyncIterable<LibraryItem> {
-    const read = (page: number) => this.list({ ...input, page });
-    return (async function* () {
-      if (input.sort === "random") {
-        throw new Error(
-          'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
-        );
-      }
-      yield* walkPages(read, input.page ?? 1);
-    })();
+    if (input.sort === "random") {
+      throw new Error(
+        'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
+      );
+    }
+    const first = startPage(input.page);
+    return walkPages((page: number) => this.list({ ...input, page }), first);
   }
 }
 

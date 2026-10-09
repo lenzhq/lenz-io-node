@@ -180,8 +180,11 @@ undefined`), the timeout of a `*AndWait` included. A resend is safe only
   shape.
 - **`verifications.listAll()` and `library.listAll(filters)`**: every item
   across pages, as an `AsyncIterable`, one page request at a time. The page
-  size is read from each response, the start page is honoured, and the walk
-  stops on a short or empty page; `sort: "random"` is refused.
+  size is read from each response and the start page is honoured (one below
+  1 throws when `listAll` is called). The walk stops after a short or empty
+  page, a page that reaches `total`, or one with no usable `page_size`, and
+  a response for another page than the one asked for ends it without being
+  yielded. `sort: "random"` is refused when `listAll` is called.
 - **`Verdict`, `Confidence` and `Depth` types**, and the `verdict` /
   `confidence` fields typed plain `string` (verifications, list items,
   related verifications, `assess` rows) now name their values
