@@ -1,26 +1,29 @@
 /**
- * Both response shapes read the same.
+ * 2.x code reads the same values from the 2026-10-11 response shape.
  *
- * The API answers each request in one of two shapes: the original one
- * (`2026-05-13`) and a newer one with one name for each field (the version
- * this release asks for). Each recording in `fixtures/shapes/legacy/` has its
- * counterpart in `fixtures/shapes/canonical/`, the same response in the newer
- * shape, both taken from the API's own contract recordings
- * (`scripts/import-shapes.mjs`).
+ * Each recording in `fixtures/shapes/canonical/` is a response of the API's
+ * own contract recordings (`scripts/import-shapes.mjs`), in the shape this
+ * release asks for.
  *
  * `fixtures/shapes/oracle/` is what the last 2.x release (2.20.0) handed a
- * caller for each `legacy/` recording (`scenarios.ts`, run once against that
- * release and frozen: `shapes/make-oracles.test.ts`). This release must hand
- * over exactly the same, from either shape:
+ * caller for the same call (`scenarios.ts`, run once against that release and
+ * frozen: `shapes/make-oracles.test.ts`). This release must hand over exactly
+ * the same:
  *
  * - every field the 2.x release returned, with the same value (deep, strict
  *   equality: `[]` is not `null`, absent is not `undefined`), in every method
  *   result, error and webhook event;
  * - plus only the newer names (`NEW_NAMES`), which 2.x did not have.
  *
- * The one allowance is what the SERVER sends differently in the newer shape
- * and no client can rebuild (`SERVER_DIFFERS`, newer shape only, each with
- * its reason): its own wording, a value it no longer sends.
+ * The allowances are what the SERVER sends differently in the newer shape and
+ * no client can rebuild (`SERVER_DIFFERS`, each with its reason): its own
+ * wording, a value it no longer sends, and the error fields that now carry
+ * the API's own values (`ERROR_FIELDS`).
+ *
+ * Webhooks are the one place the original shape is still read: a receiver is
+ * sent events for work started by any client on the account, so each webhook
+ * recording also runs in its original form (`fixtures/shapes/legacy/`, and
+ * `older/` for sparser bodies of older servers) and must give the same.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -119,12 +122,20 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   webhook__citecheck_completed: TASK_ID,
 };
 
+/**
+ * An error carries what the API's error body says (3.0 no longer rebuilds
+ * the 2.x error fields from it): the code it sent, its sentence, the field
+ * items of a schema error, the pool balance of a quota error. Skipped for
+ * the newer shape in every recording.
+ */
+const ERROR_FIELDS = /(^|\.)error\.(code|message|cause_|errors|creditBalance)(\.|$)/;
+
 function pattern(p: string): RegExp {
   return new RegExp("^" + p.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
 }
 
 function differs(name: string, path: string): boolean {
-  return (SERVER_DIFFERS[name] ?? []).some((p) => pattern(p).test(path));
+  return ERROR_FIELDS.test(path) || (SERVER_DIFFERS[name] ?? []).some((p) => pattern(p).test(path));
 }
 
 /** Every difference from the oracle, as `path: what` lines. */
@@ -172,21 +183,27 @@ const NAMES = readdirSync(join(ROOT, "oracle"))
   .map((f) => f.replace(/\.json$/, ""))
   .sort();
 
-/** Recordings of older servers (sparser bodies), original shape only. */
+/** Webhook recordings of older servers (sparser bodies), original shape only. */
 const OLDER = new Set(readdirSync(join(ROOT, "older")).map((f) => f.replace(/\.json$/, "")));
 
 describe("both response shapes give what the previous release gave", () => {
-  it("every recording has an oracle, and both shapes unless it is an older one", () => {
+  it("every recording has an oracle, and every webhook one has both shapes", () => {
     expect(NAMES.length).toBeGreaterThan(80);
     for (const name of NAMES) {
       if (OLDER.has(name)) continue;
-      expect(() => load("legacy", `${name}.json`)).not.toThrow();
       expect(() => load("canonical", `${name}.json`)).not.toThrow();
+      if (name.startsWith("webhook__")) {
+        expect(() => load("legacy", `${name}.json`)).not.toThrow();
+      }
     }
   });
 
   for (const name of NAMES) {
-    const shapes = OLDER.has(name) ? (["older"] as const) : (["legacy", "canonical"] as const);
+    const shapes = OLDER.has(name)
+      ? (["older"] as const)
+      : name.startsWith("webhook__")
+        ? (["legacy", "canonical"] as const)
+        : (["canonical"] as const);
     it.each(shapes)(`${name} (%s)`, async (shape) => {
       const recorded = load(shape, `${name}.json`) as Recorded;
       const actual = await runScenario(sdk as unknown as SdkUnderTest, name, recorded);

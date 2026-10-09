@@ -155,7 +155,7 @@ const edited = chars.join("");
 `reviewAndWait` polls on the review's own `poll_after_seconds` and takes
 `{ timeoutMs, onUpdate }`: `onUpdate(review)` fires on every poll that changed
 the review, so you can show the quick verdicts as they land. It throws
-`ReviewFailedError` (`errorCode`, `hint`, `review`) when the review fails and
+`ReviewFailedError` (`hint`, `review`, whose `failure.code` says why) when the review fails and
 `ReviewTimeoutError` (`reviewId`, `partial`) at the deadline (10 minutes by
 default); the review keeps running, so read it later with
 `client.getReview(reviewId)`. Without waiting: `client.review(...)` returns
@@ -230,7 +230,7 @@ for (const c of quick) {
 // 3. verify — escalate the low-confidence rows to the full panel + citations
 // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
 const doubtful = quick
-  .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+  .filter((c) => c.status !== "failed" && c.confidence === "low")
   .map((c) => ({ claim: c.claim! }))
   .slice(0, 20);
 const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
@@ -250,12 +250,12 @@ console.log(reply.content);
 ```
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
-one row per item, in the order sent. A row with `verdict === "Error"` had no
-verdict: `error_code` says why (`no_claim`, `framing_failed`,
+one row per item, in the order sent. A row with `status === "failed"` had no
+verdict: `failure.code` says why (`no_checkable_claim`, `framing_failed`,
 `upstream_unavailable`, or `timeout` — an open set; the last two are the ones
-worth resending as-is) and `hint` says what to send next. Error rows are
-free. A compound item is assessed on its main claim and lists the rest in
-`identified_claims` — send those as their own items to check them. The
+worth resending as-is) and `failure.hint` says what to send next. Failed rows
+are free. A compound item is assessed on its main claim and lists the rest in
+`more_claims` — send those as their own items to check them. The
 single form, `assess({ claim })`, takes one text and answers with a row per
 claim found in it, up to 20, at 1 credit each; a text that makes more claims
 gets its 20 most check-worthy checked and the rest in `more_claims`, unchecked
@@ -320,7 +320,7 @@ your own claims. Use webhooks for production async flows.
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
-- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position as `verdict: "Error"` with `error_code` and `hint`. Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
+- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
@@ -355,9 +355,9 @@ const results = await client.verifyBatchAndWait({
 });
 for (const r of results) {
   if (r.status === "completed") {
-    console.log(r.claim_text, "→", r.verification!.verdict);
+    console.log(r.claim, "→", r.verification!.verdict);
   } else {
-    console.log(r.claim_text, "→", r.status); // needs_input | failed | timeout
+    console.log(r.claim, "→", r.status); // needs_input | failed | timeout
   }
 }
 ```
@@ -404,13 +404,12 @@ Every claim-shaped response shares these fields at top level:
 ### Newer field names
 
 Since 3.0 the SDK asks for API version `2026-10-11` (`X-Lenz-API-Version`),
-the response shape with one name for each field. Responses carry the newer
-names beside the original ones. Both are filled whichever form of the
-response the API sends (except `completed_at`, which only the newer form
-carries), and the original names keep their 2.x values, so code written
-against 2.x keeps working unchanged; the original names are deprecated
-(struck through in editors) and kept for existing code. Only the raw bodies
-(`LenzError.body`, a webhook event's `raw`) show the response as sent.
+the response shape with one name for each field, and reads only that shape
+for its own calls (webhooks of both shapes are still parsed). Responses carry
+the newer names beside the 2.x ones, which keep their 2.x values and are
+deprecated (struck through in editors) but still there, so code written
+against 2.x keeps working unchanged. The raw bodies (`LenzError.body`, a
+webhook event's `raw`) show the response as sent.
 
 | Read this                                          | Instead of (deprecated)                             |
 | -------------------------------------------------- | --------------------------------------------------- |
@@ -422,9 +421,10 @@ against 2.x keeps working unchanged; the original names are deprecated
 | `completed_at` on a verification                   | `modified_at` (set only on a later calendar day)    |
 | `claim_limit_exceeded`, `citation_limit_exceeded`  | `claim_limit_reached`, `citation_limit_reached`     |
 
-A failure's `code` says `no_checkable_claim` where the original fields say
-`not_a_claim` (`verify`, `extract`) or `no_claim` (`assess`, `review`).
-`extract`'s `status` keeps reading `not_a_claim`.
+The full list is under "Deprecated" in the 3.0.0 entry of the
+[changelog](CHANGELOG.md). A failure's `code` says `no_checkable_claim` where
+the 2.x fields say `not_a_claim` (`verify`, `extract`) or `no_claim`
+(`assess`, `review`). `extract`'s `status` keeps reading `not_a_claim`.
 
 ### Coverage reasons
 
@@ -484,12 +484,12 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     }
     case "verification.failed": {
       const failed = event as VerificationFailed;
-      // failed.error is WHERE the pipeline stopped; failed.failureClass is
-      // WHY (closed set) and failed.retryable tells you what to do about it.
-      if (failed.retryable) {
+      // failed.failure.code is WHERE the pipeline stopped; failure_class is
+      // WHY (closed set) and retryable tells you what to do about it.
+      if (failed.failure?.retryable) {
         resubmitLater(failed.taskId); // transient provider outage
       } else {
-        logPermanentFailure(failed.taskId, failed.error);
+        logPermanentFailure(failed.taskId, failed.failure?.code);
       }
       break;
     }
@@ -772,7 +772,7 @@ At most 300 characters. A longer focus is rejected with a 422 rather than
 truncated, so you never get a subset you did not ask for.
 
 When the document has claims but none fall within your focus, `status` is
-`"no_match"` and `identified_claims` is empty. The unfocused list is never
+`"no_match"` and `claims` is empty. The unfocused list is never
 substituted — widen the focus and call again.
 
 ```ts
@@ -791,20 +791,19 @@ to your text, with where the text makes each one:
 ```ts
 const out = await client.extract({ text: draft, locate: true });
 
-for (const location of out.locations ?? []) {
-  for (const p of location.positions ?? []) {
+for (const found of out.claims ?? []) {
+  for (const p of found.positions ?? []) {
     if (p.start === null || p.end === null) continue; // the text was a URL
     // Offsets are code points: slice with Array.from, not text.slice.
     const passage = Array.from(draft).slice(p.start, p.end).join("");
-    console.log(location.claim, "->", passage); // passage === p.text
+    console.log(found.claim, "->", passage); // passage === p.text
   }
 }
 ```
 
 A claim found nowhere in the text, or found with a different figure, is left
-out; if none is left, `status` is `"not_a_claim"`. `locations` has one entry
-per returned claim, in the order of `identified_claims` (one entry for a single
-`claim`), and each entry lists every place the text makes the claim, in text
+out; if none is left, `status` is `"not_a_claim"`. `claims` has one entry
+per returned claim, and each entry's `positions` lists every place the text makes the claim, in text
 order (1 to 10). Locating adds a few seconds.
 
 `start` and `end` (exclusive) count Unicode **code points** in the text as you
@@ -815,10 +814,9 @@ returned, so there is nothing to index); `text` is always the passage as it
 appears. The same `Position` shape marks a claim in a review and a citation's
 statement (where `text` is `null`: the row carries the statement).
 
-`locations` is `[]` when every claim was left out (`status` is then
-`"not_a_claim"`), and `null` when `locate` was not set, when the extraction
-found no claims, or
-when the claims could not be located, in which case the list is returned
+`claims` is `[]` when every claim was left out (`status` is then
+`"not_a_claim"`). Each claim's `positions` is `null` when `locate` was not set
+or when the claims could not be located, in which case the list is returned
 unfiltered. `locate` defaults to `false`.
 
 ## Multi-language output

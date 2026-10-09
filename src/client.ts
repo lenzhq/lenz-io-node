@@ -123,7 +123,8 @@ import type {
  * The API version this release asks for, sent on every request as
  * `X-Lenz-API-Version`: the response shape with one name for each field.
  * Every method still returns the 2.x names beside the newer ones, with their
- * 2.x values (see `compat.ts`). Releases before 3.0 sent `2026-05-13`.
+ * 2.x values (see `compat.ts`). Releases before 3.0 sent `2026-05-13`; 3.0
+ * reads only the `2026-10-11` shape.
  */
 // Typed `string`, not the literal, so a later version is not a type change.
 export const API_VERSION: string = "2026-10-11";
@@ -326,9 +327,8 @@ function retrySleepMs(attempt: number): number {
 /**
  * Seconds the server says to wait, or `null` if it didn't say.
  *
- * Header first, then the body — `reset_in_seconds` (the 429 shapes), then
- * `retry_after` (the 503 shapes). Returns `null` — not `0` — when none of
- * them states a wait, so the caller can tell "server stated no wait" from
+ * Header first, then the body's `retry_after`. Returns `null` — not `0` — when
+ * neither states a wait, so the caller can tell "server stated no wait" from
  * "server said wait 0 seconds" and fall back to its own backoff.
  *
  * Reads the body off a `clone()`: the original response is consumed once by
@@ -345,17 +345,7 @@ async function statedRetryAfterSeconds(response: Response): Promise<number | nul
     try {
       const body: unknown = await response.clone().json();
       const bag = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
-      // 429 shapes carry `reset_in_seconds`; the 503 shapes carry the wait
-      // under `retry_after`. Fall through on an EMPTY value too, not just on
-      // null/undefined — `??` alone would let `reset_in_seconds: ""` mask a
-      // real `retry_after`, which is not what the Python SDK does.
-      // `retry_after_seconds` is the /review endpoints' name for the same wait.
-      let candidate: unknown = null;
-      for (const key of ["reset_in_seconds", "retry_after", "retry_after_seconds"]) {
-        candidate = bag ? bag[key] : null;
-        if (candidate !== null && candidate !== undefined && String(candidate).trim() !== "") break;
-      }
-      raw = candidate ?? null;
+      raw = bag ? (bag["retry_after"] ?? null) : null;
     } catch {
       // A non-JSON body is not exceptional — fall back to backoff.
       return null;
@@ -1645,10 +1635,7 @@ export class Lenz {
       response.headers.forEach((v, k) => {
         respHeaders[k] = v;
       });
-      throw mapResponseToError(response.status, rawBody, respHeaders, {
-        method: opts.method,
-        path: opts.path,
-      });
+      throw mapResponseToError(response.status, rawBody, respHeaders);
     }
 
     if (lastErr) {

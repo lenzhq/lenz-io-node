@@ -64,7 +64,7 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     }
     case "verification.failed": {
       const e = event as VerificationFailed;
-      console.warn(`Pipeline failed: ${e.taskId} (${e.error})`);
+      console.warn(`Pipeline failed: ${e.taskId} (${e.failure?.code})`);
       break;
     }
     default:

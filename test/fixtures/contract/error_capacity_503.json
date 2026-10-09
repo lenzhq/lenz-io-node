@@ -2,5 +2,5 @@
   "detail": "Lenz is at capacity right now — please resubmit after the stated wait. Nothing was charged.",
   "code": "capacity",
   "retry_after": 105,
-  "doc_url": "https://lenz.io/docs/errors#unavailable"
+  "docs_url": "https://lenz.io/docs/errors#unavailable"
 }

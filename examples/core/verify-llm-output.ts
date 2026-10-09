@@ -27,14 +27,14 @@ async function main(): Promise<void> {
 
   // Step 1: extract — pull the verifiable claims out of the answer (free).
   const out = await client.extract({ text: LLM_OUTPUT });
-  const claims = out.identified_claims?.length ? out.identified_claims : [out.claim ?? ""];
+  const claims = (out.claims ?? []).map((c) => c.claim);
   console.log(`Extracted ${claims.length} claims.\n`);
 
   // Step 2: assess — ONE sync call over all of them (~15s for the list).
   // Exactly one row comes back per claim, in the order sent. A row with
-  // verdict "Error" had no verdict: error_code says why and hint says what
-  // to send next; a compound item is assessed on its main claim and lists
-  // the rest in identified_claims. Error rows are free.
+  // status "failed" had no verdict: failure.code says why and failure.hint
+  // says what to send next; a compound item is assessed on its main claim and
+  // lists the rest in more_claims. Failed rows are free.
   // One assess call takes 20 claims; extract finds up to 100.
   const quick: AssessClaim[] = [];
   for (let i = 0; i < claims.length; i += 20) {
@@ -45,8 +45,8 @@ async function main(): Promise<void> {
     console.log(
       `  ${(c.verdict ?? "").padEnd(12)}  conf=${(c.confidence ?? "").padEnd(7)}  ${c.claim}`,
     );
-    if (c.verdict === "Error") console.log(`      ${c.error_code}: ${c.hint}`);
-    else if (c.identified_claims?.length) console.log(`      also found: ${c.identified_claims}`);
+    if (c.status === "failed") console.log(`      ${c.failure?.code}: ${c.failure?.hint}`);
+    else if (c.more_claims?.length) console.log(`      also found: ${c.more_claims}`);
   }
   console.log("");
 
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   // `verification_url` and you can skip the escalation.
   // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
   const doubtful = quick
-    .filter((c) => c.verdict !== "Error" && c.confidence === "low")
+    .filter((c) => c.status !== "failed" && c.confidence === "low")
     .map((c) => ({ claim: c.claim ?? "" }))
     .slice(0, 20);
   console.log(`Escalating ${doubtful.length} low-confidence claims to full verification:\n`);
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     : [];
   for (const r of results) {
     if (r.status !== "completed") {
-      console.log(`${r.status.toUpperCase().padEnd(14)} ${r.claim_text}`); // needs_input | failed | timeout
+      console.log(`${r.status.toUpperCase().padEnd(14)} ${r.claim}`); // needs_input | failed | timeout
       continue;
     }
     const v = r.verification!;

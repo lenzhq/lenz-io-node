@@ -1,6 +1,0 @@
-{
-  "status": 422,
-  "body": {
-    "detail": "Invalid curated list(s). Allowed: trivia"
-  }
-}

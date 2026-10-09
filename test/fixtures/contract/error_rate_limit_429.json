@@ -2,7 +2,7 @@
   "detail": "Daily /extract limit of 1000 reached.",
   "code": "extract_daily_limit",
   "limit": 1000,
-  "reset_in_seconds": 7200,
-  "doc_url": "https://lenz.io/docs/errors#rate-limits",
+  "retry_after": 7200,
+  "docs_url": "https://lenz.io/docs/errors#rate-limits",
   "upgrade_url": "https://lenz.io/plans"
 }

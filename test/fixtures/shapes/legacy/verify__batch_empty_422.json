@@ -1,6 +1,0 @@
-{
-  "status": 422,
-  "body": {
-    "detail": "claims is required and must be non-empty."
-  }
-}

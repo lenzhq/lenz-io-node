@@ -920,9 +920,9 @@ describe("contract", () => {
       "credits_remaining",
       "cost",
     ]);
-    // `doc_url` is intentionally not mapped: the SDK sets its own docUrl from
+    // `docs_url` is intentionally not mapped: the SDK sets its own docUrl from
     // the status table so the link is right even on an older server.
-    handled.add("doc_url");
+    handled.add("docs_url");
     const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
     expect(unhandled).toEqual([]);
   });
@@ -949,19 +949,12 @@ describe("contract", () => {
     expect(err.message).toBe(fixture["detail"]);
     expect(err.code).toBe(fixture["code"]);
     expect(err.limit).toBe(fixture["limit"]);
-    expect(err.resetInSeconds).toBe(fixture["reset_in_seconds"]);
-    expect(err.retryAfter).toBe(fixture["reset_in_seconds"]);
+    expect(err.resetInSeconds).toBe(fixture["retry_after"]);
+    expect(err.retryAfter).toBe(fixture["retry_after"]);
     // upgrade_url is on 429 too — the daily /extract cap is lifted by a plan.
     expect(err.upgradeUrl).toBe(fixture["upgrade_url"]);
 
-    const handled = new Set([
-      "detail",
-      "code",
-      "limit",
-      "reset_in_seconds",
-      "upgrade_url",
-      "doc_url",
-    ]);
+    const handled = new Set(["detail", "code", "limit", "retry_after", "upgrade_url", "docs_url"]);
     const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
     expect(unhandled).toEqual([]);
   });
@@ -988,7 +981,7 @@ describe("contract", () => {
       expect(err.retryAfter).toBe(expectedRetryAfter);
       expect(err.body).toEqual(fixture);
 
-      const handled = new Set(["detail", "code", "retry_after", "doc_url"]);
+      const handled = new Set(["detail", "code", "retry_after", "docs_url"]);
       const unhandled = Object.keys(fixture).filter((k) => !handled.has(k));
       expect(unhandled).toEqual([]);
     });
@@ -1177,7 +1170,7 @@ describe("review fixtures", () => {
       JSON.stringify({
         detail: "Daily limit.",
         code: "extract_daily_limit",
-        reset_in_seconds: 3600,
+        retry_after: 3600,
       }),
       {},
     );

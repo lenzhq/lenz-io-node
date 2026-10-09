@@ -1,7 +1,7 @@
 {
   "detail": "No remaining claim checks.",
   "code": "no_credits",
-  "doc_url": "https://lenz.io/docs/errors#quota",
+  "docs_url": "https://lenz.io/docs/errors#quota",
   "upgrade_url": "https://lenz.io/plans",
   "remaining": 0,
   "credits_remaining": 4,

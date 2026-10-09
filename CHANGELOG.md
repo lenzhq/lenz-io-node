@@ -4,51 +4,23 @@ All notable changes to this SDK are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [SemVer](https://semver.org/).
 
-## [3.0.0] - unreleased
+## [Unreleased]
 
-Major release (3.0.0). Every field, error and webhook event reads what 2.x
-read, with one exception: the raw bodies (`LenzError.body`, a webhook event's
-`raw`) show the API's newer response shape as sent. Code that reads
-`err.body.detail` as a list, `err.body.doc_url`, `err.body.error` or
-`err.body.reset_in_seconds` must read the error's own fields instead
-(`errors`, `code`, `resetInSeconds`, `retryAfter`). See "Migrating" below.
+Major release (3.0.0). The SDK now speaks the API's `2026-10-11` response
+shape, in which every field, status and error code has one name. Code written
+against 2.x keeps compiling and reading the same fields with the same values
+(they are deprecated, see "Deprecated"), except for the breaking changes
+below.
 
-### Changed (breaking at the wire, not in your code)
+### Breaking
 
-- **Asks for API version `2026-10-11`.** Every request sends
-  `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`), so the API answers in its
-  newer response shape: one name for each field, status and error code across
-  every endpoint. 2.x sent `2026-05-13`.
-- **Code written against 2.x keeps working unchanged, and keeps compiling.**
-  No exported type was narrowed, removed or made required (`API_VERSION` is
-  typed `string`, no longer the literal of its value). Every field reads the
-  value it had in 2.x, computed from the newer response with its 2.x meaning
-  (deprecated, as in the release before):
-  - `assess` rows: a row without a verdict still reads `verdict: "Error"`,
-    `confidence: "low"`, `error_code` (`no_claim` where the API now says
-    `no_checkable_claim`) and `hint`; `identified_claims`,
-    `candidate_claims: []`; the body's `error` / `error_code`.
-  - `extract`: `status: "not_a_claim"`, `claim`, `identified_claims`,
-    `candidate_claims` and `locations`.
-  - `claim_text` on `verifyBatch` / `select` receipt items and batch results,
-    `text` on `needs_input` options.
-  - Verifications: `modified_at`, set only when the run finished on a later
-    UTC calendar day than it started (`completed_at` is the newer name).
-  - A failed `getStatus` / `wait`: `error`, `failure_reason` (`not_a_claim`),
-    `failure_class`, `retryable`, `docs_url`, `hint`, and the
-    `LenzPipelineError` built from them.
-  - `usage()`: the `verify` / `ask` / `assess` blocks, `credits.bonus` and
-    `quota_resets_at`, recomputed from `credits` and `costs`.
-  - Reviews and citation checks: `failure.failure_reason`, row `error_code` /
-    `identified_claims`, `claim_limit_reached` / `citation_limit_reached`.
-  - Webhooks: `verification.failed`'s `error` (the failure code),
-    `failureClass`, `retryable`; `verification.completed`'s `result` with
-    every field the 2.x event carried.
-  - Errors: every class and field as 2.x set it. `code` is `""` where the 2.x
-    error carried none (the API now sends one on every error), a schema
-    error's `errors` are its field items and its message "Validation failed",
-    `LenzRateLimitError.resetInSeconds` reads the daily limit's wait,
-    `LenzQuotaExceededError.creditBalance` is filled for a citation check.
+- **3.0 reads only the API's `2026-10-11` response shape for its own calls**
+  (lenz.io serves it from 2026-10-11). Every request sends
+  `X-Lenz-API-Version: 2026-10-11` (`API_VERSION`, typed `string`); 2.x sent
+  `2026-05-13`. A response in the earlier shape is not supported. Webhooks are the
+  exception: `LenzWebhooks` still parses events of both shapes, because a
+  receiver is sent events for work started by any client on the account,
+  including older ones.
 - **Webhooks of calls made with 3.0 arrive in the newer shape.** The API
   sends each webhook in the version of the request that asked for it, so a
   `verify`, `verifyBatch`, `select`, `review` or `citecheck` made with this
@@ -58,26 +30,31 @@ read, with one exception: the raw bodies (`LenzError.body`, a webhook event's
   later (which reads both shapes and fills the 2.x names), or read both
   shapes yourself; a receiver on 2.20.0 or older, or one that reads the raw
   JSON, must be updated before its sender moves to 3.0.
-- **What shows the newer shape as sent:** `LenzError.body` and a webhook
-  event's `raw`. Code that reads those raw bodies reads the newer names
-  (`docs_url`, `retry_after`, `failure`, `claims`, ...).
+- **Errors carry what the API sends.** `code` is the API's code on every
+  error (2.x left it `""` on some), a schema error's message is the API's
+  sentence and its `errors` the field items, `LenzRateLimitError`'s
+  `resetInSeconds` and `retryAfter` read the body's `retry_after`, and
+  `LenzQuotaExceededError.creditBalance` is filled for a citation check.
+  `LenzError.body` is the body as sent: code that reads
+  `err.body.detail` as a list, `err.body.doc_url`, `err.body.error`,
+  `err.body.reset_in_seconds` or `err.body.retry_after_seconds` must read the
+  error's own fields (`errors`, `code`, `resetInSeconds`, `retryAfter`) or the
+  newer names (`docs_url`, `retry_after`).
+- **A webhook event's `raw` is the payload as delivered**, in whichever shape
+  the API sent.
 - **What the API now words or sends differently**, which no client can
   rebuild:
   - a failed check's `error` (and the `LenzPipelineError` message built from
-    it) reads "Pipeline stopped at: <code>" or its fixed sentence, as a
-    running check's failure did; a failure read back from storage said
-    "Pipeline stopped: <code>." in 2.x. A `task_error` reads "Pipeline
-    failed." and a `task_stuck` "The task was never completed and has been
-    marked failed.", where 2.x said one of several sentences for each (e.g.
-    "Unexpected result.", "Unexpected pipeline step: <step>", "We hit a snag
-    finalizing your result. Please try submitting again.", "The task was
-    never picked up and has been marked failed.");
+    it) reads "Pipeline stopped at: <code>" or its fixed sentence; a failure
+    read back from storage said "Pipeline stopped: <code>." in 2.x. A
+    `task_error` reads "Pipeline failed." and a `task_stuck` "The task was
+    never completed and has been marked failed.", where 2.x said one of
+    several sentences for each;
   - the 409 `verification_failed` from `verifications.get` carries the run's
     own `hint` (and so `fix`), where 2.x sometimes carried a generic one; a
     failed poll read back from storage can carry a `hint` 2.x left out;
-  - some other hints and 4xx messages are worded anew (`err.message` /
-    `cause_` of a blank input or an unparseable body, a failed review's
-    hint);
+  - some other hints and 4xx messages are worded anew (a blank input, an
+    unparseable body, a failed review's hint);
   - a review row's `hint` is the fixed compound-claim sentence (or `null`),
     not the hint stored with the review;
   - a review row stored without a failure block reads one, where 2.x read
@@ -89,26 +66,80 @@ read, with one exception: the raw bodies (`LenzError.body`, a webhook event's
     `citecheck.*` webhook event is the review / citation-check id (dedupe on
     `eventId`); a repeated `verify` answered from the first one is a 202
     (the SDK returns the same receipt either way).
-- Error `code`s the API now sends where 2.x had none (`not_authenticated`,
-  `not_found`, `validation_error`, `malformed_body`, `internal_error`,
-  `invalid_request`, `verification_not_ready` on `/ask`, ...) read as `""` on the error, per endpoint; a 422 keeps its 2.x
-  `code`, message and `errors` (a schema error's field items, `/review` and
-  `/citecheck`'s own envelope, `blank_item` on an `assess` list). The raw
-  `body` carries the codes as sent.
 - `webhookUrl` keeps its meaning on every method: on `verify` and
   `verifyBatch` an unset, empty or blank one is left out of the request (your
   credential's default URL); on `review` and `citecheck` `""` still means no
   webhook for this call.
 
+### Changed
+
+- **The newer names are the way to read a response**: `claims`, `status` and
+  `failure`, `claim`, `more_claims`, `completed_at`, `claim_limit_exceeded`,
+  `citation_limit_exceeded`, `credits` with `costs`, `failure.code`. See
+  "Newer field names" in the README.
+- No exported type was narrowed, removed or made required, and every 2.x
+  field reads the value it had in 2.x, computed from the newer response with
+  its 2.x meaning: a failed `assess` row still reads `verdict: "Error"` and
+  `confidence: "low"`, `extract`'s `status` reads `not_a_claim`, and a
+  failure's `failure_reason` / `error_code` say `not_a_claim` (`verify`,
+  `extract`) or `no_claim` (`assess`, `review`) where `failure.code` says
+  `no_checkable_claim`.
+
+### Deprecated
+
+Kept in 3.x with their 2.x values, so 2.x code runs and compiles unchanged;
+they will be removed in a future major release. Move to the newer names when
+convenient. Editors strike them through (`@deprecated` names the
+replacement).
+
+| Where                                                                              | Deprecated (2.x name)                                              | Read instead                                                                     |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `extract`                                                                          | `claim`                                                            | `claims[0].claim`                                                                |
+|                                                                                    | `identified_claims`                                                | `claims`                                                                         |
+|                                                                                    | `locations`                                                        | `claims[i].positions`                                                            |
+|                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+| `assess` row                                                                       | `verdict: "Error"`, `confidence: "low"` on a failed row            | `status === "failed"`                                                            |
+|                                                                                    | `error_code`                                                       | `failure.code`                                                                   |
+|                                                                                    | `hint`                                                             | `failure.hint`                                                                   |
+|                                                                                    | `identified_claims`                                                | `more_claims`                                                                    |
+|                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+| `assess` body                                                                      | `error`                                                            | `failure.detail`                                                                 |
+|                                                                                    | `error_code`                                                       | `failure.code`                                                                   |
+|                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+| `verifyBatch` / `select` receipt, `verifyBatchAndWait`                             | `claim_text`                                                       | `claim`                                                                          |
+| `needs_input` options                                                              | `text`                                                             | `claim`                                                                          |
+| Verifications (`get`, `list`, `library`, a status `result`, a review's deep check) | `modified_at`                                                      | `completed_at`                                                                   |
+| `getStatus` / `wait` on a failed run                                               | `error`                                                            | `failure.detail`                                                                 |
+|                                                                                    | `failure_reason`                                                   | `failure.code`                                                                   |
+|                                                                                    | `failure_class`, `retryable`, `docs_url`, `hint`                   | `failure.failure_class`, `failure.retryable`, `failure.docs_url`, `failure.hint` |
+|                                                                                    | `candidates`, `similar_claims` (typed only; the API sends neither) | `claims` for `candidates`; none for `similar_claims`                             |
+| `usage()`                                                                          | `verify`, `ask`, `assess` blocks                                   | `credits` and `costs` (divide `credits.remaining` by the cost)                   |
+|                                                                                    | per-block `credits`                                                | the block's `bonus`                                                              |
+|                                                                                    | `credits.bonus`                                                    | `credits.extra`                                                                  |
+|                                                                                    | `quota_resets_at`                                                  | `credits.resets_at`                                                              |
+| Reviews and citation checks                                                        | `failure.failure_reason` (every failure block)                     | `failure.code`                                                                   |
+|                                                                                    | assessment `error_code`, `hint`                                    | assessment `failure.code`, `failure.hint`                                        |
+|                                                                                    | assessment `identified_claims`                                     | `more_claims`                                                                    |
+|                                                                                    | summary `claim_limit_reached`                                      | `claim_limit_exceeded`                                                           |
+|                                                                                    | summary `citation_limit_reached`                                   | `citation_limit_exceeded`                                                        |
+| `verification.failed` webhook                                                      | `error`                                                            | `failure.code`                                                                   |
+|                                                                                    | `failureClass`, `retryable`                                        | `failure.failure_class`, `failure.retryable`                                     |
+| `verification.completed` webhook                                                   | `result`                                                           | `verification.result`                                                            |
+| Errors                                                                             | `LenzRateLimitError.resetInSeconds`                                | `retryAfter`                                                                     |
+|                                                                                    | `LenzQuotaExceededError.creditsRemaining` (still warns once)       | `remaining`                                                                      |
+|                                                                                    | `ReviewFailedError.errorCode`                                      | `review.failure.code`                                                            |
+|                                                                                    | `CitecheckFailedError.errorCode`                                   | `citecheck.failure.code`                                                         |
+
+`creditsRemaining`, which earlier releases said would be removed in 3.0, is
+kept, and its one-time console warning now says "a future major release".
+Values that keep their 2.x wording while `failure.code` says
+`no_checkable_claim`: `extract`'s `status` (`not_a_claim`), `failure_reason`
+and `error_code`.
+
 ### Migrating
 
-Nothing is required. To move off the deprecated names, read the newer ones
-listed under "Newer field names" in the README; they are filled whichever
-shape the API sends. A response the API replays from before this version (an
-idempotent retry of an earlier call) can arrive in the original shape; the
-SDK reads both.
-
-## [Unreleased]
+Nothing is required. To move off the deprecated names, use the newer ones
+listed under "Newer field names" in the README.
 
 ## [2.21.0] - 2026-10-09
 

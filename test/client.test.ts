@@ -55,41 +55,15 @@ function makeFetch(responses: Iterable<MockResponse>) {
 // unit. Reused across usage tests. A free account: 100 credits, no bonus.
 const USAGE_BODY = {
   plan: "free",
-  quota_resets_at: "2026-07-01T00:00:00+00:00",
   credits: {
     total: 100,
     used: 0,
     remaining: 100,
     extra: 0,
-    bonus: 0,
     resets_at: "2026-07-01T00:00:00+00:00",
   },
   costs: { verify: 10, assess: 1, ask: 1, extract: 0 },
   cost_options: { verify: { depth: { standard: 10, low: 5 } } },
-  verify: {
-    quota_used: 0,
-    quota_total: 10,
-    quota_remaining: 10,
-    bonus: 0,
-    credits: 0,
-    remaining: 10,
-  },
-  ask: {
-    quota_used: 0,
-    quota_total: 100,
-    quota_remaining: 100,
-    bonus: 0,
-    credits: 0,
-    remaining: 100,
-  },
-  assess: {
-    quota_used: 0,
-    quota_total: 100,
-    quota_remaining: 100,
-    bonus: 0,
-    credits: 0,
-    remaining: 100,
-  },
   extract: { calls_today: 0, daily_limit: 1000, unlimited: false },
 };
 
@@ -1832,7 +1806,7 @@ describe("Auto-retry", () => {
     const { fetch, calls } = makeFetch([
       {
         status: 429,
-        body: { detail: "Daily /extract limit of 1000 reached.", reset_in_seconds: 86_400 },
+        body: { detail: "Daily /extract limit of 1000 reached.", retry_after: 86_400 },
         headers: { "Retry-After": "86400" },
       },
       { body: USAGE_BODY },
@@ -1888,7 +1862,7 @@ describe("Auto-retry", () => {
     // Python's client falls back to the body here. Node must too, or the same
     // server response produces 1 call in Python and 4 in Node.
     const { fetch, calls } = makeFetch([
-      { status: 429, body: { detail: "capped", reset_in_seconds: 86_400 } },
+      { status: 429, body: { detail: "capped", retry_after: 86_400 } },
       { body: USAGE_BODY },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
@@ -1995,7 +1969,7 @@ describe("Auto-retry", () => {
   }, 10_000);
 
   it("503 reads the wait from the body retry_after key — parity with Python", async () => {
-    // The 503 bodies carry `retry_after` (429 carries `reset_in_seconds`);
+    // The 503 bodies carry `retry_after` (so does 429);
     // a proxy that strips the header must not demote the stated wait to the
     // blind ladder.
     const { fetch, calls } = makeFetch([
@@ -2116,20 +2090,16 @@ describe("usage", () => {
     // 25 non-expiring credits buys 25 assesses but only 2 verifications.
     const body = {
       ...USAGE_BODY,
-      credits: { total: 125, used: 0, remaining: 125, bonus: 25, resets_at: null },
-      verify: { ...USAGE_BODY.verify, bonus: 2, credits: 2 },
-      assess: { ...USAGE_BODY.assess, bonus: 25, credits: 25 },
+      credits: { total: 125, used: 0, remaining: 125, extra: 25, resets_at: null },
     };
     const { fetch } = makeFetch([{ body }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const u = await client.usage();
-    // This body carries only `bonus`; `usage()` fills `extra` from it.
     expect(u.credits.extra).toBe(25);
     expect(u.credits.resets_at).toBeNull();
     expect(u.verify.bonus).toBe(2);
     expect(u.assess.bonus).toBe(25);
-    // The deprecated per-capability `credits` is an alias of `bonus` until
-    // a server may send only one of the two names.
+    // The deprecated per-capability `credits` is an alias of `bonus`.
     expect(u.verify.credits).toBe(u.verify.bonus);
     expect(u.assess.credits).toBe(u.assess.bonus);
   });
@@ -2141,28 +2111,6 @@ describe("usage", () => {
     const u = await client.usage();
     expect(u.credits.extra).toBe(30);
     expect(u.credits.bonus).toBe(30);
-  });
-
-  it("parses a response that has already dropped the deprecated credits alias", async () => {
-    // A server that sends no per-block `credits`: `bonus` carries on, and
-    // the alias is not invented for a block the server sent.
-    const withoutAlias = (cap: Record<string, unknown>): Record<string, unknown> => {
-      const copy = { ...cap };
-      delete copy["credits"];
-      return copy;
-    };
-    const body = {
-      ...USAGE_BODY,
-      verify: withoutAlias(USAGE_BODY.verify),
-      assess: withoutAlias(USAGE_BODY.assess),
-      ask: withoutAlias(USAGE_BODY.ask),
-    };
-    const { fetch } = makeFetch([{ body }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const u = await client.usage();
-    expect(u.verify.credits).toBeUndefined();
-    expect(u.verify.bonus).toBe(0);
-    expect(u.verify.remaining).toBe(10);
   });
 });
 

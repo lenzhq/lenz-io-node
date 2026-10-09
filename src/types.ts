@@ -154,8 +154,7 @@ export interface Verification {
   audit?: Audit;
   created_at?: string | null;
   /**
-   * When the verification finished. Sent by the API's newer response shape;
-   * absent from the original shape, which sends `modified_at` instead.
+   * When the verification finished.
    */
   completed_at?: string | null;
   /**
@@ -421,8 +420,7 @@ export interface ExtractedClaims {
   status?: ExtractStatus;
   /**
    * Every claim found, in order: one entry for one claim, `[]` for none.
-   * Each carries `positions` (see {@link ClaimLocation}). Filled from
-   * `claim` / `identified_claims` / `locations` when the server sends those.
+   * Each carries `positions` (see {@link ClaimLocation}).
    */
   claims?: ExtractedClaim[];
   /** @deprecated Read `claims[0].claim`. The first claim, `""` for none. */
@@ -522,9 +520,10 @@ export interface AssessClaim {
    */
   suggested_rewrite?: string | null;
   /**
-   * Why this row has no verdict — set only when `verdict === "Error"`:
-   * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`.
-   * `null` on a verdict row. Error rows are free.
+   * Why this row has no verdict — set only when `status === "failed"`:
+   * `no_claim` | `framing_failed` | `upstream_unavailable` | `timeout`
+   * (`failure.code` says `no_checkable_claim` for the first).
+   * `null` on a verdict row. Failed rows are free.
    *
    * An OPEN set, deliberately typed `string` rather than a union: the API may
    * add a cause in a minor version, so branch on the ones you know and fall
@@ -565,24 +564,22 @@ export interface AssessClaim {
  * input — up to 20, at 1 credit each. A text that makes more claims than one
  * call checks gets its most check-worthy 20 checked and the rest listed in
  * `more_claims`, unchecked and free: send them back with `assess({ claims })`,
- * 20 a call, to check them. `error` is set when the input holds no checkable
+ * 20 a call, to check them. `failure` is set when the input holds no checkable
  * claim.
  *
  * List form (`claims`): exactly one entry per item sent, in the order
  * sent. An item that could not be given a verdict is still in position,
- * with `verdict: "Error"` and `error_code` / `hint` saying why; `error`
- * is `null`.
+ * with `status: "failed"` and a `failure` (`code`, `hint`) saying why; the
+ * body's `failure` is `null`.
  *
- * When `claims` is empty (single form), `error_code` is `'no_claim'`: the
- * input holds no checkable claim (a vague input is assessed on its most
- * likely reading instead). It is optional, so older servers that don't send
- * it degrade to the plain `error` message.
+ * When `claims` is empty (single form), `failure.code` is
+ * `'no_checkable_claim'`: the input holds no checkable claim (a vague input
+ * is assessed on its most likely reading instead).
  */
 export interface AssessResponse {
   /**
    * `"ok"` (at least one row has a verdict), `"error"`, or, when the input
-   * holds nothing checkable, `"no_checkable_claim"` (`"not_a_claim"` on the
-   * API's original response shape). Passed through as the server sent it;
+   * holds nothing checkable, `"no_checkable_claim"`. Passed through as the server sent it;
    * absent from servers older than the field.
    */
   status?: string;
@@ -667,19 +664,18 @@ export interface TaskStatus {
   claims?: CandidateClaim[];
   /**
    * @deprecated Always empty: its producer was retired and the API no longer
-   * sends it. Removal is planned for **2026-11-29**; read `claims` instead.
+   * sends it. Read `claims`.
    */
   candidates?: string[];
   /**
    * @deprecated Always empty: the API never raised `duplicate_found` for API
-   * tasks and no longer sends it. Removal is planned for **2026-11-29**.
+   * tasks and no longer sends it. No replacement.
    */
   similar_claims?: SimilarVerification[];
   /**
    * On a `failed` status, why: `code` (e.g. `no_checkable_claim`,
    * `research_empty`), `detail` (one sentence), `hint`, `failure_class`,
-   * `retryable`, `docs_url`. Built from the flat fields below when the
-   * server sends those.
+   * `retryable`, `docs_url`.
    */
   failure?: ReviewFailureBlock | null;
   /**
@@ -688,6 +684,10 @@ export interface TaskStatus {
    * failure_reason`.
    */
   error?: string;
+  /**
+   * @deprecated Read `failure.code`. The same cause in its original words
+   * (`not_a_claim` where `failure.code` says `no_checkable_claim`).
+   */
   failure_reason?: string;
   failure_detail?: string;
   /**
@@ -695,15 +695,22 @@ export interface TaskStatus {
    * `insufficient_evidence` | `invalid_input` | `cancelled` | `internal`) —
    * and the derived retry signal (true iff `upstream_unavailable`). Rows
    * predating 2026-08 omit both.
+   *
+   * @deprecated On a `failed` status read `failure.failure_class`.
    */
   failure_class?: FailureClass;
+  /** @deprecated On a `failed` status read `failure.retryable`. */
   retryable?: boolean;
-  /** On a `failed` status: the page explaining that `failure_class`. */
+  /**
+   * On a `failed` status: the page explaining that `failure_class`.
+   *
+   * @deprecated On a `failed` status read `failure.docs_url`.
+   */
   docs_url?: string;
   /**
    * One sentence on how to resolve the interrupt: what was unclear and that
-   * `select` resolves it. Sent on a `multi_claim` `needs_input` and on a
-   * `failed` status whose `failure_reason` is `not_a_claim`. Older servers
+   * `select` resolves it. Sent on a `multi_claim` `needs_input`; on a `failed`
+   * status it repeats `failure.hint` (read that one there). Older servers
    * omit it.
    */
   hint?: string;
@@ -1483,7 +1490,12 @@ export interface ReviewAssessment {
   more_claims?: string[];
   /** @deprecated Read `more_claims`; the same list. */
   identified_claims: string[];
-  /** One sentence on what to send next (a compound item); else `null`. */
+  /**
+   * One sentence on what to send next (a compound item); else `null`.
+   *
+   * @deprecated Read `failure.hint`. Computed from it when the server sends
+   * only `failure`; a row with a verdict then reads the compound-item sentence or `null`.
+   */
   hint: string | null;
   /**
    * With `suggestEdits: true`: the claim with its wrong part corrected, from
@@ -1530,7 +1542,7 @@ export interface ReviewVerification {
   suggested_rewrite: string | null;
   warnings: string[];
   created_at: string | null;
-  /** When the deep check finished; absent from the API's original response shape. */
+  /** When the deep check finished. */
   completed_at?: string | null;
   /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
   modified_at: string | null;

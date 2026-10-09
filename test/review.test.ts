@@ -243,7 +243,7 @@ describe("review()", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("review_in_flight reads retry_after_seconds when the header is missing", async () => {
+  it("review_in_flight reads retry_after when the header is missing", async () => {
     const { fetch } = makeFetch([
       { status: 429, body: fixture("error_review_in_flight_429.json") },
     ]);
@@ -654,9 +654,9 @@ describe("reviewAndWait()", () => {
     await pending;
   });
 
-  it("a 503 stating its wait only as retry_after_seconds is surfaced, not retried at once", async () => {
+  it("a 503 stating its wait only as retry_after is surfaced, not retried at once", async () => {
     const { fetch, calls } = makeFetch([
-      { status: 503, body: { detail: "Busy.", code: "capacity", retry_after_seconds: 90 } },
+      { status: 503, body: { detail: "Busy.", code: "capacity", retry_after: 90 } },
       { status: 202, body: ACCEPTED },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
@@ -748,10 +748,10 @@ describe("reviewAndWait()", () => {
     });
   }
 
-  it("a stated retry_after_seconds on a poll is capped at 60 s too", async () => {
+  it("a stated retry_after on a poll is capped at 60 s too", async () => {
     const { fetch, calls } = makeFetch([
       { status: 202, body: ACCEPTED },
-      { status: 429, body: { detail: "Slow.", code: "rate_limited", retry_after_seconds: 900 } },
+      { status: 429, body: { detail: "Slow.", code: "rate_limited", retry_after: 900 } },
       { body: COMPLETED },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });

@@ -1,6 +1,0 @@
-{
-  "status": 422,
-  "body": {
-    "detail": "Message too long (max 500 characters)."
-  }
-}

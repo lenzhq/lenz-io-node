@@ -1,6 +1,0 @@
-{
-  "status": 422,
-  "body": {
-    "detail": "focus must be at most 300 characters of plain text."
-  }
-}

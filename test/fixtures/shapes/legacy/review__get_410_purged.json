@@ -1,8 +1,0 @@
-{
-  "status": 410,
-  "body": {
-    "detail": "This review is no longer available: its account removes content after a set period.",
-    "code": "purged",
-    "purged_at": "2026-03-14T09:01:01.000456Z"
-  }
-}

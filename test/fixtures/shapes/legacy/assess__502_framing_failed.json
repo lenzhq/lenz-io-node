@@ -1,8 +1,0 @@
-{
-  "status": 502,
-  "body": {
-    "detail": "Framing failed",
-    "code": "framing_failed",
-    "error": "framing_failed"
-  }
-}

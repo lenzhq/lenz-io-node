@@ -23,7 +23,7 @@ import { LenzWebhookSignatureError } from "./errors.js";
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 import {
   normalizeOptions,
-  normalizeTaskStatus,
+  normalizeWebhookStatus,
   normalizeVerification,
   webhookResultDefaults,
 } from "./compat.js";
@@ -126,6 +126,7 @@ interface VerificationEventBody {
 
 export interface VerificationCompleted extends WebhookEventBase, VerificationEventBody {
   event: "verification.completed";
+  /** @deprecated Read `verification.result`. */
   result: Record<string, unknown>;
 }
 
@@ -138,9 +139,17 @@ export interface VerificationFailed extends WebhookEventBase, VerificationEventB
   error: string;
   /** Why it failed: `code`, `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. */
   failure?: ReviewFailureBlock | null;
-  /** WHY it failed — the closed `FailureClass` set; "" when an older server omits it. */
+  /**
+   * WHY it failed — the closed `FailureClass` set; "" when an older server omits it.
+   *
+   * @deprecated Read `failure.failure_class`.
+   */
   failureClass: FailureClass;
-  /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
+  /**
+   * true iff `upstream_unavailable` — resubmit the same claim after a short wait.
+   *
+   * @deprecated Read `failure.retryable`.
+   */
   retryable: boolean | null;
 }
 
@@ -260,10 +269,10 @@ function asObject(v: unknown): Record<string, unknown> | null {
  */
 function verificationBody(event: string, payload: Record<string, unknown>): TaskStatus | undefined {
   const nested = asObject(payload["verification"]);
-  if (nested) return normalizeTaskStatus(nested) as TaskStatus;
+  if (nested) return normalizeWebhookStatus(nested) as TaskStatus;
   const taskId = payload["task_id"];
   if (event === "verification.completed") {
-    return normalizeTaskStatus({
+    return normalizeWebhookStatus({
       status: "completed",
       task_id: taskId,
       result: payload["result"],
@@ -276,7 +285,7 @@ function verificationBody(event: string, payload: Record<string, unknown>): Task
     for (const key of ["failure_class", "retryable"]) {
       if (payload[key] !== undefined) flat[key] = payload[key];
     }
-    const status = normalizeTaskStatus(flat) as Record<string, unknown>;
+    const status = normalizeWebhookStatus(flat) as Record<string, unknown>;
     // `error` here was never a sentence: drop the copy made from it.
     const failure = asObject(status["failure"]);
     if (failure) status["failure"] = { ...failure, detail: null };
@@ -285,7 +294,7 @@ function verificationBody(event: string, payload: Record<string, unknown>): Task
   }
   if (event === "verification.needs_input") {
     const ni = asObject(payload["needs_input"]) ?? {};
-    return normalizeTaskStatus({ status: "needs_input", task_id: taskId, ...ni }) as TaskStatus;
+    return normalizeWebhookStatus({ status: "needs_input", task_id: taskId, ...ni }) as TaskStatus;
   }
   return undefined;
 }

@@ -1,6 +1,0 @@
-{
-  "status": 422,
-  "body": {
-    "detail": "Message cannot be empty."
-  }
-}

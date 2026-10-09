@@ -1,9 +1,0 @@
-{
-  "status": 200,
-  "body": {
-    "messages": [],
-    "exchanges_used": 0,
-    "exchange_limit": 100,
-    "can_send": true
-  }
-}

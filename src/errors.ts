@@ -17,7 +17,6 @@
  *     Request ID: {id}
  */
 
-import { legacyErrorBody, type RequestContext } from "./compat.js";
 import type { Citecheck, ReviewFull } from "./types.js";
 
 export interface LenzErrorContext {
@@ -136,7 +135,7 @@ export class LenzQuotaExceededError extends LenzError {
   private static warnedCreditsRemaining = false;
 
   /**
-   * @deprecated Use {@link remaining}. Removed in 3.0.
+   * @deprecated Use {@link remaining}. Removed in a future major release.
    *
    * Reports `0` when the balance is unknown — exactly the ambiguity
    * `remaining` exists to fix.
@@ -173,7 +172,7 @@ export class LenzQuotaExceededError extends LenzError {
     LenzQuotaExceededError.warnedCreditsRemaining = true;
     // eslint-disable-next-line no-console
     console.warn(
-      "[lenz-io] creditsRemaining is deprecated and will be removed in 3.0; " +
+      "[lenz-io] creditsRemaining is deprecated and will be removed in a future major release; " +
         "use `remaining`, which is null when the server didn't report a " +
         "balance (creditsRemaining reports that as 0). It is not the " +
         "server's `credits_remaining` field — that pool balance is " +
@@ -198,7 +197,11 @@ export class LenzRateLimitError extends LenzError {
   retryAfter = 0;
   /** The cap that was hit, when the server states it. */
   limit: number | null = null;
-  /** The body's raw echo of the same wait. */
+  /**
+   * The daily `/extract` limit's wait in seconds; `null` on any other 429.
+   *
+   * @deprecated Read `retryAfter`, which carries the same wait.
+   */
   resetInSeconds: number | null = null;
   /**
    * Where the cap lifts. The server sends this on 429 as well as 402,
@@ -349,6 +352,7 @@ export class CitecheckTimeoutError extends LenzTimeoutError {
  */
 export class CitecheckFailedError extends LenzPipelineError {
   citecheckId: string;
+  /** @deprecated Read `citecheck.failure.code`. */
   errorCode: string;
   citecheck: Citecheck;
 
@@ -389,6 +393,7 @@ export class CitecheckFailedError extends LenzPipelineError {
  */
 export class ReviewFailedError extends LenzPipelineError {
   reviewId: string;
+  /** @deprecated Read `review.failure.code` (which says `no_checkable_claim` where this says `no_claim`). */
   errorCode: string;
   review: ReviewFull;
 
@@ -539,11 +544,6 @@ function optString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** An error body in the API's newer shape: it links `docs_url`, never `doc_url`. */
-function isNewErrorShape(parsed: Record<string, unknown>): boolean {
-  return "docs_url" in parsed && !("doc_url" in parsed);
-}
-
 function parseBody(raw: string | undefined | null): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -560,25 +560,15 @@ function getHeader(headers: Record<string, string>, name: string): string {
 }
 
 /**
- * The typed error for an HTTP error response.
- *
- * `request` names the call it answered. With it, a body in the API's newer
- * shape is read as the original one first ({@link legacyErrorBody}), so every
- * field of the error keeps its original value: `code` is `""` where the
- * original error had none, a schema error's `errors` are its field items,
- * `resetInSeconds` reads the daily limit's wait. `body` is always the body as
- * sent.
+ * The typed error for an HTTP error response, read from the API's
+ * `2026-10-11` error body. `body` is the body as sent.
  */
 export function mapResponseToError(
   statusCode: number,
   body: string | null | undefined,
   headers: Record<string, string> = {},
-  request?: RequestContext,
 ): LenzError {
-  const raw = parseBody(body);
-  const parsed = request
-    ? (legacyErrorBody(statusCode, raw, request) as Record<string, unknown>)
-    : raw;
+  const parsed = parseBody(body);
   const requestId = getHeader(headers, "X-Request-ID");
 
   const codeForClass = typeof parsed["code"] === "string" ? (parsed["code"] as string) : "";
@@ -625,7 +615,7 @@ export function mapResponseToError(
     requestId,
     statusCode,
     code,
-    body: raw,
+    body: parsed,
   });
 
   // Per-class enrichment
@@ -641,20 +631,14 @@ export function mapResponseToError(
       err.status = optString(parsed["status"]);
       err.fix = err.hint || "Wait for the run with client.wait(taskId), then read its result.";
     } else {
-      // The newer response shape nests these in `failure` (its `code` says
-      // `no_checkable_claim` where the original says `not_a_claim`). Read
-      // there only when the body is in that shape; the original's flat fields
-      // are read exactly as before.
+      // The failure is nested in `failure`. Its `code` says
+      // `no_checkable_claim`; `failureReason` keeps the 2.x word.
       const nested = parsed["failure"];
-      const failure =
-        nested &&
-        typeof nested === "object" &&
-        !Array.isArray(nested) &&
-        !("failure_reason" in parsed)
+      const source: Record<string, unknown> =
+        nested && typeof nested === "object" && !Array.isArray(nested)
           ? (nested as Record<string, unknown>)
-          : null;
-      const source = failure ?? parsed;
-      const reason = failure ? optString(failure["code"]) : optString(parsed["failure_reason"]);
+          : {};
+      const reason = optString(source["code"]);
       err.failureReason = reason === "no_checkable_claim" ? "not_a_claim" : reason;
       err.failureClass = optString(source["failure_class"]);
       // Only a real boolean is a retry signal, as in the wait path.
@@ -678,19 +662,17 @@ export function mapResponseToError(
   }
 
   if (err instanceof LenzAPIError) {
-    // Body `retry_after` first (both 503 shapes carry it), header as the
+    // Body `retry_after` first, header as the
     // fallback for any proxy that strips the body.
     err.retryAfter =
-      optNumber(parsed["retry_after"]) ??
-      optNumber(parsed["retry_after_seconds"]) ??
-      optNumber(getHeader(headers, "Retry-After"));
+      optNumber(parsed["retry_after"]) ?? optNumber(getHeader(headers, "Retry-After"));
   } else if (err instanceof LenzQuotaExceededError) {
     const upgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof upgradeUrl === "string" ? upgradeUrl : "";
     err.remaining = optNumber(parsed["remaining"]);
     err.requested = optNumber(parsed["requested"]);
-    if (err.remaining === null && isNewErrorShape(parsed)) {
-      // The newer shape may send only the pool: the capability's unit is the
+    if (err.remaining === null) {
+      // The body may send only the pool: the capability's unit is the
       // price of one of the units requested.
       const balance = optNumber(parsed["credits_remaining"]);
       const cost = optNumber(parsed["cost"]);
@@ -705,38 +687,20 @@ export function mapResponseToError(
     const resetsAt = parsed["resets_at"];
     err.resetsAt = typeof resetsAt === "string" && resetsAt ? resetsAt : null;
   } else if (err instanceof LenzValidationError) {
-    if (Array.isArray(parsed["detail"])) {
-      err.errors = parsed["detail"] as Array<Record<string, unknown>>;
-    } else if (Array.isArray(parsed["errors"])) {
+    if (Array.isArray(parsed["errors"])) {
       err.errors = parsed["errors"] as Array<Record<string, unknown>>;
     }
   } else if (err instanceof LenzRateLimitError) {
     err.limit = optNumber(parsed["limit"]);
-    // The newer response shape names the wait `retry_after` only. The
-    // in-flight 429s never carried `reset_in_seconds`, so they keep `null`.
-    err.resetInSeconds = optNumber(parsed["reset_in_seconds"]);
-    // The newer response shape (it links `docs_url`, never `doc_url`) names
-    // the daily cap's wait `retry_after`. A 429 that never carried
-    // `reset_in_seconds` (the in-flight ones, no doc link) keeps `null`.
-    if (
-      err.resetInSeconds === null &&
-      isNewErrorShape(parsed) &&
-      !("retry_after_seconds" in parsed)
-    ) {
-      err.resetInSeconds = optNumber(parsed["retry_after"]);
-    }
+    // The daily limit's wait is `retry_after`; the in-flight 429s never
+    // carried `resetInSeconds`, so they keep `null`.
+    err.resetInSeconds =
+      codeForClass === "extract_daily_limit" ? optNumber(parsed["retry_after"]) : null;
     const rlUpgradeUrl = parsed["upgrade_url"];
     err.upgradeUrl = typeof rlUpgradeUrl === "string" ? rlUpgradeUrl : "";
-    // Header first, then the body. `reset_in_seconds` is what the server
-    // actually sends; `retry_after` was an SDK-side invention the server has
-    // never emitted — kept last purely as a defensive read.
-    // `retry_after_seconds` is the /review in-flight 429's name for it.
+    // The header first, then the body's `retry_after`.
     err.retryAfter =
-      optNumber(getHeader(headers, "Retry-After")) ??
-      optNumber(parsed["reset_in_seconds"]) ??
-      optNumber(parsed["retry_after_seconds"]) ??
-      optNumber(parsed["retry_after"]) ??
-      0;
+      optNumber(getHeader(headers, "Retry-After")) ?? optNumber(parsed["retry_after"]) ?? 0;
   }
 
   return err;
