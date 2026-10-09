@@ -838,6 +838,30 @@ Supported codes: `en` (default), `es`, `de`, `fr`, `it`, `pt`, `nl`, `sv`, `da`,
 `no`, `fi`, `bg`. To ask for another language, contact us at
 https://lenz.io/contact.
 
+### Answer in the language of the text
+
+Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait` or `ask.send` and
+the answer comes back in the language of the text you submitted. A concrete code
+such as `"es"` always wins, and omitting `language` still means English. On
+`ask.send`, `"auto"` uses the language of the claim being discussed. `extract`,
+`verifyBatch`, `citecheck` and `review` do not accept `"auto"` (the API answers
+422, as for any unsupported language).
+
+```ts
+const v = await client.verifyAndWait({
+  claim: "Die Erde ist flach",
+  language: "auto", // answer in German
+});
+console.log(v.language);
+// de
+```
+
+On `assess` with a `claims` list, one language is chosen for the whole request:
+the language most items agree on, else English. For a list in mixed languages,
+name a code instead.
+
+A runnable version is in [`examples/core/verify-auto.ts`](examples/core/verify-auto.ts).
+
 Per-item override on `verifyBatch`:
 
 ```ts

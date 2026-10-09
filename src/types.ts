@@ -1011,9 +1011,10 @@ export interface VerifyInput {
   visibility?: "private" | "unlisted";
   /**
    * Output language (ISO 639-1). Omit for English (default). Supported:
-   * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Omitted from the
-   * request body when empty so existing English callers keep
-   * byte-identical wire format.
+   * en, es, de, fr, it, pt, nl, sv, da, no, fi, bg. Or `"auto"`: the answer
+   * comes back in the language of the submitted text. A concrete code always
+   * wins. Omitted from the request body when empty so existing English
+   * callers keep byte-identical wire format.
    */
   language?: string;
   /**
@@ -1056,6 +1057,7 @@ export interface VerifyBatchItem {
   claim?: string | null;
   /** Accepted alias for `claim`; `claim` wins if both are given. */
   text?: string | null;
+  /** Output language (ISO 639-1). `"auto"` is not accepted. */
   language?: string;
   source_url?: string;
   webhook_url?: string;
@@ -1070,7 +1072,7 @@ export interface VerifyBatchInput {
   claims: VerifyBatchItem[];
   /** Batch-wide webhook URL; per-item value (if set) overrides. */
   webhookUrl?: string;
-  /** Batch-wide output-language default; per-item `language` overrides. */
+  /** Batch-wide output-language default; per-item `language` overrides. `"auto"` is not accepted. */
   language?: string;
   /** Batch-wide "private" | "unlisted" default; per-item `visibility` overrides. */
   visibility?: "private" | "unlisted";
@@ -1081,7 +1083,7 @@ export interface VerifyBatchInput {
 
 export interface ExtractInput {
   text: string;
-  /** Output language (ISO 639-1). See `VerifyInput.language`. */
+  /** Output language (ISO 639-1). `"auto"` is not accepted here. */
   language?: string;
   /**
    * Narrows the result to the claims this describes, e.g.
@@ -1151,7 +1153,12 @@ export interface AssessInput {
    * in-position `verdict: "Error"` row (free) with `error_code` and `hint`.
    */
   claims?: string[];
-  /** Output language (ISO 639-1). See `VerifyInput.language`. */
+  /**
+   * Output language (ISO 639-1), or `"auto"` for the language of the
+   * submitted text. See `VerifyInput.language`. With a `claims` list,
+   * `"auto"` chooses one language for the whole request (the language most
+   * items agree on, else English); name a code for a list in mixed languages.
+   */
   language?: string;
   /**
    * Also write `suggested_rewrite` on each row: the claim with its wrong part
@@ -1186,7 +1193,8 @@ export interface AskSendInput {
   message: string;
   /**
    * Optional language override (ISO 639-1). When omitted, the server
-   * uses the claim's stored language as the default.
+   * uses the claim's stored language as the default. `"auto"` answers in
+   * the language of the claim being discussed.
    */
   language?: string;
   /**
@@ -1913,7 +1921,7 @@ export interface ReviewInput {
    * Sent as `escalate.suggest_edits` only when `true`.
    */
   suggestEdits?: boolean;
-  /** Output language of every claim and rewrite (ISO 639-1). Omit for English. */
+  /** Output language of every claim and rewrite (ISO 639-1). Omit for English. `"auto"` is not accepted. */
   language?: string;
   /**
    * Where `review.completed` / `review.failed` go. Omitted or `null`: the
@@ -1971,7 +1979,8 @@ export interface CitecheckInput {
   /** With `text`: check its first N citations (1-20). Default 20. */
   maxCitations?: number;
   /**
-   * The language Lenz writes the reasoning in. English when omitted. Hints
+   * The language Lenz writes the reasoning in. English when omitted; `"auto"`
+   * is not accepted. Hints
    * are always in English, and the passage and the quote stay verbatim in the
    * page's language.
    */
