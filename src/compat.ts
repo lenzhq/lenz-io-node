@@ -538,7 +538,10 @@ export function legacyErrorBody(status: number, body: unknown, req: RequestConte
   const errors = Array.isArray(out["errors"]) ? (out["errors"] as unknown[]) : null;
   const path = req.path.split("?")[0] ?? "";
   // The three cancel calls are new in 3.0: there is no 2.x reading of their
-  // errors, so the body is read as sent (a 404 keeps its `not_found`).
+  // errors, so the body is read as sent (a 404 keeps its `not_found`). On
+  // purpose this also keeps a 401's `not_authenticated` code, which the
+  // /review family drops, and skips `legacyWaitAndLink`: no 2.x error has
+  // names to keep for these calls.
   if (req.method === "POST" && /^\/(verify|reviews|citechecks)\/[^/]+\/cancel$/.test(path)) {
     return out;
   }

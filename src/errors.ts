@@ -637,6 +637,10 @@ const GONE_410: StatusEntry = {
 const GONE_FIX =
   "Its account's retention period removed it. A certificate issued for it is still available.";
 
+/** `POST /verify/{task_id}/cancel` on a review's deep check: retrying cannot succeed. */
+const USE_REVIEW_CANCEL_FIX =
+  "Cancel the review that started this task instead: client.cancelReview(reviewId).";
+
 const FIX_HINTS: Record<number, string> = {
   401: "Your credential is missing, invalid or expired. Check the key you passed, or get a new one at https://lenz.io/api-credentials.",
   403: "This key doesn't have access to that resource.",
@@ -774,7 +778,10 @@ export function mapResponseToError(
     message: detail,
     cause: detail,
     fix:
-      FIX_HINTS[statusCode] ?? "Retry; if the error persists, file an issue with the Request ID.",
+      statusCode === 409 && code === "use_review_cancel"
+        ? USE_REVIEW_CANCEL_FIX
+        : (FIX_HINTS[statusCode] ??
+          "Retry; if the error persists, file an issue with the Request ID."),
     docUrl: entry.docUrl,
     requestId,
     statusCode,

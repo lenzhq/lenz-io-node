@@ -456,6 +456,32 @@ function isRateLimit(exc: unknown): boolean {
   return exc instanceof LenzError && exc.statusCode === 429;
 }
 
+/**
+ * An id as it goes into a request path, or `null` when it cannot name one
+ * thing: empty, `.` or `..` (a path segment that climbs or stays put), or text
+ * `encodeURIComponent` refuses (a lone surrogate). Any other id is encoded
+ * exactly as before.
+ */
+function pathId(id: string): string | null {
+  if (!id || id === "." || id === "..") return null;
+  try {
+    return encodeURIComponent(id);
+  } catch {
+    return null;
+  }
+}
+
+/** `pathId`, or the local error a call throws instead of sending a request. */
+function requirePathId(method: string, field: string, id: string): string {
+  const encoded = pathId(id);
+  if (encoded !== null) return encoded;
+  throw new Error(
+    id
+      ? `${method}() was given an invalid ${field}.`
+      : `${method}() requires a non-empty ${field}.`,
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((res) => setTimeout(res, ms));
 }
@@ -1207,26 +1233,45 @@ export class Lenz {
   }
 
   /**
-   * Stop a verification. Nothing is saved or charged for a run it stops.
+   * Stop a verification. A cancelled run is not charged and saves nothing.
    *
-   * Resolves for every run of yours, whatever its state: `cancelled: true`
-   * when this call stopped it; `cancelled: false` when it had already ended
-   * (or been stopped), with its final `status`. Cancelling again is safe, so
-   * the call sends no Idempotency-Key and is retried like any other request.
+   * Answers for every run of yours, whatever its state. `cancelled: true`
+   * means the run is cancelled, by this call or an earlier one (so a repeat,
+   * or a retry after a lost response, answers `true` again). `cancelled:
+   * false` means it was not cancelled and nothing changed: `status` is the
+   * run's status, normally `completed` (the verification exists and was
+   * charged as usual) or `failed`. A task that `select` already resolved
+   * answers `cancelled: false` with `needs_input`; cancel the task ids
+   * `select` returned. Cancelling is safe to repeat, so the call sends no
+   * Idempotency-Key and is retried like any other request.
    *
-   * Throws {@link LenzNotFoundError} (404) for a task that does not exist or
-   * is not yours. A review's deep check cannot be cancelled on its own: the
-   * API answers 409 with code `use_review_cancel` (a {@link LenzError}); stop
-   * the review with {@link Lenz.cancelReview} instead.
+   * Throws {@link LenzNotFoundError} (404) for a task that does not exist, is
+   * not yours, or was started on the website. A review's deep check cannot be
+   * cancelled on its own: the API answers 409 with code `use_review_cancel`
+   * (a {@link LenzError}, not retryable); stop the review with
+   * {@link Lenz.cancelReview} instead. Throws {@link LenzAPIError} when a 200
+   * carries no cancel result.
    */
   async cancel(taskId: string): Promise<CancelResult> {
-    if (!taskId) {
-      throw new Error("cancel() requires a non-empty task_id.");
+    const id = requirePathId("cancel", "task_id", taskId);
+    const path = `/verify/${id}/cancel`;
+    const body = await this.request<unknown>({ method: "POST", path });
+    const result = body as Partial<CancelResult> | null;
+    if (
+      !result ||
+      typeof result !== "object" ||
+      Array.isArray(result) ||
+      typeof result.task_id !== "string" ||
+      typeof result.cancelled !== "boolean"
+    ) {
+      throw new LenzAPIError({
+        message: `POST ${path} answered without a cancel result.`,
+        cause: "The response carries no task_id and cancelled.",
+        fix: "Read the run with getStatus(taskId); contact support with the request id if this persists.",
+        docUrl: "https://lenz.io/docs/errors",
+      });
     }
-    return this.request<CancelResult>({
-      method: "POST",
-      path: `/verify/${encodeURIComponent(taskId)}/cancel`,
-    });
+    return body as CancelResult;
   }
 
   async usage(): Promise<Usage> {
@@ -1401,12 +1446,10 @@ export class Lenz {
     citecheckId: string,
     transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
   ): Promise<unknown> {
-    if (!citecheckId) {
-      throw new Error("getCitecheck() requires a non-empty citecheck_id.");
-    }
+    const id = requirePathId("getCitecheck", "citecheck_id", citecheckId);
     return this.request<unknown>({
       method: "GET",
-      path: `/citechecks/${encodeURIComponent(citecheckId)}`,
+      path: `/citechecks/${id}`,
       ...transport,
     });
   }
@@ -1418,15 +1461,14 @@ export class Lenz {
    * safe, so the call sends no Idempotency-Key.
    *
    * Throws {@link LenzNotFoundError} (404) for a check that does not exist
-   * or is not yours.
+   * or is not yours, and {@link LenzGoneError} (HTTP 410) once the account's
+   * retention period has removed it.
    */
   async cancelCitecheck(citecheckId: string): Promise<Citecheck> {
-    if (!citecheckId) {
-      throw new Error("cancelCitecheck() requires a non-empty citecheck_id.");
-    }
+    const id = requirePathId("cancelCitecheck", "citecheck_id", citecheckId);
     const body = await this.request<unknown>({
       method: "POST",
-      path: `/citechecks/${encodeURIComponent(citecheckId)}/cancel`,
+      path: `/citechecks/${id}/cancel`,
     });
     return withCitecheckDefaults(body) as Citecheck;
   }
@@ -1482,12 +1524,10 @@ export class Lenz {
     opts: GetReviewOptions,
     transport: Pick<RequestOptions, "timeoutMs" | "maxRetries" | "deadlineAt"> = {},
   ): Promise<ReviewFull | ReviewIssues> {
-    if (!reviewId) {
-      throw new Error("getReview() requires a non-empty review_id.");
-    }
+    const id = requirePathId("getReview", "review_id", reviewId);
     const body = await this.request<ReviewFull | ReviewIssues>({
       method: "GET",
-      path: `/reviews/${encodeURIComponent(reviewId)}`,
+      path: `/reviews/${id}`,
       query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
       ...transport,
     });
@@ -1502,15 +1542,14 @@ export class Lenz {
    * Idempotency-Key.
    *
    * Throws {@link LenzNotFoundError} (404) for a review that does not exist
-   * or is not yours.
+   * or is not yours, and {@link LenzGoneError} (HTTP 410) when the review was
+   * purged.
    */
   async cancelReview(reviewId: string): Promise<ReviewFull> {
-    if (!reviewId) {
-      throw new Error("cancelReview() requires a non-empty review_id.");
-    }
+    const id = requirePathId("cancelReview", "review_id", reviewId);
     const body = await this.request<ReviewFull>({
       method: "POST",
-      path: `/reviews/${encodeURIComponent(reviewId)}/cancel`,
+      path: `/reviews/${id}/cancel`,
     });
     return withReviewDefaults(body) as ReviewFull;
   }

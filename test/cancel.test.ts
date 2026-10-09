@@ -16,6 +16,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   Lenz,
   LenzApiVersionError,
+  LenzAPIError,
   LenzAuthError,
   LenzError,
   LenzNotFoundError,
@@ -139,6 +140,9 @@ describe("cancel(taskId)", () => {
     expect(err.code).toBe("use_review_cancel");
     expect(err.message).toBe("This task is a review's deep check. Cancel the review to cancel it.");
     expect(err.retryable).toBe(false);
+    expect(err.fix).toBe(
+      "Cancel the review that started this task instead: client.cancelReview(reviewId).",
+    );
   });
 
   it("a 409 idempotency_conflict is not retried either: this call has no key", async () => {
@@ -335,4 +339,61 @@ describe("cancelCitecheck(citecheckId)", () => {
       expect(calls).toHaveLength(1);
     },
   );
+});
+
+describe("ids that cannot name one run", () => {
+  const CALLS: Array<[string, (c: Lenz, id: string) => Promise<unknown>, string]> = [
+    ["cancel", (c, id) => c.cancel(id), "task_id"],
+    ["cancelReview", (c, id) => c.cancelReview(id), "review_id"],
+    ["cancelCitecheck", (c, id) => c.cancelCitecheck(id), "citecheck_id"],
+    ["getReview", (c, id) => c.getReview(id), "review_id"],
+    ["getCitecheck", (c, id) => c.getCitecheck(id), "citecheck_id"],
+  ];
+
+  it.each(CALLS)(
+    "%s refuses '.', '..' and a lone surrogate before any request",
+    async (name, call, field) => {
+      const { fetch, calls } = serving(reply("verify__cancel_200_cancelled"));
+      const client = make(fetch);
+      for (const id of [".", "..", "ab\ud800"]) {
+        const err = (await call(client, id).catch((e: unknown) => e)) as Error;
+        expect(err).toBeInstanceOf(Error);
+        expect(err).not.toBeInstanceOf(URIError);
+        expect(err).not.toBeInstanceOf(LenzError);
+        expect(err.message).toBe(`${name}() was given an invalid ${field}.`);
+      }
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it("an id with dots inside, or a full stop, is still sent as it was", async () => {
+    const { fetch, calls } = serving(reply("verify__cancel_200_cancelled"));
+    await make(fetch).cancel("a.b");
+    await make(fetch).cancel("...");
+    expect(calls[0]!.url.pathname).toBe("/api/v1/verify/a.b/cancel");
+    expect(calls[1]!.url.pathname).toBe("/api/v1/verify/.../cancel");
+  });
+});
+
+describe("a 200 that is not a cancel result", () => {
+  const empty = () => new Response("", { status: 200, headers: { "content-length": "0" } });
+  const noContent = () => new Response(null, { status: 204 });
+  const noTaskId = () =>
+    new Response(JSON.stringify({ cancelled: true, status: "cancelled" }), { status: 200 });
+  const notAnObject = () => new Response("[]", { status: 200 });
+
+  it.each([
+    ["an empty body", empty],
+    ["a 204", noContent],
+    ["a body without task_id", noTaskId],
+    ["a list", notAnObject],
+  ])("cancel throws LenzAPIError for %s", async (_label, answer) => {
+    const { fetch, calls } = serving(answer);
+    const err = (await make(fetch)
+      .cancel("t1")
+      .catch((e: unknown) => e)) as LenzAPIError;
+    expect(err).toBeInstanceOf(LenzAPIError);
+    expect(err.message).toBe("POST /verify/t1/cancel answered without a cancel result.");
+    expect(calls).toHaveLength(1);
+  });
 });

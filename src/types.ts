@@ -649,10 +649,12 @@ export interface Progress {
 }
 
 /**
- * What `cancel(taskId)` returns. `cancelled` is `true` when this call stopped
- * the run, `false` when it had already ended (or been stopped) and nothing
- * changed; `status` is the run's status afterwards, so a `false` carries the
- * final one (`completed`, `failed`, `cancelled`).
+ * What `cancel(taskId)` returns. `cancelled: true` means the run is cancelled,
+ * by this call or an earlier one (a repeat answers `true` again), with
+ * `status: "cancelled"`. `cancelled: false` means it was not cancelled and
+ * nothing changed: `status` is the run's status, normally `completed` or
+ * `failed`. A task that `select` already resolved answers `cancelled: false`
+ * with `needs_input`; cancel the task ids `select` returned.
  */
 export interface CancelResult {
   task_id: string;

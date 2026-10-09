@@ -40,24 +40,27 @@ maybe("smoke", () => {
     expect(v.verdict).toBeTruthy();
   }, 160_000);
 
-  // Stopping a run. The same cheap claim at low depth, cancelled at once: the
-  // run is either stopped (`cancelled: true`; nothing is saved or charged) or
-  // it had already finished, e.g. an answer the verdict cache served
-  // (`cancelled: false` with the final status). Both are a pass, so the step
-  // does not depend on how fast the run is.
+  // Stopping a run. The same cheap claim at low depth, cancelled at once. If
+  // the call cancelled it (`cancelled: true`), cancelling again answers true
+  // again and a wait ends on the cancelled status. Otherwise the run had
+  // already finished (e.g. an answer the verdict cache served): `completed` or
+  // `failed`, never `cancelled`. Either way is a pass, so the step does not
+  // depend on how fast the run is.
   it("cancel stops a run, or reports the status it had already reached", async () => {
     const client = makeClient();
     const accepted = await client.verify({ claim: "Sharks don't get cancer", depth: "low" });
     const out = await client.cancel(accepted.task_id);
     expect(out.task_id).toBe(accepted.task_id);
-    expect(typeof out.cancelled).toBe("boolean");
     if (out.cancelled) {
       expect(out.status).toBe("cancelled");
+      const again = await client.cancel(accepted.task_id);
+      expect(again).toEqual({ task_id: accepted.task_id, cancelled: true, status: "cancelled" });
       const err = await client.wait(accepted.task_id, { timeoutMs: 30_000 }).catch((e) => e);
       expect(err).toBeInstanceOf(LenzPipelineError);
       expect((err as LenzPipelineError).failureClass).toBe("cancelled");
     } else {
-      expect(["completed", "failed", "cancelled"]).toContain(out.status);
+      expect(out.cancelled).toBe(false);
+      expect(["completed", "failed"]).toContain(out.status);
     }
   }, 60_000);
 
