@@ -175,11 +175,6 @@ const POLL_HINT_MAX_S = 30;
 // than this, whatever the body says.
 const REVIEW_POLL_FLOOR_S = 5;
 const REVIEW_DEFAULT_TIMEOUT_MS = 600_000;
-/**
- * The least time a verification poll is given, even at its wait's deadline,
- * so the last poll can still answer. Each poll ends by the deadline plus this.
- */
-const POLL_REQUEST_FLOOR_MS = 5_000;
 
 /**
  * 429 codes that throw at once instead of sleeping the stated wait.
@@ -1012,8 +1007,19 @@ export class Lenz {
    * account's retention period has removed the verification. A running task
    * never answers 410.
    */
-  async getStatus(taskId: string): Promise<TaskStatus> {
-    return this._getStatus(taskId);
+  async getStatus(
+    taskId: string,
+    /**
+     * Used by the waits, which poll through this method: the request's
+     * per-attempt timeout and absolute `Date.now()` deadline. An override
+     * may ignore it; the wait still ends at its deadline.
+     */
+    budget?: { timeoutMs?: number; deadlineAt?: number },
+  ): Promise<TaskStatus> {
+    return this._getStatus(taskId, {
+      ...(budget?.timeoutMs !== undefined ? { timeoutMs: budget.timeoutMs } : {}),
+      ...(budget?.deadlineAt !== undefined ? { deadlineAt: budget.deadlineAt } : {}),
+    });
   }
 
   private async _getStatus(
@@ -1444,9 +1450,12 @@ export class Lenz {
    * on a per-item outcome — a claim that fails, pauses, or times out becomes a
    * `BatchItemResult` with the matching `status`. A claim removed under the
    * account's retention period reads `"failed"` with no `status_detail`, and
-   * so does a claim whose poll answered an error waiting will not change
-   * (401, 403, 404); the other claims keep being polled. (Transport/auth
-   * errors on the initial submit still throw.)
+   * so does a claim whose poll answered an error waiting will not change for
+   * it (404, or an answer in another API version); the other claims keep
+   * being polled. A 401 or 403 is about the key, not one claim: it throws
+   * {@link LenzAuthError} from the wait, as do transport/auth errors on the
+   * initial submit. Polls go through `getStatus` and none runs past the
+   * deadline.
    */
   async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
     const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
@@ -1524,19 +1533,19 @@ export class Lenz {
 
   /**
    * Round-robin poll `taskIds` until each reaches a terminal state or the
-   * deadline elapses. Returns `{terminal, timedOut, gone}`; a timed-out task
-   * has no `TaskStatus` (`"timeout"` is client-side, never a wire status), and
-   * a task whose poll threw {@link LenzGoneError} (removed under its account's
-   * retention period) is in `gone`, final and never polled again. Any other
-   * poll error keeps the task pending.
+   * deadline elapses. Returns `{terminal, timedOut, gone, permanent}`; a
+   * timed-out task has no `TaskStatus` (`"timeout"` is client-side, never a
+   * wire status), a task whose poll threw {@link LenzGoneError} (removed under
+   * its account's retention period) is in `gone`, and one whose poll answered
+   * 404 or another API version is in `permanent`: final, never polled again.
+   * A 401/403 throws (it is the key's, not the task's). Any other poll error
+   * keeps the task pending.
    *
-   * Each round polls every still-pending id once (via `Promise.allSettled`, so
-   * one poll's transport failure doesn't abort the batch — that id stays
-   * pending and retries next round) BEFORE the deadline check, preserving the
-   * legacy `verifyAndWait` behavior of polling once more after sleeping the
-   * remaining time. Timeout is therefore approximate. Backoff reuses the
-   * existing 2/4/8/8…ms sequence; the 10s cap is currently unreachable and kept
-   * only to preserve identical timing.
+   * Each round polls every still-pending id once through `getStatus` (via
+   * `Promise.allSettled`, so one poll's transport failure doesn't abort the
+   * batch — that id stays pending and retries next round). Every poll ends by
+   * the deadline; once the deadline is spent no poll is made and the pending
+   * ids time out. Backoff reuses the existing 2/4/8/8…ms sequence.
    */
   private async _pollToTerminal(
     taskIds: string[],
@@ -1559,15 +1568,22 @@ export class Lenz {
     const permanent = new Map<string, LenzError>();
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
-    while (pending.length > 0) {
-      // Every poll request is bounded by the deadline: its attempts (and any
-      // retry inside it) end by then, with a short floor so the poll made
-      // right at the deadline still gets an answer.
-      const transport = {
-        timeoutMs: Math.min(this.timeoutMs, Math.max(deadline - Date.now(), POLL_REQUEST_FLOOR_MS)),
-        deadlineAt: Math.max(deadline, Date.now() + POLL_REQUEST_FLOOR_MS),
-      };
-      const settled = await Promise.allSettled(pending.map((id) => this._getStatus(id, transport)));
+    for (let round = 0; pending.length > 0; round++) {
+      const remaining = deadline - Date.now();
+      // The budget is spent: no poll past the deadline. Only a wait given no
+      // budget at all (timeoutMs <= 0) still looks once, bounded by the
+      // client's own timeout, as 2.x did.
+      if (remaining <= 0 && (round > 0 || timeoutMs > 0)) {
+        pending.forEach((id) => timedOut.add(id));
+        break;
+      }
+      const transport =
+        remaining > 0
+          ? { timeoutMs: Math.min(this.timeoutMs, remaining), deadlineAt: deadline }
+          : { timeoutMs: this.timeoutMs };
+      const settled = await Promise.allSettled(
+        pending.map((id) => this._pollThroughGetStatus(id, transport)),
+      );
       const stillPending: string[] = [];
       let serverHintMs: number | undefined;
       settled.forEach((res, i) => {
@@ -1598,10 +1614,15 @@ export class Lenz {
           }
         } else if (res.reason instanceof LenzGoneError) {
           gone.set(id, res.reason);
-        } else if (res.reason instanceof LenzApiVersionError) {
-          // Another API version answered: polling again reads the same.
+        } else if (res.reason instanceof LenzAuthError) {
+          // The key is refused: no item of this wait can be read with it.
           throw res.reason;
-        } else if (res.reason instanceof LenzAuthError || res.reason instanceof LenzNotFoundError) {
+        } else if (
+          res.reason instanceof LenzApiVersionError ||
+          res.reason instanceof LenzNotFoundError
+        ) {
+          // This task's answer, which polling again will not change: another
+          // API version, or no such task. Final for this task only.
           permanent.set(id, res.reason);
         } else {
           // Poll errored this round (after _request exhausted its retries) —
@@ -1611,19 +1632,51 @@ export class Lenz {
       });
       pending = stillPending;
       if (pending.length === 0) break;
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
+      const left = deadline - Date.now();
+      if (left <= 0) {
         pending.forEach((id) => timedOut.add(id));
         break;
       }
       await sleep(
         serverHintMs === undefined
-          ? pollSleepMs(backoffIdx, remaining)
-          : Math.min(serverHintMs, Math.max(0, remaining)),
+          ? pollSleepMs(backoffIdx, left)
+          : Math.min(serverHintMs, Math.max(0, left)),
       );
       backoffIdx += 1;
     }
     return { terminal, timedOut, gone, permanent };
+  }
+
+  /**
+   * One poll, made through the public `getStatus` (so a subclass's or a test
+   * double's override is honoured) with the wait's budget, and cut at the
+   * wait's deadline even when an override ignores that budget: a poll that
+   * has not answered by then counts as no answer.
+   */
+  private async _pollThroughGetStatus(
+    taskId: string,
+    budget: { timeoutMs: number; deadlineAt?: number },
+  ): Promise<TaskStatus> {
+    const poll = this.getStatus(taskId, budget);
+    const deadlineAt = budget.deadlineAt;
+    if (deadlineAt === undefined) return poll;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cutoff = new Promise<never>((_res, rej) => {
+      timer = setTimeout(
+        () =>
+          rej(
+            new LenzRequestTimeoutError({
+              message: `GET /verify/status/${taskId} did not answer by the wait's deadline`,
+            }),
+          ),
+        Math.max(0, deadlineAt - Date.now()),
+      );
+    });
+    try {
+      return await Promise.race([poll, cutoff]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

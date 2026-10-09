@@ -699,9 +699,13 @@ deadline while the job kept running on the server: read it later, do not
 resubmit it.
 
 `wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once when a poll
-answers an error waiting cannot change (401, 403, 404): `wait` throws it, and
-in a batch that claim reads `"failed"` while the others keep being polled. A
-5xx, a 429 or a network drop is polled through.
+answers an error waiting cannot change: `wait` throws it (401, 403, 404,
+`LenzApiVersionError`). In a batch, a 404 or an answer in another API version
+for one claim makes that claim read `"failed"` while the others keep being
+polled; a 401 or 403 is about the key, so `verifyBatchAndWait` throws it. A
+5xx, a 429 or a network drop is polled through. No poll runs past the wait's
+`timeoutMs`; once it is spent, the claims still running read `"timeout"`
+(`wait` throws `LenzTimeoutError`).
 
 A read of a verification removed under its account's retention period throws
 `LenzGoneError` (HTTP 410, `code` `"purged"`, with `purgedAt`), and `wait` /

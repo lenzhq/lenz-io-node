@@ -101,10 +101,18 @@ differently:
   that names the job is still returned as its receipt at once.
 - **`wait`, `verifyAndWait` and `verifyBatchAndWait` stop at once on an error
   waiting cannot change** (401, 403, 404, `LenzApiVersionError`): `wait`
-  throws it, where 2.x polled on to a `LenzTimeoutError` at the deadline; in
-  a batch that claim reads `"failed"` (no `status_detail`) and the others
-  keep being polled. A 5xx, a 429 and a network drop are polled through as
-  before, and every poll request now ends by the wait's deadline.
+  throws it, where 2.x polled on to a `LenzTimeoutError` at the deadline. In
+  a batch, a 404 or an answer in another API version for one claim makes
+  that claim read `"failed"` (no `status_detail`) and the others keep being
+  polled, while a 401 or 403 (the key's, not the claim's) throws
+  `LenzAuthError` from `verifyBatchAndWait`. A 5xx, a 429 and a network drop
+  are polled through as before.
+- **No poll runs past the wait's deadline**: each poll request is cut to the
+  time the wait has left, and once it is spent the wait stops polling (the
+  claims still running read `"timeout"`, `wait` throws `LenzTimeoutError`).
+  2.x made one more poll after sleeping the remaining time, with the client's
+  full request timeout. A wait given no time at all (`timeoutMs: 0`) still
+  looks once, as in 2.x.
 - **Network failures and transport timeouts throw subclasses of the class
   they threw in 2.x**: `LenzConnectionError` and, for a timeout,
   `LenzRequestTimeoutError`, both `LenzAPIError`s. A timeout's message reads
@@ -145,6 +153,11 @@ differently:
   unknown; a boolean the response body states wins. A failed run
   (`LenzPipelineError`, `ReviewFailedError`, `CitecheckFailedError`) keeps
   the server's value, `null` when it stated none, as in 2.x.
+- **An optional second argument to `getStatus`**, the wait's budget (the
+  per-request timeout and deadline). The waits poll through the public
+  `getStatus`, as in 2.x, so an override (a subclass, a test double) is used;
+  an override may ignore the argument and the wait still ends at its
+  deadline.
 - **`idempotencyKey` on every error of a call that sent one** (`string |
 undefined`), the timeout of a `*AndWait` included. A resend is safe only
   with that key: pass `idempotencyKey: err.idempotencyKey` back. A plain new
