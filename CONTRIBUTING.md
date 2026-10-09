@@ -30,7 +30,9 @@ npm run test:smoke  # opt-in staging smoke (needs LENZ_E2E_KEY)
 ```
 
 The unit suite mocks `fetch` via vitest. Smoke tests run against `lenz.io`
-(or a staging URL via `LENZ_BASE_URL`).
+(or a staging URL via `LENZ_BASE_URL`). A release publishes only after they
+pass: `release.yml` runs them through `smoke.yml`, which fails when
+`LENZ_E2E_KEY` is not set. Run them by hand from Actions > Smoke.
 
 ## Build
 

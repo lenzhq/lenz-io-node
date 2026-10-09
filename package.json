@@ -59,6 +59,7 @@
     "pretest": "npm run --silent sync-version",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:smoke": "npm run --silent sync-version",
     "test:smoke": "vitest run test/smoke.test.ts",
     "pretest:coverage": "npm run --silent sync-version",
     "test:coverage": "vitest run --coverage",
