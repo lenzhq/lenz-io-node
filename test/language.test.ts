@@ -351,6 +351,60 @@ describe("explicit language wire format", () => {
   });
 });
 
+describe('language: "auto" wire format', () => {
+  it("verify: sends auto unchanged", async () => {
+    const { fetch, calls } = makeFetch([{ body: { task_id: "t", claim_text: "x" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "Die Erde ist flach", language: "auto" });
+    expect(bodyOf(calls).language).toBe("auto");
+  });
+
+  it("verifyAndWait: sends auto on the submit body", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { task_id: "t1", claim_text: "x" } },
+      {
+        body: {
+          status: "completed",
+          result: {
+            verification_id: "v1",
+            claim: "Die Erde ist flach",
+            verdict: "False",
+            confidence: "high",
+            language: "de",
+          },
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const v = await client.verifyAndWait({
+      claim: "Die Erde ist flach",
+      language: "auto",
+      timeoutMs: 5000,
+    });
+    expect(bodyOf(calls, 0).language).toBe("auto");
+    expect(v.language).toBe("de");
+  });
+
+  it("assess: sends auto unchanged, single text and claims list", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { claims: [], error: null } },
+      { body: { claims: [], error: null } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.assess({ text: "Die Erde ist flach", language: "auto" });
+    await client.assess({ claims: ["Die Erde ist flach", "Wasser ist nass"], language: "auto" });
+    expect(bodyOf(calls, 0).language).toBe("auto");
+    expect(bodyOf(calls, 1).language).toBe("auto");
+  });
+
+  it("ask.send: sends auto unchanged", async () => {
+    const { fetch, calls } = makeFetch([{ body: { reply: "ok" } }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.ask.send("v1", { message: "warum?", language: "auto" });
+    expect(bodyOf(calls).language).toBe("auto");
+  });
+});
+
 // ─────────────────────────────────────────────── ERROR PATH ──
 
 describe("invalid language code", () => {

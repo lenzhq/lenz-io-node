@@ -8,6 +8,16 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
+- **`language: "auto"`** on `assess`, `verify`, `verifyAndWait` and
+  `ask.send`. The SDK sends the string as given, so this is documentation and
+  tests only. The answer comes back in the
+  language of the submitted text; on `ask.send`, in the language of the claim
+  being discussed. A concrete code always wins; omitting `language` still means
+  English. On `assess` with a `claims` list, one language is chosen for the
+  whole request (the language most items agree on, else English); name a code
+  for a list in mixed languages. `extract`, `verifyBatch`, `citecheck` and
+  `review` do not accept `"auto"`.
+
 - **Reads both forms of the API's responses.** The API is adding a newer
   response form with one name for each field across every endpoint, chosen
   per request by the `X-Lenz-API-Version` header. This release still sends
