@@ -328,11 +328,21 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     const result = has(payload, "result")
       ? payload["result"]
       : webhookResultDefaults(verification?.result);
+    // `verification.result` reads with the same defaults as `result`;
+    // `raw` is the payload as sent.
+    const nestedResult = verification?.result;
+    const withDefaults =
+      verification && nestedResult && typeof nestedResult === "object"
+        ? ({
+            ...verification,
+            result: webhookResultDefaults(nestedResult),
+          } as unknown as TaskStatus)
+        : verification;
     return {
       ...base,
       event: "verification.completed",
       result: (normalizeVerification(result) as Record<string, unknown>) ?? {},
-      verification,
+      verification: withDefaults,
     };
   }
   if (event === "verification.failed") {
