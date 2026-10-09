@@ -16,7 +16,14 @@
  * Lenz repo; both sides MUST produce byte-identical signatures.
  */
 import { Buffer } from "node:buffer";
-import type { Citecheck, Coverage, FailureClass, ReviewFull } from "./types.js";
+import type {
+  Citecheck,
+  Coverage,
+  FailureClass,
+  ReviewFailureBlock,
+  ReviewFull,
+  TaskStatus,
+} from "./types.js";
 export declare const SIGNATURE_HEADER = "X-Lenz-Signature";
 export declare const DEFAULT_REPLAY_WINDOW_SECONDS = 300;
 type RawBody = string | Buffer | Uint8Array;
@@ -33,27 +40,46 @@ export type WebhookEventKind =
   | (string & NonNullable<unknown>);
 export interface WebhookEventBase {
   event: WebhookEventKind;
+  /**
+   * The verification's `task_id`. On `review.*` / `citecheck.*` it is the
+   * delivery's identity, not pollable, and `""` when the payload carries none.
+   */
   taskId: string;
   attempt: number;
   deliveredAt: string;
   verificationId: string | null;
   batchId: string | null;
   status: string;
+  /** The payload exactly as delivered, in whichever shape the server sent. */
   raw: Record<string, unknown>;
 }
-export interface VerificationCompleted extends WebhookEventBase {
+/**
+ * The verification as `client.getStatus` returns it: on the newer payload
+ * shape the event carries it as `verification`; on the original shape it is
+ * built from the flat fields. `undefined` only when neither is there.
+ */
+interface VerificationEventBody {
+  verification?: TaskStatus;
+}
+export interface VerificationCompleted extends WebhookEventBase, VerificationEventBody {
   event: "verification.completed";
   result: Record<string, unknown>;
 }
-export interface VerificationFailed extends WebhookEventBase {
+export interface VerificationFailed extends WebhookEventBase, VerificationEventBody {
   event: "verification.failed";
+  /**
+   * @deprecated Read `failure.code`. The failure code, with its original
+   * words (`not_a_claim` where `failure.code` says `no_checkable_claim`).
+   */
   error: string;
+  /** Why it failed: `code`, `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. */
+  failure?: ReviewFailureBlock | null;
   /** WHY it failed — the closed `FailureClass` set; "" when an older server omits it. */
   failureClass: FailureClass;
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. */
   retryable: boolean | null;
 }
-export interface VerificationNeedsInput extends WebhookEventBase {
+export interface VerificationNeedsInput extends WebhookEventBase, VerificationEventBody {
   event: "verification.needs_input";
   needsInput: Record<string, unknown>;
   /**
@@ -89,7 +115,8 @@ export interface CertificateTimestamped extends WebhookEventBase {
  * review's own deep checks fire no `verification.*` events.
  *
  * `taskId` is the delivery's identity, not a task you can poll on
- * `/verify/status`; read the review with `client.getReview(reviewId)`.
+ * `/verify/status`; read the review with `client.getReview(reviewId)`. In the
+ * API's newer payload shape, which sends no `task_id`, it is the `reviewId`.
  */
 export interface ReviewEventBase extends WebhookEventBase {
   event: "review.completed" | "review.failed";
@@ -110,7 +137,8 @@ export type ReviewEvent = ReviewCompleted | ReviewFailed;
  * `event=citecheck.completed` / `citecheck.failed` — a citation check ended.
  * `citecheck` is the whole check, as `client.getCitecheck` returns it.
  * **Dedupe on `eventId`**: it is stable across every retry, while `attempt`
- * changes. `taskId` is the delivery's identity, not pollable.
+ * changes. `taskId` is the delivery's identity, not pollable (the
+ * `citecheckId` in the API's newer payload shape, which sends no `task_id`).
  */
 export interface CitecheckEventBase extends WebhookEventBase {
   event: "citecheck.completed" | "citecheck.failed";

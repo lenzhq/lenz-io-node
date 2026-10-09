@@ -12,6 +12,8 @@ import {
   LenzWebhooks,
   type AssessClaim,
   type BatchItemResult,
+  type ExtractedClaim,
+  type ReviewFailureBlock,
   type TaskStatus,
   type Verification,
 } from "../../src/index.js";
@@ -86,4 +88,36 @@ export function webhookFlow(hooks: LenzWebhooks, body: string, sig: string): str
     return String((event.result as Verification).modified_at);
   }
   return event.taskId;
+}
+
+// Written against 2.21.0: the newer names it added, read from either form.
+export async function twoTwentyOneFlow(client: Lenz, hooks: LenzWebhooks): Promise<string[]> {
+  const out = await client.extract({ text: "x" });
+  const claims: ExtractedClaim[] = out.claims ?? [];
+  const res = await client.assess({ claim: "x", language: "auto" });
+  const failures: Array<ReviewFailureBlock | null | undefined> = res.claims.map((r) =>
+    r.status === "failed" ? r.failure : null,
+  );
+  const more: string[] = res.claims.flatMap((r) => r.more_claims ?? []);
+  const receipt = await client.verify({ claim: "x", language: "auto" });
+  const status: TaskStatus = await client.getStatus(receipt.task_id);
+  const code: string | null | undefined = status.failure?.code;
+  const batch = await client.verifyBatch({ claims: [{ claim: "a" }] });
+  const claimOf: string | null | undefined = batch.items[0]?.claim;
+  const v: Verification = await client.verifications.get("v");
+  const done: string | null | undefined = v.completed_at;
+  const review = await client.reviewAndWait({ text: "x" });
+  const found: number | null | undefined = review.summary.claims_found;
+  const exceeded: boolean | null | undefined = review.summary.claim_limit_exceeded;
+  const reply = await client.ask.send("v", { message: "why?", language: "auto" });
+  const event = hooks.parse("", { "X-Lenz-Signature": "" });
+  if (event.event === "verification.failed" && "failure" in event) void event.failure?.code;
+  if (event.event === "verification.completed" && "verification" in event) {
+    void event.verification?.status;
+  }
+  void failures;
+  void found;
+  void exceeded;
+  void reply;
+  return [...claims.map((c) => c.claim), ...more, code ?? "", claimOf ?? "", done ?? ""];
 }

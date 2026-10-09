@@ -13,7 +13,7 @@ import { expect, it } from "vitest";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 it.each(["compat.ts", "user-code-2x.ts"])(
-  "%s (code written against 2.20.0) compiles under tsc --strict",
+  "%s (code written against 2.21.0) compiles under tsc --strict",
   (file) => {
     const tsc = join(ROOT, "node_modules", "typescript", "bin", "tsc");
     const args = [

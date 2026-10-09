@@ -1,7 +1,7 @@
 /**
- * Type compatibility with the previous release (2.20.0).
+ * Type compatibility with the previous release (2.21.0).
  *
- * `release-2.20.0/` holds that release's published declarations. Every type
+ * `release-2.21.0/` holds that release's published declarations. Every type
  * it exported must stay assignable BOTH ways: a value typed with the old
  * type must fit the new one (code that builds objects, e.g. test mocks), and
  * a value typed with the new one must fit the old (code that reads fields:
@@ -11,7 +11,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type * as Old from "./release-2.20.0/index.js";
+import type * as Old from "./release-2.21.0/index.js";
 import type * as New from "../../src/index.js";
 
 /** A value of type `T`, for assignment checks only (never evaluated). */
@@ -215,6 +215,8 @@ export const new_ExtractStatus: New.ExtractStatus = value<Old.ExtractStatus>();
 export const old_ExtractStatus: Old.ExtractStatus = value<New.ExtractStatus>();
 export const new_ExtractedClaims: New.ExtractedClaims = value<Old.ExtractedClaims>();
 export const old_ExtractedClaims: Old.ExtractedClaims = value<New.ExtractedClaims>();
+export const new_ExtractedClaim: New.ExtractedClaim = value<Old.ExtractedClaim>();
+export const old_ExtractedClaim: Old.ExtractedClaim = value<New.ExtractedClaim>();
 export const new_ExtractedEntity: New.ExtractedEntity = value<Old.ExtractedEntity>();
 export const old_ExtractedEntity: Old.ExtractedEntity = value<New.ExtractedEntity>();
 export const new_FailureClass: New.FailureClass = value<Old.FailureClass>();

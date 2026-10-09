@@ -7,7 +7,11 @@
  *   English (default) — the SDK then omits the key from the request
  *   body, preserving byte-identical wire format for existing English
  *   callers. Set `language: "es"` (or any of the 12 supported codes)
- *   to receive prose fields in that language.
+ *   to receive prose fields in that language. `assess`, `verify`,
+ *   `verifyAndWait` and `ask.send` also take `language: "auto"`: the answer
+ *   comes back in the language of the submitted text (for `ask.send`, the
+ *   language of the claim being discussed). `extract`, `verifyBatch`,
+ *   `citecheck` and `review` do not take `"auto"`.
  * - Response shapes (Verification, VerificationListItem, AssessClaim)
  *   expose `language?: string` populated by the server. Verdict /
  *   domain / status enums stay English regardless of language; only
@@ -26,7 +30,7 @@
  *
  * // 1. extract — pull verifiable claims out of text (free, 1000/day)
  * const out = await client.extract({ text: llmOutput });
- * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+ * const claims = (out.claims ?? []).map((c) => c.claim);
  *
  * // 2. assess — one call per 20 claims (extract finds up to 100), one
  * //    row per claim in the same order. A row with verdict 'Error' has
@@ -253,7 +257,7 @@ export declare class Lenz {
    *
    * ```ts
    * const out = await client.extract({ text: llmOutput });
-   * const claims = out.identified_claims?.length ? out.identified_claims : [out.claim!];
+   * const claims = (out.claims ?? []).map((c) => c.claim);
    * const quick: AssessClaim[] = []; // one row per claim, same order, 20 claims a call
    * for (let i = 0; i < claims.length; i += 20) {
    *   quick.push(...(await client.assess({ claims: claims.slice(i, i + 20) })).claims);
@@ -273,7 +277,11 @@ export declare class Lenz {
    * share a result cache server-side.
    *
    * Pass `language: "es"` (or any of the 12 supported codes) to receive
-   * the claim text in that language. Verdict labels stay English.
+   * the claim text in that language. Verdict labels stay English. Pass
+   * `language: "auto"` to receive the answer in the language of the
+   * submitted text; with a `claims` list, one language is chosen for the
+   * whole request (the language most items agree on, else English), so name
+   * a code for a list in mixed languages.
    *
    * Pass `suggestRewrite: true` to also get `suggested_rewrite` on each row
    * the check found `"False"` or `"Mostly False"` with high confidence: the
