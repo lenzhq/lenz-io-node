@@ -1590,11 +1590,11 @@ export class Lenz {
           // not JSON: stays null
         }
         const err = new LenzApiVersionError({
-          message:
-            `The API answered in version ${served}; lenz-io 3.x reads ${API_VERSION} only. ` +
-            `Use lenz-io 2.x against that API, or move the API to ${API_VERSION}.`,
-          cause: `${opts.method} ${opts.path} was served in version ${served}.`,
-          fix: `Use lenz-io 2.x against that API, or move the API to ${API_VERSION}.`,
+          message: `The API answered in version ${served}; lenz-io 3.x reads ${API_VERSION} only.`,
+          cause: `The response carries X-Lenz-API-Version: ${served}.`,
+          fix:
+            "If this persists, contact support (https://lenz.io/contact) with the request id; " +
+            "lenz-io 2.x reads both versions.",
           docUrl: "https://lenz.io/docs/errors",
           requestId: response.headers.get("X-Request-ID") ?? "",
           statusCode: response.status,

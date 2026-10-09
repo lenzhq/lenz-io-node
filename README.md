@@ -669,8 +669,8 @@ A response that names an API version other than `2026-10-11` in its
 `X-Lenz-API-Version` header (for example `2026-05-13`, as an older stored
 replay of an idempotent call can) is not parsed: the call throws
 `LenzApiVersionError` with `apiVersion` (the version named), `statusCode` and
-`body` (as sent). lenz-io 3.x reads `2026-10-11` only, so use lenz-io 2.x
-against an API that does not serve it. A response with no such header is not
+`body` (as sent). If it persists, contact support with the request id;
+lenz-io 2.x reads both versions. A response with no such header is not
 checked, and neither are webhook events.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
