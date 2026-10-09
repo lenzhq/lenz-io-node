@@ -34,6 +34,7 @@ import type {
   ReviewFailureBlock,
   ReviewFull,
   TaskStatus,
+  Verification,
 } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
@@ -111,6 +112,12 @@ export interface WebhookEventBase {
   verificationId: string | null;
   batchId: string | null;
   status: string;
+  /**
+   * The delivery's stable id (`event_id`): the same on every retry of one
+   * event, so dedupe on it. Absent when the payload carries none (the
+   * original shape of `verification.*` events).
+   */
+  eventId?: string;
   /** The payload exactly as delivered, in whichever shape the server sent. */
   raw: Record<string, unknown>;
 }
@@ -322,6 +329,7 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     status: String(payload["status"] ?? ""),
     raw: payload,
   };
+  if (typeof payload["event_id"] === "string") base.eventId = payload["event_id"];
   if (event === "verification.completed") {
     // The newer event's result has only the fields stored; the original
     // event carried every field, with its default where none was stored.
@@ -419,6 +427,66 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     }
   }
   return base;
+}
+
+/**
+ * Each known event kind, as {@link isEvent} narrows it: the member the kind
+ * promises is present (a `verification.*` event's `verification`, with its
+ * `result` on `completed`).
+ */
+export interface WebhookEventMap {
+  "verification.completed": VerificationCompleted & {
+    verification: TaskStatus & { result: Verification };
+  };
+  "verification.failed": VerificationFailed & { verification: TaskStatus };
+  "verification.needs_input": VerificationNeedsInput & { verification: TaskStatus };
+  "certificate.timestamped": CertificateTimestamped;
+  "review.completed": ReviewCompleted;
+  "review.failed": ReviewFailed;
+  "citecheck.completed": CitecheckCompleted;
+  "citecheck.failed": CitecheckFailed;
+}
+
+/** Whether the payload carries a `verification.*` event's verification, in either shape. */
+function carriesVerification(raw: Record<string, unknown>, kind: string): boolean {
+  if (has(raw, "verification")) return asObject(raw["verification"]) !== null;
+  // The original shape: flat fields beside the task id.
+  if (typeof raw["task_id"] !== "string" || raw["task_id"] === "") return false;
+  if (kind === "verification.completed") return asObject(raw["result"]) !== null;
+  if (kind === "verification.failed") return has(raw, "error");
+  return asObject(raw["needs_input"]) !== null;
+}
+
+/**
+ * Narrow a parsed event to one kind, without a cast:
+ *
+ * ```ts
+ * const event = hooks.parse(rawBody, req.headers);
+ * if (isEvent(event, "verification.completed")) {
+ *   console.log(event.verification.result.verdict);
+ * }
+ * ```
+ *
+ * True only when the event's name is `kind` AND the member that kind
+ * promises was parsed (`verification`, `review`, `citecheck`, `coverage`),
+ * so a malformed event under a known name never narrows.
+ */
+export function isEvent<K extends keyof WebhookEventMap>(
+  event: WebhookEvent,
+  kind: K,
+): event is WebhookEventMap[K] {
+  if (!event || event.event !== kind) return false;
+  const e = event as unknown as Record<string, unknown>;
+  const raw = asObject(e["raw"]) ?? {};
+  if (kind.startsWith("verification.")) {
+    const verification = asObject(e["verification"]);
+    if (!verification || !carriesVerification(raw, kind)) return false;
+    return kind !== "verification.completed" || asObject(verification["result"]) !== null;
+  }
+  if (kind === "certificate.timestamped") return asObject(raw["coverage"]) !== null;
+  if (kind.startsWith("review.")) return asObject(e["review"]) !== null;
+  if (kind.startsWith("citecheck.")) return asObject(e["citecheck"]) !== null;
+  return false;
 }
 
 export interface LenzWebhooksOptions {

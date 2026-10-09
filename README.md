@@ -461,62 +461,49 @@ if (rewrite) {
 ### Webhooks
 
 ```ts
-import { LenzWebhooks } from "lenz-io";
-import type {
-  ReviewCompleted,
-  VerificationCompleted,
-  VerificationFailed,
-  VerificationNeedsInput,
-} from "lenz-io";
+import { LenzWebhooks, isEvent } from "lenz-io";
 
 const webhooks = new LenzWebhooks({ secret: "whsec_..." });
 
 // In your Express handler (use express.raw() to get rawBody as Buffer):
 app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) => {
   const event = webhooks.parse(req.body, req.headers as Record<string, string>);
-  switch (event.event) {
-    case "verification.completed": {
-      const completed = event as VerificationCompleted;
-      const r = completed.verification?.result;
-      // r?.verdict, r?.lenz_score, r?.confidence, ...
-      break;
+  // isEvent narrows on the event name AND the member it promises, so a
+  // malformed payload under a known name is never taken for a real one.
+  if (isEvent(event, "verification.completed")) {
+    const r = event.verification.result;
+    // r.verdict, r.lenz_score, r.confidence, ...
+  } else if (isEvent(event, "verification.needs_input")) {
+    // …surface candidate claims, call client.select(taskId, ...) to resolve
+  } else if (isEvent(event, "verification.failed")) {
+    // failure.code is WHERE the pipeline stopped; failure_class is WHY
+    // (closed set) and retryable tells you what to do about it.
+    if (event.failure?.retryable) {
+      resubmitLater(event.taskId); // transient provider outage
+    } else {
+      logPermanentFailure(event.taskId, event.failure?.code);
     }
-    case "verification.needs_input": {
-      const ni = event as VerificationNeedsInput;
-      // …surface candidate claims, call client.select(taskId, ...) to resolve
-      break;
+  } else if (isEvent(event, "review.completed")) {
+    // Dedupe on eventId: a retry of the same delivery keeps it.
+    if (!alreadyHandled(event.eventId)) {
+      for (const i of event.review.issues) flagIssue(i.claim, i.verdict, i.suggested_rewrite);
     }
-    case "verification.failed": {
-      const failed = event as VerificationFailed;
-      // failed.failure.code is WHERE the pipeline stopped; failure_class is
-      // WHY (closed set) and retryable tells you what to do about it.
-      if (failed.failure?.retryable) {
-        resubmitLater(failed.taskId); // transient provider outage
-      } else {
-        logPermanentFailure(failed.taskId, failed.failure?.code);
-      }
-      break;
-    }
-    case "review.completed": {
-      const done = event as ReviewCompleted;
-      // Dedupe on eventId: a retry of the same delivery keeps it.
-      if (alreadyHandled(done.eventId)) break;
-      for (const i of done.review.issues) flagIssue(i.claim, i.verdict, i.suggested_rewrite);
-      break;
-    }
-    default:
-      // An event you do not recognise: ignore it. New kinds are added
-      // without a major release.
-      break;
+  } else if (isEvent(event, "citecheck.completed")) {
+    for (const c of event.citecheck.citation_issues) flagCitation(c);
   }
+  // Any other event (one you do not recognise, or a malformed one): ignore
+  // it. New kinds are added without a major release.
   res.status(200).send();
 });
 ```
 
 `review.completed` and `review.failed` carry the whole review under `review`,
-as `client.getReview` returns it; a review's own deep checks fire no
-`verification.*` events. Dedupe on `eventId`, which stays the same across
-retries while `attempt` changes.
+as `client.getReview` returns it, and `citecheck.*` the whole check under
+`citecheck`; a review's own deep checks fire no `verification.*` events.
+Dedupe on `eventId`, which stays the same across retries while `attempt`
+changes. Every event carries `eventId` when its payload does (all of them,
+for work started with 3.x); the original shape of `verification.*` events
+has none.
 
 Signature verification is HMAC-SHA256 over the raw bytes; the SDK does it for
 you and rejects tampered or replayed payloads.

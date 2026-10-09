@@ -74,6 +74,7 @@ export {
   SIGNATURE_HEADER,
   DEFAULT_REPLAY_WINDOW_SECONDS,
   verifySignature,
+  isEvent,
 } from "./webhooks.js";
 export type {
   LenzWebhooksOptions,
@@ -92,6 +93,7 @@ export type {
   WebhookEvent,
   WebhookEventBase,
   WebhookEventKind,
+  WebhookEventMap,
 } from "./webhooks.js";
 
 export type {

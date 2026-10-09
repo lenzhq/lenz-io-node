@@ -64,6 +64,7 @@ export type {
   WebhookEvent,
   WebhookEventBase,
   WebhookEventKind,
+  WebhookEventMap,
 } from "./webhooks.js";
 
 export type {

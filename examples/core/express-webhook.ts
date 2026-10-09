@@ -1,8 +1,8 @@
 /**
  * Receive Lenz webhook events in an Express app.
  *
- * Lenz POSTs HMAC-signed payloads to your `webhook_url` when the
- * verification pipeline terminates. This handler verifies the signature,
+ * Lenz POSTs HMAC-signed payloads to your `webhook_url` when a verification,
+ * a review or a citation check ends. This handler verifies the signature,
  * parses the payload into a typed event, and dispatches per event type.
  *
  *   npm install express
@@ -16,13 +16,7 @@
 
 import express from "express";
 
-import {
-  LenzWebhooks,
-  LenzWebhookSignatureError,
-  type VerificationCompleted,
-  type VerificationFailed,
-  type VerificationNeedsInput,
-} from "lenz-io";
+import { LenzWebhooks, LenzWebhookSignatureError, isEvent } from "lenz-io";
 
 const app = express();
 const webhooks = new LenzWebhooks({ secret: process.env["LENZ_WEBHOOK_SECRET"] ?? "" });
@@ -45,30 +39,32 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
     throw exc;
   }
 
-  switch (event.event) {
-    case "verification.completed": {
-      const e = event as VerificationCompleted;
-      // The verdict block is on e.verification.result.
-      const r = e.verification?.result;
-      console.log(
-        `Completed: ${e.verificationId} -> ${r?.verdict} (lenz_score ${r?.lenz_score}, confidence ${r?.confidence})`,
-      );
-      // TODO: persist verdict + sources; ping users; etc.
-      break;
-    }
-    case "verification.needs_input": {
-      const e = event as VerificationNeedsInput;
-      console.log(`Needs input on ${e.taskId}: ${e.needsInput["reason"]}`);
-      // TODO: surface candidate claims; call client.select(taskId, ...) to resolve
-      break;
-    }
-    case "verification.failed": {
-      const e = event as VerificationFailed;
-      console.warn(`Pipeline failed: ${e.taskId} (${e.failure?.code})`);
-      break;
-    }
-    default:
-      console.log(`Unhandled webhook event: ${event.event}`);
+  // `isEvent` narrows on the event name AND the member it promises, so a
+  // malformed payload under a known name falls through to "unhandled".
+  if (isEvent(event, "verification.completed")) {
+    const r = event.verification.result;
+    console.log(
+      `Completed: ${event.verificationId} -> ${r.verdict} (lenz_score ${r.lenz_score}, confidence ${r.confidence})`,
+    );
+    // TODO: persist verdict + sources; ping users; etc.
+  } else if (isEvent(event, "verification.needs_input")) {
+    console.log(`Needs input on ${event.taskId}: ${event.verification.reason}`);
+    // TODO: surface candidate claims; call client.select(taskId, ...) to resolve
+  } else if (isEvent(event, "verification.failed")) {
+    console.warn(`Verification failed: ${event.taskId} (${event.failure?.code})`);
+  } else if (isEvent(event, "review.completed") || isEvent(event, "review.failed")) {
+    // Dedupe on eventId: every retry of one delivery carries the same one.
+    console.log(
+      `Review ${event.reviewId} ${event.review.status}: ${event.review.issues.length} issue(s) (event ${event.eventId})`,
+    );
+  } else if (isEvent(event, "citecheck.completed") || isEvent(event, "citecheck.failed")) {
+    console.log(
+      `Citation check ${event.citecheckId} ${event.citecheck.status}: ${event.citecheck.citation_issues.length} issue(s)`,
+    );
+  } else {
+    // An event you do not recognise: ignore it. New kinds are added without
+    // a major release.
+    console.log(`Unhandled webhook event: ${event.event}`);
   }
 
   // Always return 2xx fast. Lenz expects an ack within 5s; otherwise the
