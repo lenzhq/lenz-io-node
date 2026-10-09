@@ -1,7 +1,7 @@
 /**
- * The edge entry loads where Node's built-ins do not exist.
+ * The package loads where Node's built-ins do not exist.
  *
- * Bundles `src/index.edge.ts` for a browser-like platform, where esbuild
+ * Bundles `src/index.ts` for a browser-like platform, where esbuild
  * refuses any `node:*` import, then checks the output for a built-in's name
  * or a `Buffer` reference, runs it with `process` and `require` absent, and
  * resolves it through the package's export conditions the way each edge
@@ -20,7 +20,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function bundleEdge(): Promise<string> {
   const result = await build({
-    entryPoints: [join(ROOT, "src", "index.edge.ts")],
+    entryPoints: [join(ROOT, "src", "index.ts")],
     bundle: true,
     platform: "browser",
     format: "iife",
@@ -31,7 +31,7 @@ async function bundleEdge(): Promise<string> {
   return result.outputFiles[0]!.text;
 }
 
-describe("the edge entry", () => {
+describe("the main entry as an edge runtime loads it", () => {
   it("bundles for a platform with no Node built-ins", async () => {
     await expect(bundleEdge()).resolves.toBeTypeOf("string");
   });
@@ -104,6 +104,7 @@ describe("the edge entry", () => {
     const { parseError, taskId } = JSON.parse(await out) as { parseError: string; taskId: string };
     expect(taskId).toBe("t1");
     expect(parseError).toMatch(/unwrap|parseAsync/);
+    expect(parseError).toMatch(/Node 22\.12 or later/);
   });
 });
 
@@ -114,10 +115,8 @@ describe("package.json exports", () => {
   const dot = pkg.exports["."];
 
   it("lists the edge conditions before browser, import and require", () => {
-    const keys = Object.keys(dot);
-    expect(keys).toEqual([
+    expect(Object.keys(dot)).toEqual([
       "workerd",
-      "worker",
       "edge-light",
       "deno",
       "browser",
@@ -126,9 +125,13 @@ describe("package.json exports", () => {
     ]);
   });
 
-  it("points every edge condition at the edge build, with types", () => {
-    for (const k of ["workerd", "worker", "edge-light", "deno"]) {
-      expect(dot[k]).toEqual({ types: "./dist/index.d.ts", default: "./dist/index.edge.js" });
+  it("does not catch browser Web Workers with a `worker` condition", () => {
+    expect(dot).not.toHaveProperty("worker");
+  });
+
+  it("sends every edge condition to the ESM build, which has no browser-only omissions", () => {
+    for (const k of ["workerd", "edge-light", "deno"]) {
+      expect(dot[k]).toEqual({ types: "./dist/index.d.ts", default: "./dist/index.js" });
     }
   });
 

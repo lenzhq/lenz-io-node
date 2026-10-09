@@ -8,9 +8,9 @@
  *
  * Bundlers targeting the browser (Vite, webpack, Rollup with the browser
  * condition) resolve `lenz-io` to this file via the `"browser"` export
- * condition in package.json. Edge runtimes (Workers, Deno, Vercel Edge) resolve
- * `./index.edge.ts` instead, which has the webhook receiver. Node keeps the
- * full `./index.ts`.
+ * condition in package.json. Edge runtimes (the `workerd`, `edge-light` and `deno`
+ * conditions, listed before `browser`) and Node resolve the full `./index.ts`,
+ * which has the webhook receiver and imports no Node built-in.
  *
  * Webhook *types* are still re-exported here (they erase at compile time and
  * carry no runtime `node:` imports), so `import type { WebhookEvent }` works

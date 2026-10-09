@@ -30,19 +30,15 @@
     ".": {
       "workerd": {
         "types": "./dist/index.d.ts",
-        "default": "./dist/index.edge.js"
-      },
-      "worker": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.edge.js"
+        "default": "./dist/index.js"
       },
       "edge-light": {
         "types": "./dist/index.d.ts",
-        "default": "./dist/index.edge.js"
+        "default": "./dist/index.js"
       },
       "deno": {
         "types": "./dist/index.d.ts",
-        "default": "./dist/index.edge.js"
+        "default": "./dist/index.js"
       },
       "browser": {
         "types": "./dist/index.d.ts",

@@ -38,6 +38,9 @@ export const DEFAULT_REPLAY_WINDOW_SECONDS = 300;
  */
 type RawBody = string | Uint8Array;
 
+/** Request headers: a `Headers`, or a plain object (Node's `req.headers`, whose values may be arrays). */
+type HeaderBag = Record<string, string | string[] | undefined> | Headers;
+
 /** What the WebCrypto path also takes: the `ArrayBuffer` a `Request` reads. */
 type RawBodyAsync = RawBody | ArrayBuffer;
 
@@ -46,14 +49,38 @@ const encoder = new TextEncoder();
 // `Buffer#toString("utf-8")` does, so both paths read the same body.
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
-function toBytes(body: RawBodyAsync): Uint8Array {
+const NOT_BYTES =
+  "The webhook body must be the raw request body: a string, bytes (a Uint8Array or Node buffer) or an " +
+  "ArrayBuffer. A body parser ran before LenzWebhooks and replaced it (an object, null or " +
+  "undefined): use express.raw({ type: 'application/json' }) in Express, or " +
+  "`await request.arrayBuffer()` (or `unwrap(request)`) with a Request.";
+
+/**
+ * A private copy of the body, taken once and before any `await`: the bytes that
+ * are verified are the bytes that are parsed, whatever the caller does to its
+ * buffer in between. Anything that is not a string or bytes is a `TypeError`.
+ */
+function snapshot(body: unknown): Uint8Array {
   if (typeof body === "string") {
     // Encoded as UTF-8. WARNING: only safe if the original body was valid
     // UTF-8 and no proxy mangled it. Prefer the bytes (or `unwrap(request)`).
     return encoder.encode(body);
   }
-  if (body instanceof Uint8Array) return body;
-  return new Uint8Array(body);
+  if (ArrayBuffer.isView(body)) {
+    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength).slice();
+  }
+  if (Object.prototype.toString.call(body) === "[object ArrayBuffer]") {
+    return new Uint8Array(body as ArrayBuffer).slice();
+  }
+  throw new TypeError(NOT_BYTES);
+}
+
+function requireSecret(secret: string): void {
+  if (!secret) {
+    throw new Error(
+      "Webhook verification requires a non-empty secret. Get it from /api-credentials.",
+    );
+  }
 }
 
 function hex(bytes: Uint8Array): string {
@@ -101,8 +128,9 @@ function loadNodeCrypto(): NodeCrypto {
   if (!mod) {
     throw new Error(
       "LenzWebhooks.parse() is synchronous and needs Node's crypto module, which this " +
-        "runtime does not provide. Use `await webhooks.unwrap(request)` or " +
-        "`await webhooks.parseAsync(rawBody, headers)`, which verify with WebCrypto.",
+        "runtime does not provide (it is there on Node 22.12 or later). Use " +
+        "`await webhooks.unwrap(request)` or `await webhooks.parseAsync(rawBody, headers)`, " +
+        "which verify with WebCrypto and run anywhere.",
     );
   }
   nodeCrypto = mod;
@@ -114,16 +142,20 @@ function sign(body: Uint8Array, secret: string): string {
   return `${SIGNATURE_PREFIX}${mac}`;
 }
 
-export function verifySignature(rawBody: RawBody, signature: string, secret: string): true {
-  if (!signature) throw missingSignature();
-
-  const expected = encoder.encode(sign(toBytes(rawBody), secret));
+function verifyBytes(bytes: Uint8Array, signature: string, secret: string): true {
+  const expected = encoder.encode(sign(bytes, secret));
   const given = encoder.encode(signature);
   // timingSafeEqual requires equal-length buffers.
   if (expected.length !== given.length || !loadNodeCrypto().timingSafeEqual(expected, given)) {
     throw signatureMismatch();
   }
   return true;
+}
+
+export function verifySignature(rawBody: RawBody, signature: string, secret: string): true {
+  requireSecret(secret);
+  if (!signature) throw missingSignature();
+  return verifyBytes(snapshot(rawBody), signature, secret);
 }
 
 /** Equal-length byte strings, compared without stopping at the first difference. */
@@ -150,6 +182,16 @@ async function signAsync(body: Uint8Array, secret: string): Promise<string> {
   return `${SIGNATURE_PREFIX}${hex(mac)}`;
 }
 
+async function verifyBytesAsync(
+  bytes: Uint8Array,
+  signature: string,
+  secret: string,
+): Promise<true> {
+  const expected = encoder.encode(await signAsync(bytes, secret));
+  if (!constantTimeEqual(expected, encoder.encode(signature))) throw signatureMismatch();
+  return true;
+}
+
 /**
  * `verifySignature` with WebCrypto: resolves `true` or rejects with the same
  * `LenzWebhookSignatureError`. Works wherever `crypto.subtle` does.
@@ -159,11 +201,11 @@ export async function verifySignatureAsync(
   signature: string,
   secret: string,
 ): Promise<true> {
+  requireSecret(secret);
   if (!signature) throw missingSignature();
-
-  const expected = encoder.encode(await signAsync(toBytes(rawBody), secret));
-  if (!constantTimeEqual(expected, encoder.encode(signature))) throw signatureMismatch();
-  return true;
+  // Copied before the first await: see `snapshot`.
+  const bytes = snapshot(rawBody);
+  return verifyBytesAsync(bytes, signature, secret);
 }
 
 export type {
@@ -379,31 +421,43 @@ export class LenzWebhooks {
    * It throws on a runtime without Node's `crypto` (Workers, Deno, edge
    * runtimes): use {@link unwrap} or {@link parseAsync} there.
    */
-  parse(rawBody: RawBody, headers: Record<string, string> | Headers): WebhookEvent {
+  parse(rawBody: RawBody, headers: HeaderBag): WebhookEvent {
     const sig = this.lookupHeader(headers, SIGNATURE_HEADER);
-    verifySignature(rawBody, sig, this.secret);
-    return this.finish(toBytes(rawBody));
+    requireSecret(this.secret);
+    if (!sig) throw missingSignature();
+    const bytes = snapshot(rawBody);
+    verifyBytes(bytes, sig, this.secret);
+    return this.finish(bytes);
   }
 
   /**
    * `parse` with WebCrypto, for any runtime: Workers, Deno, Bun, Node, edge
-   * bundles. Same checks, same events, same errors.
+   * bundles. Same checks, same events, same errors. The body is copied before
+   * the first `await`, so the bytes that are verified are the bytes parsed even
+   * if the caller reuses its buffer meanwhile.
    */
-  async parseAsync(
-    rawBody: RawBodyAsync,
-    headers: Record<string, string> | Headers,
-  ): Promise<WebhookEvent> {
+  async parseAsync(rawBody: RawBodyAsync, headers: HeaderBag): Promise<WebhookEvent> {
     const sig = this.lookupHeader(headers, SIGNATURE_HEADER);
-    await verifySignatureAsync(rawBody, sig, this.secret);
-    return this.finish(toBytes(rawBody));
+    requireSecret(this.secret);
+    if (!sig) throw missingSignature();
+    const bytes = snapshot(rawBody);
+    await verifyBytesAsync(bytes, sig, this.secret);
+    return this.finish(bytes);
   }
 
   /**
    * Verify and parse a delivery from a standard `Request`: reads the raw body
    * once and the `X-Lenz-Signature` header, then behaves as {@link parseAsync}.
-   * For Workers, Deno, Bun, Next.js route handlers, Hono and the like.
+   * For Workers, Deno, Bun, Next.js route handlers, Hono and the like. Call it
+   * before anything else reads the body.
    */
   async unwrap(request: Request): Promise<WebhookEvent> {
+    if (request.bodyUsed) {
+      throw new Error(
+        "LenzWebhooks.unwrap(request) found the body already read. Call unwrap before reading " +
+          "the body (request.json(), request.text(), a middleware): the signature covers the raw bytes.",
+      );
+    }
     const rawBody = await request.arrayBuffer();
     return this.parseAsync(rawBody, request.headers);
   }
@@ -439,13 +493,15 @@ export class LenzWebhooks {
     return buildEvent(obj);
   }
 
-  private lookupHeader(headers: Record<string, string> | Headers, name: string): string {
+  private lookupHeader(headers: HeaderBag, name: string): string {
     if (typeof (headers as Headers).get === "function") {
       const v = (headers as Headers).get(name);
       return v ? String(v) : "";
     }
-    const h = headers as Record<string, string>;
-    return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()] ?? "";
+    const h = headers as Record<string, string | string[] | undefined>;
+    const v = h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()];
+    // A header sent twice may arrive as an array: the first value is the one.
+    return (Array.isArray(v) ? v[0] : v) ?? "";
   }
 
   private checkReplay(payload: Record<string, unknown>): void {

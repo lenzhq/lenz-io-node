@@ -205,10 +205,20 @@ import {
 /**
  * Cross-runtime UUID: the WebCrypto global, present in Node >= 20, browsers,
  * Deno, Bun and Workers. It needs no Node built-in, so the package loads
- * on every one of them.
+ * on every one of them. Where `randomUUID` is missing (insecure browser
+ * origins, Hermes) a version 4 UUID is built from `getRandomValues`.
  */
 async function generateUuid(): Promise<string> {
-  return globalThis.crypto.randomUUID();
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") return webCrypto.randomUUID();
+  if (typeof webCrypto?.getRandomValues !== "function") {
+    throw new Error("lenz-io needs WebCrypto (globalThis.crypto) to make an Idempotency-Key.");
+  }
+  const b = webCrypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 /**

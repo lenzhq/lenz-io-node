@@ -340,3 +340,20 @@ describe("verifyBatchAndWait submits through the public verifyBatch, as 2.21 did
     expect(client.inputs[1]!["idempotencyKey"]).toBeUndefined();
   });
 });
+
+describe("the generated Idempotency-Key without crypto.randomUUID", () => {
+  it("falls back to a v4 UUID from getRandomValues", async () => {
+    const real = globalThis.crypto;
+    const stub = { getRandomValues: real.getRandomValues.bind(real) };
+    vi.stubGlobal("crypto", stub);
+    try {
+      const { fetch, calls } = makeFetch([{ status: 202, body: { task_id: "t1" } }]);
+      const client = new Lenz({ apiKey: "lenz_test", fetch, maxRetries: 0 });
+      await client.verify({ claim: "x" });
+      const k = key(calls[0]!);
+      expect(k).toMatch(/^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

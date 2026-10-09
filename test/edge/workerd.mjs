@@ -3,7 +3,7 @@
  * Miniflare, with Node compatibility OFF: no `process`, no `node:*` modules.
  *
  * The worker is bundled the way Wrangler bundles one: esbuild, the `workerd`,
- * `worker` and `browser` conditions, no Node built-ins. `resolveDir` is the
+ * `worker` and `browser` conditions (the ones `wrangler` passes), no Node built-ins. `resolveDir` is the
  * directory whose `node_modules/lenz-io` the worker imports (a packed install,
  * to test the package's exports map), or `alias` points `lenz-io` at a file.
  */
@@ -49,14 +49,18 @@ export default {
  * Bundle the worker: `{ code, inputs }` (the files that went in). The build fails
  * if the bundle needs a Node built-in.
  */
-export async function bundleWorker({ resolveDir, alias }) {
+export async function bundleWorker({
+  resolveDir,
+  alias,
+  conditions = ["workerd", "worker", "browser"],
+}) {
   const result = await build({
     stdin: { contents: WORKER, resolveDir, loader: "js", sourcefile: "worker.js" },
     bundle: true,
     format: "esm",
     platform: "neutral",
     target: "es2022",
-    conditions: ["workerd", "worker", "browser"],
+    conditions,
     mainFields: ["browser", "module", "main"],
     alias: alias ? { "lenz-io": alias } : undefined,
     write: false,

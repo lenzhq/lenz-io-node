@@ -191,11 +191,27 @@ signature, secret)` is the low-level counterpart of `verifySignature`.
 - **The package loads with no Node built-ins.** The webhook code no longer
   imports `node:crypto` or `node:buffer` when the module loads, and nothing
   else in the package uses a Node built-in or `Buffer`. The synchronous
-  `parse` and `verifySignature` still work on Node, unchanged, and throw a clear
-  error pointing to `unwrap` on a runtime without Node's `crypto`.
-- **Export conditions `workerd`, `worker`, `edge-light` and `deno`** resolve to
-  an edge build (`dist/index.edge.js`) that exports the whole API, webhook
-  receiver included. `import`, `require` and `browser` resolve as before.
+  `parse` and `verifySignature` still work on Node, and throw a clear error
+  pointing to `unwrap` on a runtime without Node's `crypto`. Their results are
+  unchanged, with two corrections: a header value that arrives as an array
+  (Node's `req.headers` for a header sent twice) now reads as its first element
+  on `parse` and `parseAsync` alike (it always failed as a mismatch before), and
+  `verifySignature` refuses an empty secret.
+- **Export conditions `workerd`, `edge-light` and `deno`**, listed before
+  `browser`, resolve to the main build (`dist/index.js`), which exports the
+  whole API, webhook receiver included, so these runtimes skip the `browser`
+  build that omits it. `import`, `require` and `browser` resolve as before.
+  Tested in Cloudflare Workers (workerd, without Node compatibility), Deno and
+  Bun; Vercel Edge is covered by the `edge-light` condition but not tested in a
+  real Next.js build.
+- `parse` / `parseAsync` copy the body once before verifying, so a caller
+  that reuses its buffer cannot change what is parsed after the signature
+  checked. A body that is not a string or bytes (an object left by a body
+  parser, `null`, `undefined`) is a `TypeError` that says so, not a signature
+  mismatch.
+- `unwrap` throws a clear error when the request's body was already read.
+- The generated `Idempotency-Key` falls back to `getRandomValues` where
+  `crypto.randomUUID` is missing (insecure browser origins, Hermes).
 - Examples for a Next.js route handler and a Hono app
   (`examples/core/nextjs-webhook.ts`, `examples/core/hono-webhook.ts`).
 

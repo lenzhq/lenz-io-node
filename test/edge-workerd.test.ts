@@ -1,6 +1,6 @@
 /**
  * A real workerd run (Miniflare, Node compatibility off): the worker imports
- * the edge entry, receives a signed request and answers with the parsed event.
+ * the package, receives a signed request and answers with the parsed event.
  */
 
 import { dirname, join } from "node:path";
@@ -27,7 +27,7 @@ describe("workerd, Node compatibility off", () => {
   it("verifies a signed request and returns the parsed event", async () => {
     const { code: script } = (await bundleWorker({
       resolveDir: ROOT,
-      alias: join(ROOT, "src", "index.edge.ts"),
+      alias: join(ROOT, "src", "index.ts"),
     })) as { code: string };
     expect(script).not.toMatch(/node:/);
 

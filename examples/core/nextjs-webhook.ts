@@ -20,9 +20,10 @@ import { LenzWebhooks, LenzWebhookSignatureError, isEvent } from "lenz-io";
 // Uncomment to run on the Edge runtime:
 // export const runtime = "edge";
 
-const webhooks = new LenzWebhooks({ secret: process.env["LENZ_WEBHOOK_SECRET"] ?? "" });
-
 export async function POST(request: Request): Promise<Response> {
+  // Built here, not at module scope: `next build` imports this file without the
+  // secret, and the receiver refuses an empty one.
+  const webhooks = new LenzWebhooks({ secret: process.env["LENZ_WEBHOOK_SECRET"] ?? "" });
   let event;
   try {
     // Reads the raw body once and checks X-Lenz-Signature. Never call

@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { LenzWebhooks, LenzWebhookSignatureError } from "../src/index.js";
+import {
+  LenzWebhooks,
+  LenzWebhookSignatureError,
+  verifySignature,
+  verifySignatureAsync,
+} from "../src/index.js";
 
 const SECRET = "whsec_test_async";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "shapes");
@@ -209,5 +214,145 @@ describe("parse, parseAsync and unwrap agree", () => {
     const headers = { "X-Lenz-Signature": sign(buf) };
     expect((await strict.parseAsync(buf, headers)).event).toBe("verification.failed");
     expect((await strict.parseAsync(ab, headers)).event).toBe("verification.failed");
+  });
+});
+
+describe("the bytes that were signed are the bytes that are parsed", () => {
+  const strict = new LenzWebhooks({ secret: SECRET });
+  const signed = JSON.stringify({
+    event: "verification.failed",
+    task_id: "t_signed",
+    delivered_at: new Date().toISOString(),
+  });
+
+  it("parseAsync ignores a caller who changes the buffer while it verifies", async () => {
+    const buf = Buffer.from(signed);
+    const headers = { "X-Lenz-Signature": sign(buf) };
+    // Same length, so the JSON stays valid: only the fields differ.
+    const at = buf.indexOf("t_signed");
+    setImmediate(() => buf.write("t_forged", at));
+    const outcome = await strict.parseAsync(buf, headers).then(
+      (event) => ({ taskId: event.taskId }),
+      (exc: unknown) => ({ error: exc }),
+    );
+    // Either the signed bytes' event, or a refusal: never the changed fields.
+    if ("taskId" in outcome) expect(outcome.taskId).toBe("t_signed");
+    else expect(outcome.error).toBeInstanceOf(LenzWebhookSignatureError);
+    expect(buf.toString()).toContain("t_forged");
+  });
+
+  it("verifySignatureAsync and unwrap do not read the caller's buffer after verifying", async () => {
+    const buf = Buffer.from(signed);
+    const headers = { "X-Lenz-Signature": sign(buf) };
+    const at = buf.indexOf("t_signed");
+    const pending = strict.unwrap(
+      new Request("https://example.test/hook", { method: "POST", headers, body: buf }),
+    );
+    buf.write("t_forged", at);
+    expect((await pending).taskId).toBe("t_signed");
+  });
+
+  it("parse reads the buffer once, as signed", () => {
+    const buf = Buffer.from(signed);
+    expect(strict.parse(buf, { "X-Lenz-Signature": sign(buf) }).taskId).toBe("t_signed");
+  });
+});
+
+describe("a body that is not bytes", () => {
+  const strict = new LenzWebhooks({ secret: SECRET });
+  const headers = { "X-Lenz-Signature": "sha256=" + "0".repeat(64) };
+  const hostile: Array<[string, unknown]> = [
+    ["{} from express.json()", {}],
+    ["a parsed object", { event: "verification.completed", task_id: "t" }],
+    ["null", null],
+    ["undefined", undefined],
+    ["a number", 42],
+    ["an array", [1, 2]],
+  ];
+
+  it.each(hostile)(
+    "%s is a TypeError that names the body parser, on every path",
+    async (_n, body) => {
+      const message = /body parser ran before LenzWebhooks/;
+      expect(() => strict.parse(body as never, headers)).toThrow(TypeError);
+      expect(() => strict.parse(body as never, headers)).toThrow(message);
+      await expect(strict.parseAsync(body as never, headers)).rejects.toThrow(TypeError);
+      await expect(strict.parseAsync(body as never, headers)).rejects.toThrow(message);
+    },
+  );
+
+  it("still reports a missing signature before looking at the body", async () => {
+    expect(() => strict.parse({} as never, {})).toThrow(/Missing webhook signature/);
+    await expect(strict.parseAsync({} as never, {})).rejects.toThrow(/Missing webhook signature/);
+  });
+
+  it("a DataView and a Uint16Array are read as the bytes they cover", async () => {
+    let text = JSON.stringify({ event: "x.y", task_id: "t_view" });
+    if (text.length % 2) text += " ";
+    const bytes = new TextEncoder().encode(text);
+    expect(bytes.length % 2).toBe(0);
+    const h = { "X-Lenz-Signature": sign(bytes) };
+    const u16 = new Uint16Array(bytes.buffer.slice(0));
+    const dv = new DataView(bytes.buffer.slice(0));
+    for (const view of [u16, dv]) {
+      expect(strict.parse(view as never, h).taskId).toBe("t_view");
+      expect((await strict.parseAsync(view as never, h)).taskId).toBe("t_view");
+    }
+    // A view onto part of a larger buffer reads only its own bytes.
+    const big = new Uint8Array(bytes.length + 8);
+    big.set(bytes, 4);
+    const part = new Uint8Array(big.buffer, 4, bytes.length);
+    expect(strict.parse(part, h).taskId).toBe("t_view");
+    expect((await strict.parseAsync(part, h)).taskId).toBe("t_view");
+  });
+});
+
+describe("the secret", () => {
+  it("an empty secret is refused by both verify functions, with the same error", async () => {
+    const body = "{}";
+    const sig = sign(body, "");
+    let sync = "";
+    try {
+      verifySignature(body, sig, "");
+    } catch (exc) {
+      sync = String((exc as Error).message);
+    }
+    expect(sync).toMatch(/non-empty/);
+    await expect(verifySignatureAsync(body, sig, "")).rejects.toThrow(sync);
+    await expect(verifySignatureAsync(body, sig, "")).rejects.toBeInstanceOf(Error);
+  });
+});
+
+describe("header values", () => {
+  const strict = new LenzWebhooks({ secret: SECRET });
+  const body = JSON.stringify({ event: "x.y", task_id: "t_arr" });
+  const good = sign(body);
+
+  it("an array value reads as its first element, on both paths", async () => {
+    const headers = { "X-Lenz-Signature": [good, "sha256=other"] } as never;
+    expect(strict.parse(body, headers).taskId).toBe("t_arr");
+    expect((await strict.parseAsync(body, headers)).taskId).toBe("t_arr");
+  });
+
+  it("an array whose first element is wrong is a mismatch, an empty one is missing", async () => {
+    const wrong = { "X-Lenz-Signature": ["sha256=other", good] } as never;
+    expect(() => strict.parse(body, wrong)).toThrow(/signature mismatch/);
+    await expect(strict.parseAsync(body, wrong)).rejects.toThrow(/signature mismatch/);
+    const empty = { "X-Lenz-Signature": [] } as never;
+    expect(() => strict.parse(body, empty)).toThrow(/Missing webhook signature/);
+    await expect(strict.parseAsync(body, empty)).rejects.toThrow(/Missing webhook signature/);
+  });
+});
+
+describe("unwrap on a Request whose body was read", () => {
+  it("says to call unwrap first", async () => {
+    const strict = new LenzWebhooks({ secret: SECRET });
+    const request = new Request("https://example.test/hook", {
+      method: "POST",
+      headers: { "X-Lenz-Signature": sign("{}") },
+      body: "{}",
+    });
+    await request.text();
+    await expect(strict.unwrap(request)).rejects.toThrow(/unwrap before reading the body/);
   });
 });

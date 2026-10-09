@@ -74,8 +74,11 @@ async function workerd() {
     const { code, inputs } = await bundleWorker({ resolveDir: project });
     if (/node:|\bBuffer\b/.test(code))
       throw new Error("the bundle names a Node built-in or Buffer");
-    if (!inputs.some((f) => f.endsWith("lenz-io/dist/index.edge.js"))) {
-      throw new Error("the workerd condition did not resolve to index.edge.js");
+    if (!inputs.some((f) => f.endsWith("lenz-io/dist/index.js"))) {
+      throw new Error("the workerd condition did not resolve to dist/index.js");
+    }
+    if (inputs.some((f) => f.endsWith("index.browser.js"))) {
+      throw new Error("the workerd condition resolved the browser build");
     }
     await withWorker(code, async (fetch) => {
       const body = JSON.stringify({
@@ -105,15 +108,50 @@ async function workerd() {
       });
       if (bad.status !== 400) throw new Error(`a forged request answered ${bad.status}`);
     });
-    report("workerd", true, "Miniflare, Node compatibility off, resolved index.edge.js");
+    report(
+      "workerd",
+      true,
+      "Miniflare, Node compatibility off, resolved dist/index.js, not the browser build",
+    );
   } catch (e) {
     report("workerd", false, String(e?.stack ?? e));
+  }
+}
+
+// Which build each bundler condition set resolves to: the edge ones must skip
+// `browser` (it has no webhook receiver); `browser` alone is the control.
+async function conditions() {
+  if (!wanted("workerd")) return;
+  const cases = [
+    [["workerd", "worker", "browser"], false],
+    [["edge-light", "browser"], false],
+    [["deno", "browser"], false],
+    [["browser"], true],
+  ];
+  for (const [list, browser] of cases) {
+    try {
+      const { inputs } = await bundleWorker({ resolveDir: project, conditions: list });
+      const got = inputs.some((f) => f.endsWith("index.browser.js"));
+      report(
+        `conditions ${list.join(",")}`,
+        got === browser,
+        got ? "browser build (no LenzWebhooks)" : "dist/index.js",
+      );
+    } catch (e) {
+      // The browser build has no LenzWebhooks, so the worker's import fails: the control.
+      report(
+        `conditions ${list.join(",")}`,
+        browser,
+        "browser build (no LenzWebhooks), as expected",
+      );
+    }
   }
 }
 
 try {
   install();
   await workerd();
+  await conditions();
   runtime("node", "node", ["check.mjs"], "dist/index.js");
   if (wanted("node")) {
     const cjs = spawnSync(
@@ -134,7 +172,7 @@ try {
     "deno",
     process.env.DENO_BIN ?? "deno",
     ["run", "--allow-read", "--allow-env", "check.mjs"],
-    "dist/index.edge.js",
+    "dist/index.js",
   );
 } finally {
   rmSync(work, { recursive: true, force: true });

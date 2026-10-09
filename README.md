@@ -581,9 +581,9 @@ signature, a body that is not a JSON object, or a stale `delivered_at`.
 // Next.js: app/api/lenz-webhook/route.ts
 import { LenzWebhooks } from "lenz-io";
 
-const webhooks = new LenzWebhooks({ secret: process.env.LENZ_WEBHOOK_SECRET! });
-
 export async function POST(request: Request) {
+  // Built inside the handler: `next build` imports this module without the secret.
+  const webhooks = new LenzWebhooks({ secret: process.env.LENZ_WEBHOOK_SECRET! });
   const event = await webhooks.unwrap(request); // throws LenzWebhookSignatureError
   // ...handle the event (below)...
   return Response.json({ received: "ok" });
@@ -1103,7 +1103,7 @@ An OAuth access token for the Lenz API works wherever the API key goes: pass it 
 - Node 22.12+ (22, 24)
 - ESM + CJS dual exports
 - TypeScript types included
-- Runs on Node 22.12+ and on edge runtimes with no Node built-ins: the `workerd`, `worker`, `edge-light` and `deno` export conditions resolve to a build that imports none (Cloudflare Workers without the Node compatibility flag, Deno, Vercel Edge). Verify webhooks there with `await webhooks.unwrap(request)`; the synchronous `parse` needs Node. Bun and Node use the main build. The client needs `globalThis.fetch` (every runtime above has it; pass `fetch` in the options otherwise)
+- Runs on Node 22.12+ and on edge runtimes with no Node built-ins: the `workerd`, `edge-light` and `deno` export conditions resolve to the main build, which imports none, ahead of the `browser` one (which has no webhook receiver). Tested: Cloudflare Workers (`workerd`, without the Node compatibility flag), Deno and Bun. Vercel Edge and Next.js edge runtime are supported through the `edge-light` condition but not tested in a real Next.js build. Verify webhooks there with `await webhooks.unwrap(request)`; the synchronous `parse` needs Node. Bun and Node use the main build. The client needs `globalThis.fetch` (every runtime above has it; pass `fetch` in the options otherwise)
 
 ## Contributing
 
