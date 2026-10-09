@@ -95,6 +95,7 @@ import type {
   Certificate,
   ExtractInput,
   ExtractedClaims,
+  LibraryItem,
   LibraryList,
   LibraryListInput,
   OnProgress,
@@ -116,6 +117,7 @@ import type {
   Usage,
   Verification,
   VerificationList,
+  VerificationListItem,
   VerifyAndWaitInput,
   VerifyBatchAndWaitInput,
   VerifyBatchInput,
@@ -306,6 +308,27 @@ const REVIEW_STATUSES: readonly string[] = [
   "failed",
 ];
 
+/**
+ * Every item of a paginated list, one page request at a time, from the page
+ * `first` asks for. The page size is read from each response; the walk stops
+ * on a short or empty page. Nothing is fetched before the first item is
+ * asked for, and no page ahead of the one being read.
+ */
+async function* walkPages<T>(
+  read: (page: number) => Promise<{ items?: T[]; page_size?: number }>,
+  first: number,
+): AsyncGenerator<T, void, undefined> {
+  for (let page = first; ; page++) {
+    const body = await read(page);
+    const items = Array.isArray(body.items) ? body.items : [];
+    yield* items;
+    const size = body.page_size;
+    if (items.length === 0 || (typeof size === "number" && size > 0 && items.length < size)) {
+      return;
+    }
+  }
+}
+
 function isPlainObject(v: unknown): boolean {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
@@ -489,6 +512,20 @@ class VerificationsNamespace {
   }
 
   /**
+   * Every verification of the account, newest first, across pages:
+   *
+   * ```ts
+   * for await (const v of client.verifications.listAll()) console.log(v.verification_id);
+   * ```
+   *
+   * One `list` request per page, made when the previous page has been read;
+   * starts at `page` (default 1) and stops on a short or empty page.
+   */
+  listAll({ page = 1 }: { page?: number } = {}): AsyncIterable<VerificationListItem> {
+    return walkPages((p) => this.list({ page: p }), page);
+  }
+
+  /**
    * Fetch a single verification. Accepts anon callers — any non-hidden
    * public claim resolves without an API key (the old `library.get`
    * endpoint merged into this one).
@@ -641,6 +678,24 @@ class LibraryNamespace {
       authRequired: false,
     });
     return normalizeVerificationList(body) as LibraryList;
+  }
+
+  /**
+   * Every library item matching the filters, across pages: one `list`
+   * request per page, made when the previous page has been read; starts at
+   * `page` (default 1) and stops on a short or empty page. Throws for
+   * `sort: "random"`, whose pages are separate samples, not one list.
+   */
+  listAll(input: LibraryListInput = {}): AsyncIterable<LibraryItem> {
+    const read = (page: number) => this.list({ ...input, page });
+    return (async function* () {
+      if (input.sort === "random") {
+        throw new Error(
+          'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
+        );
+      }
+      yield* walkPages(read, input.page ?? 1);
+    })();
   }
 }
 
