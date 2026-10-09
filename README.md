@@ -473,8 +473,8 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
   switch (event.event) {
     case "verification.completed": {
       const completed = event as VerificationCompleted;
-      const r = completed.result as Record<string, unknown>;
-      // r.verdict, r.lenz_score, r.confidence, ...
+      const r = completed.verification?.result;
+      // r?.verdict, r?.lenz_score, r?.confidence, ...
       break;
     }
     case "verification.needs_input": {

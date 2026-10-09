@@ -48,10 +48,10 @@ app.post("/lenz-webhook", express.raw({ type: "application/json" }), (req, res) 
   switch (event.event) {
     case "verification.completed": {
       const e = event as VerificationCompleted;
-      // Verdict block is FLAT on e.result — no nested object.
-      const r = e.result as Record<string, unknown>;
+      // The verdict block is on e.verification.result.
+      const r = e.verification?.result;
       console.log(
-        `Completed: ${e.verificationId} -> ${r["verdict"]} (lenz_score ${r["lenz_score"]}, confidence ${r["confidence"]})`,
+        `Completed: ${e.verificationId} -> ${r?.verdict} (lenz_score ${r?.lenz_score}, confidence ${r?.confidence})`,
       );
       // TODO: persist verdict + sources; ping users; etc.
       break;
