@@ -6,6 +6,11 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-10-09
+
+Minor release. Existing code keeps working unchanged; nothing to do on
+upgrade.
+
 ### Added
 
 - **`language: "auto"`** on `assess`, `verify`, `verifyAndWait` and
@@ -90,6 +95,12 @@ in the newer form (this release does not ask for it):
   `verify` / `ask` / `assess` blocks of `/me/usage` is cancelled. The fields
   stay deprecated and are kept for existing callers. The README, the type
   docs and `openapi.json` no longer give a date.
+
+### Docs
+
+- `openapi.json` resynced from the API: the `X-Lenz-API-Version` request
+  header and response header, `language: "auto"`, a documented error body on
+  every operation, and the `/verify/batch` and `/select` receipts as `202`.
 
 ## [2.20.0] - 2026-10-05
 
