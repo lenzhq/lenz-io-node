@@ -350,9 +350,9 @@ work and are deprecated. A citation pair's own enumerable keys are read, as
 when it is serialized. Giving both spellings of a field with different values
 throws an `Error` naming both before anything is sent.)
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` overrides it for that call.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
-- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` (default 100s: a long text can take up to 90s on the server).
+- **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` in the options argument (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
 - **`client.verifyAndWait({ claim, ... })`** → `Verification`. Submit + poll until the pipeline lands (sync ergonomic). Equivalent to `wait(verify(...))`.
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
@@ -431,10 +431,9 @@ await client.citecheckAndWait({ text: draft }, { timeoutMs: 600_000, onUpdate })
 ```
 
 `timeoutMs` is the wait's deadline: 300 s by default for verifications, 10
-minutes for reviews and citation checks. A verification wait starts it after
-the submit, and with `0` or less it still polls once. A review or citation
-wait counts the submit inside it: with `0` or less the submit gets no time and
-usually ends in `LenzRequestTimeoutError`, so give those waits a real budget.
+minutes for reviews and citation checks. Every wait starts it after the submit
+(review and citation waits since 3.0; before, their budget included the
+submit). With `0` or less a wait submits normally and polls once.
 The verification waits call `onProgress(taskId, progress)`; review and citation
 waits call `onUpdate(body)` with the whole changed body. Passing `timeoutMs` /
 `onProgress` inside the `verifyAndWait` / `verifyBatchAndWait` input, as 2.x
@@ -488,6 +487,41 @@ An unknown id, another account's, or (for `cancel`) the task of a run started
 on the website throws `LenzNotFoundError` (404); a purged review or check
 throws `LenzGoneError` (410). An empty id, `.` or `..` throws before any request
 is sent.
+
+### Aborting a call
+
+Every method takes a `signal` (see [Configuration](#configuration)). When it
+fires, the call stops where it is (a request, a retry sleep, a poll, the items
+of a `listAll`) and throws `LenzAbortError`:
+
+```ts
+import { LenzAbortError } from "lenz-io";
+
+try {
+  await client.verifyAndWait({ claim }, { signal: AbortSignal.timeout(60_000) });
+} catch (e) {
+  if (e instanceof LenzAbortError && e.taskId) await client.cancel(e.taskId);
+  else throw e;
+}
+```
+
+- `LenzAbortError` is not a `LenzError` (an abort is your decision, not an API
+  answer), its `name` is `"AbortError"`, and its `cause` is the signal's
+  `reason` (a `TimeoutError` for `AbortSignal.timeout(ms)`, which bounds a
+  whole call, retries and polls included).
+- **Nothing is cancelled on the server.** Work the server accepted keeps
+  running and is charged if it completes. Stop it with `cancel`,
+  `cancelReview` or `cancelCitecheck`, as above.
+- It carries what the call knew: `idempotencyKey` when the request was keyed
+  (resend with it to get the same answer, or the submit's receipt, back
+  instead of starting the work again), and once the work was accepted,
+  `taskId`, `batchId` and `taskIds` (every accepted task, in input order),
+  `reviewId` or `citecheckId`. A call with `idempotency: false` carries no
+  key; if it was aborted during the submit, there is no safe way to find the
+  task (`verifications.list` may show it).
+- A client copy made with a signal (`withOptions({ signal })`) is dead once the
+  signal fires: every later call on it throws `LenzAbortError`. Make such a
+  copy per request, and cancel through the client you made it from.
 
 ## Response shape — the unified vocabulary
 
@@ -1091,10 +1125,74 @@ new Lenz({
 });
 ```
 
+`timeoutMs` (a finite number of ms above 0) is the timeout of one HTTP attempt;
+`maxRetries` (a whole number, 0 or more) is how many times a failed request is
+retried. Any other value throws an `Error` when the client is made.
+
 Environment variables:
 
 - `LENZ_API_KEY` — read if `apiKey` is not passed
 - `LENZ_BASE_URL` — read if `baseUrl` is not passed
+
+### Per-call options
+
+Every method takes request options for one call: in its options argument
+(`verify(input, options)`, `getStatus(taskId, options)`, `usage(options)`, …),
+or merged into the options object it already takes (the waits' options,
+`getReview`'s `{ view }`, `verifications.list`'s `{ page }`,
+`verifications.related`'s `{ limit }`):
+
+```ts
+await client.assess({ claim }, { timeoutMs: 20_000, maxRetries: 0 });
+await client.verify({ claim }, { signal, headers: { "X-Trace-Id": traceId } });
+await client.getReview(reviewId, { view: "issues", signal });
+```
+
+| Option       | What it does                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `signal`     | Stops the call: every request, retry sleep and poll it makes. Throws `LenzAbortError` (see [Aborting a call](#aborting-a-call)). |
+| `timeoutMs`  | The timeout of one HTTP attempt, in ms; each retry gets it again.                                                                |
+| `maxRetries` | How many times a failed request is retried.                                                                                      |
+| `headers`    | Extra request headers. `null` removes one a `withOptions` copy set; `undefined` is ignored.                                      |
+
+What the options bound, per method:
+
+| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                  | `maxRetries`                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                   | each request's retries                                           |
+| `extract`, `assess`                                                                                                                                                              | each attempt; used as given, even below the 150 s / 100 s these wait at least when the timeout is inherited  | each request's retries                                           |
+| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left | the submit's; `wait` takes none, and the polls keep the client's |
+| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                 | each page request's retries                                      |
+| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                             | every call made through the copy                                 |
+
+For one call, the call's value wins, then the deprecated `timeoutMs` inside an
+`extract` / `assess` input, then a `withOptions` copy's, then the client's.
+Headers merge (case does not matter; the call's value wins), the others
+replace. A per-call `timeoutMs` below the `extract` / `assess` floor can end a
+call the server is still running; a retry with the same idempotency key then
+replays it rather than running it twice. Invalid values (a `timeoutMs` that is
+not a finite number above 0, a `maxRetries` that is not a whole number from 0,
+a header value that is not a string or `null`) throw an `Error` before any
+request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+`Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host` and
+`Transfer-Encoding` cannot be set as options.
+
+`client.withOptions(options)` returns a copy of the client whose options apply
+to every call made through it. The copy is cheap: it shares the `fetch`, key,
+base URL and logger, keeps your subclass and any method you replaced, and
+leaves the original untouched. A copy's `timeoutMs` is also the attempt timeout
+of its waits' polls.
+
+```ts
+const quick = client.withOptions({ timeoutMs: 10_000, maxRetries: 1 });
+
+// One copy per incoming request: the call stops when the caller goes away.
+export async function POST(request: Request): Promise<Response> {
+  const { claim } = (await request.json()) as { claim: string };
+  const perRequest = client.withOptions({ signal: request.signal });
+  return Response.json(await perRequest.assess({ claim }));
+}
+```
 
 An OAuth access token for the Lenz API works wherever the API key goes: pass it as `apiKey` or in `LENZ_API_KEY`.
 

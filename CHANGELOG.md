@@ -113,6 +113,14 @@ must handle). Some upgrades need a change first: see "Migrating".
 Intentional behaviour changes; apart from these and "Breaking", nothing that
 worked on 2.21 behaves differently:
 
+- **Per-request timeouts and retry counts are checked before any request.**
+  A `timeoutMs` must be a finite number of ms above 0 and a `maxRetries` a
+  whole number, 0 or more, wherever they are given: `new Lenz()`, the
+  deprecated `timeoutMs` inside an `extract` / `assess` input, and the new
+  request options and `withOptions`. Any other value (0, a negative number,
+  `NaN`, `Infinity`, a fraction of a retry) throws an `Error`; none of them
+  worked before. A wait's budget is not affected: `timeoutMs` of 0 or less on
+  a wait still polls once.
 - **`reviewAndWait` and `citecheckAndWait` start their `timeoutMs` after the
   submit**, as `verifyAndWait`, `verifyBatchAndWait` and the Python SDK's
   review and citation-check waits do. The submit is no longer cut at the
@@ -187,6 +195,38 @@ worked on 2.21 behaves differently:
 
 ### Added
 
+- **Per-call request options.** Every method takes `signal`, `timeoutMs`,
+  `maxRetries` and `headers` for one call (the `RequestOptions` type): in a new
+  trailing options argument (`verify(input, options)`, `getStatus(taskId,
+options)`, `usage(options)`, …), or merged into the options object a method
+  already takes (the waits' options, `getReview`'s `{ view }`,
+  `verifications.list` / `listAll`'s `{ page }`, `verifications.related`'s
+  `{ limit }`). `timeoutMs` is one HTTP attempt's timeout; on `extract` and
+  `assess` a value given for the call is used as given, even below the 150 s /
+  100 s floor that still applies to an inherited timeout. On the waits
+  `timeoutMs` stays the wait's budget, `signal` and `headers` reach the submit
+  and every poll, and `maxRetries` is the submit's (`wait` takes none).
+  `headers` merge without regard to case; `null` removes one a copy set; the
+  headers the client sets itself (`X-Lenz-API-Version`, `Idempotency-Key`,
+  `Authorization`, `Content-Type`, `Content-Length`, `Host`,
+  `Transfer-Encoding`) are refused. A call made without options sends exactly
+  what it sent before. New types: `RequestOptions`, `GetStatusOptions`
+  (`getStatus`'s options, with the waits' `deadlineAt`), `VerifyAndWaitOptions`
+  (`verifyAndWait` / `verifyBatchAndWait`); `WaitOptions`,
+  `ReviewAndWaitOptions` and `CitecheckAndWaitOptions` gain `signal` and
+  `headers` (the last two, and `VerifyAndWaitOptions`, `maxRetries`).
+- **`client.withOptions(options)`**: a copy of the client whose request
+  options apply to every call made through it. It shares the `fetch`, key,
+  base URL and logger, keeps a subclass and replaced methods, and leaves the
+  original unchanged. A call's own options win over the copy's.
+- **`LenzAbortError`**, thrown when a call's `signal` (or a copy's) fires:
+  during a request, a retry sleep, a poll, or between the items of a
+  `listAll`. It is not a `LenzError` (code that retries every `LenzError` does
+  not retry an abort); its `name` is `"AbortError"` and its `cause` the
+  signal's `reason`. It carries the request's `idempotencyKey` when it was
+  keyed, and the `taskId`, `batchId` and `taskIds`, `reviewId` or
+  `citecheckId` once the server had accepted the work. Nothing is cancelled
+  on the server: call `cancel`, `cancelReview` or `cancelCitecheck`.
 - **Webhooks on edge runtimes.** `await webhooks.unwrap(request)` takes a
   standard `Request`, reads the raw body once and `X-Lenz-Signature`, and
   verifies with WebCrypto. `await webhooks.parseAsync(rawBody, headers)` is the
@@ -365,6 +405,7 @@ replacement).
 |                                                                                    | `source_url`, `webhook_url`                                        | `sourceUrl`, `webhookUrl`                                                        |
 | `citecheck` pairs                                                                  | `cited_title`, `cited_authors`, `cited_year`, `cited_journal`      | `citedTitle`, `citedAuthors`, `citedYear`, `citedJournal`                        |
 | `verifyAndWait` / `verifyBatchAndWait` input                                       | `timeoutMs`, `onProgress`                                          | the same fields in the second argument                                           |
+| `extract` / `assess` input                                                         | `timeoutMs`                                                        | `timeoutMs` in the options argument (`extract(input, { timeoutMs })`)            |
 
 `creditsRemaining`, which earlier releases said would be removed in 3.0, is
 kept, and its one-time console warning now says "a future major release".
