@@ -75,6 +75,11 @@ below. Some upgrades need a change first: see "Migrating".
     `citecheck.*` webhook event is the review / citation-check id (dedupe on
     `eventId`); a repeated `verify` answered from the first one is a 202
     (the SDK returns the same receipt either way).
+- **A subclass of `LenzError` that declares its own `retryable` or
+  `idempotencyKey`** (rare) now overrides a member of `LenzError`: under
+  `noImplicitOverride` it needs the `override` modifier (TS4114), and an
+  `idempotencyKey` declared without an initializer needs `declare` (TS2612).
+  The runtime is unaffected.
 - `webhookUrl` keeps its meaning on every method: on `verify` and
   `verifyBatch` an unset, empty or blank one is left out of the request (your
   credential's default URL); on `review` and `citecheck` `""` still means no

@@ -52,8 +52,8 @@ async function main(): Promise<void> {
   //    back low-confidence, so the walkthrough always reaches steps 3 and 4.
   // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
   const doubtful = quick
-    .filter((c) => c.status !== "failed" && c.confidence === "low")
-    .map((c) => ({ claim: c.claim ?? "" }))
+    .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
+    .map((c) => ({ claim: c.claim! }))
     .slice(0, 20);
   const results = await client.verifyBatchAndWait({
     claims: doubtful.length ? doubtful : [{ claim: "Sharks don't get cancer" }],

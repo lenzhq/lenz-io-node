@@ -56,8 +56,8 @@ async function main(): Promise<void> {
   // `verification_url` and you can skip the escalation.
   // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
   const doubtful = quick
-    .filter((c) => c.status !== "failed" && c.confidence === "low")
-    .map((c) => ({ claim: c.claim ?? "" }))
+    .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
+    .map((c) => ({ claim: c.claim! }))
     .slice(0, 20);
   console.log(`Escalating ${doubtful.length} low-confidence claims to full verification:\n`);
   const results = doubtful.length
