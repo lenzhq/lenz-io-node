@@ -5,7 +5,7 @@
  * own contract recordings (`scripts/import-shapes.mjs`), in the shape this
  * release asks for.
  *
- * `fixtures/shapes/oracle/` is what the last 2.x release (2.20.0) handed a
+ * `fixtures/shapes/oracle/` is what the last 2.x release (2.21.0) handed a
  * caller for the same call (`scenarios.ts`, run once against that release and
  * frozen: `shapes/make-oracles.test.ts`). This release must hand over exactly
  * the same:
@@ -97,6 +97,14 @@ const CANCELLED_CITECHECK = [
 ];
 // The event is named `*.cancelled`; the original `*.failed` states `failed`.
 const CANCELLED_EVENT = ["value.event", "value.status"];
+const FAILED_EVENT = [
+  "value.failure.detail",
+  "value.failure.docs_url",
+  "value.verification.failure.detail",
+  "value.verification.failure.docs_url",
+  "value.verification.error",
+  "value.verification.docs_url",
+];
 
 const SERVER_DIFFERS: Record<string, string[]> = {
   // A failed check read back from storage said "Pipeline stopped: <code>."
@@ -142,7 +150,12 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   // states the original shape's live sentence, which the newer shape no
   // longer tells apart from the stored one.
   verify__status_cancelled_durable: CANCELLED_TASK,
-  verify__status_cancelled_live: [...CANCELLED_TASK, "getStatus.value.failure", ...STATUS_SENTENCE],
+  verify__status_cancelled_live: [
+    ...CANCELLED_TASK,
+    ...STATUS_SENTENCE,
+    // The failure block 3.0 fills states the stored sentence.
+    "getStatus.value.failure.detail",
+  ],
   review__get_cancelled: CANCELLED_REVIEW,
   citecheck__get_cancelled: CANCELLED_CITECHECK,
   webhook__verification_cancelled: [
@@ -154,7 +167,8 @@ const SERVER_DIFFERS: Record<string, string[]> = {
     "value.verification.status",
     "value.verification.error",
     "value.verification.docs_url",
-    "value.verification.failure",
+    "value.verification.failure.detail",
+    "value.verification.failure.docs_url",
   ],
   webhook__review_cancelled: [
     ...CANCELLED_EVENT,
@@ -169,12 +183,46 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   // The delivery id the newer review / citation-check events no longer carry
   // (never pollable; dedupe on `eventId`): `taskId` reads the review /
   // citation-check id instead.
-  webhook__review_failed: TASK_ID,
   webhook__review_completed: TASK_ID,
   webhook__review_completed_key_default_url: TASK_ID,
   webhook__review_completed_oversized_rebuilt: TASK_ID,
-  webhook__citecheck_failed: TASK_ID,
   webhook__citecheck_completed: TASK_ID,
+  // The failure block of a failed event: 2.21 built it from the original
+  // flat payload, which carries no sentence, docs link or hint (all null);
+  // the newer event carries the server's own, and a run with no failure code
+  // says "" where 2.21 said null. A verification event's `verification` is a
+  // task status, so it also carries the flat fields a `getStatus` read
+  // derives from that block.
+  webhook__citecheck_failed: [...TASK_ID, "value.citecheck.failure.detail"],
+  webhook__review_failed: [...TASK_ID, "value.review.failure.detail"],
+  webhook__verification_failed_error_none: [
+    "value.failure.code",
+    "value.failure.failure_reason",
+    "value.verification.failure.code",
+    "value.verification.failure.failure_reason",
+    "value.verification.failure_reason",
+    ...FAILED_EVENT,
+  ],
+  webhook__verification_failed_insufficient_evidence: FAILED_EVENT,
+  webhook__verification_failed_not_a_claim: [
+    ...FAILED_EVENT,
+    "value.failure.hint",
+    "value.verification.failure.hint",
+    "value.verification.hint",
+  ],
+  webhook__verification_failed_upstream_unavailable: FAILED_EVENT,
+};
+
+/**
+ * What 3.0 adds on purpose, in any shape (CHANGELOG): a `verification.completed`
+ * event's `verification.result` has the same defaults as `result`.
+ */
+const THREE_X_ADDS: Record<string, string[]> = {
+  webhook__older_webhook_payload_completed: [
+    "value.verification.result.visibility",
+    "value.verification.result.depth",
+    "value.verification.result.coverage",
+  ],
 };
 
 /**
@@ -250,7 +298,12 @@ function differences(
       else if (key in a) out.push(...differences(a[key], o[key], name, canonical, here(key)));
     }
     for (const key of Object.keys(a)) {
-      if (!(key in o) && !NEW_NAMES.has(key) && !(canonical && differs(name, here(key)))) {
+      if (
+        !(key in o) &&
+        !NEW_NAMES.has(key) &&
+        !(canonical && differs(name, here(key))) &&
+        !(THREE_X_ADDS[name] ?? []).includes(here(key))
+      ) {
         out.push(`${here(key)}: unexpected new field`);
       }
     }

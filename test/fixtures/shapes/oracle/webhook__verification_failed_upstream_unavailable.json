@@ -9,6 +9,31 @@
     "status": "failed",
     "error": "framing_failed",
     "failureClass": "upstream_unavailable",
-    "retryable": true
+    "retryable": true,
+    "failure": {
+      "code": "framing_failed",
+      "detail": null,
+      "hint": null,
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "docs_url": null,
+      "failure_reason": "framing_failed"
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "abbf9ef7492b675f71569a2da93dd5cf",
+      "failure_reason": "framing_failed",
+      "failure_class": "upstream_unavailable",
+      "retryable": true,
+      "failure": {
+        "code": "framing_failed",
+        "detail": null,
+        "hint": null,
+        "failure_class": "upstream_unavailable",
+        "retryable": true,
+        "docs_url": null,
+        "failure_reason": "framing_failed"
+      }
+    }
   }
 }

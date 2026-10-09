@@ -34,6 +34,8 @@
         "assessments": null,
         "verifications": null,
         "issues": 0,
+        "claims_found": null,
+        "claim_limit_exceeded": null,
         "citations_found": null,
         "citations_selected": null,
         "citation_limit": null,
@@ -54,7 +56,9 @@
         "failure_class": "invalid_input",
         "retryable": false,
         "hint": "The input requests a short poem about autumn leaves and states no fact. Send one factual claim, or run the text through /extract to enumerate its claims.",
-        "docs_url": "https://lenz.io/docs/errors#invalid-input"
+        "docs_url": "https://lenz.io/docs/errors#invalid-input",
+        "code": "no_checkable_claim",
+        "detail": null
       },
       "citation_issues": [],
       "citation_failures": [],

@@ -30,7 +30,8 @@
           "unchecked": 0,
           "failed": 0
         },
-        "citation_issues": 1
+        "citation_issues": 1,
+        "citation_limit_exceeded": false
       },
       "credits": {
         "charged": 2

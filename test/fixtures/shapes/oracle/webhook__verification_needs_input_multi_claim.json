@@ -12,15 +12,35 @@
       "claims": [
         {
           "text": "The Earth is round.",
-          "domain": ""
+          "domain": "",
+          "claim": "The Earth is round."
         },
         {
           "text": "The Moon is made of cheese.",
-          "domain": "Science"
+          "domain": "Science",
+          "claim": "The Moon is made of cheese."
         }
       ],
       "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
     },
-    "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+    "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select.",
+    "verification": {
+      "status": "needs_input",
+      "task_id": "3d8de9645a32e86715dc032c6213a69e",
+      "reason": "multi_claim",
+      "claims": [
+        {
+          "text": "The Earth is round.",
+          "domain": "",
+          "claim": "The Earth is round."
+        },
+        {
+          "text": "The Moon is made of cheese.",
+          "domain": "Science",
+          "claim": "The Moon is made of cheese."
+        }
+      ],
+      "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."
+    }
   }
 }

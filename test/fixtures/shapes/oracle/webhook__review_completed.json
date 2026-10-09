@@ -47,7 +47,10 @@
         "citation_limit_reached": null,
         "citation_checks": null,
         "citation_issues": 0,
-        "citations_skipped": null
+        "citations_skipped": null,
+        "claims_found": 1,
+        "claim_limit_exceeded": false,
+        "citation_limit_exceeded": null
       },
       "credits": {
         "charged": 11
@@ -101,7 +104,8 @@
             "identified_claims": [],
             "hint": null,
             "suggested_rewrite": null,
-            "failure": null
+            "failure": null,
+            "more_claims": []
           },
           "escalation": {
             "matched_rules": ["verdict"],

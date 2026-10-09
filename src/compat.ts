@@ -369,6 +369,19 @@ export function normalizeTaskStatus(body: unknown): unknown {
     fill(out, "failure_class", "cancelled");
     fill(out, "retryable", false);
     fill(out, "docs_url", CANCELLED_DOCS_URL);
+    // And the failure block 2.x code reads (`status_detail.failure.code`),
+    // as 2.21 built it for a run cancelled while it was running.
+    if (!isObj(out["failure"])) {
+      out["failure"] = {
+        code: "cancelled",
+        detail: CANCELLED_SENTENCE,
+        hint: null,
+        failure_class: "cancelled",
+        retryable: false,
+        docs_url: CANCELLED_DOCS_URL,
+        failure_reason: "cancelled",
+      };
+    }
     return out;
   }
   if (body["status"] !== "failed") return out;

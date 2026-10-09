@@ -86,8 +86,22 @@ describe("a cancelled verification", () => {
     const status = await client(serving([[/verify\/status/, () => json(200, body)]])).getStatus(
       "t",
     );
-    // What 2.21 read for the same task, with the one new thing: the status.
-    expect(status).toEqual({ ...oracle.getStatus.value, status: "cancelled" });
+    // What 2.21 read for the same task, with the status, and the failure
+    // block 2.21 built for a run cancelled while it was running.
+    expect(status).toEqual({
+      ...oracle.getStatus.value,
+      status: "cancelled",
+      failure: {
+        code: "cancelled",
+        detail: "Cancelled.",
+        hint: null,
+        failure_class: "cancelled",
+        retryable: false,
+        docs_url: "https://lenz.io/docs/errors#cancelled",
+        failure_reason: "cancelled",
+      },
+    });
+    expect(status.failure?.code).toBe("cancelled");
     expect(status.retryable).toBe(false);
     expect(status.failure_class).toBe("cancelled");
   });
@@ -163,6 +177,15 @@ describe("a cancelled verification", () => {
       failure_class: "cancelled",
       retryable: false,
       docs_url: "https://lenz.io/docs/errors#cancelled",
+      failure: {
+        code: "cancelled",
+        detail: "Cancelled.",
+        hint: null,
+        failure_class: "cancelled",
+        retryable: false,
+        docs_url: "https://lenz.io/docs/errors#cancelled",
+        failure_reason: "cancelled",
+      },
     });
     expect(out[0]!.verification).toBeUndefined();
   });

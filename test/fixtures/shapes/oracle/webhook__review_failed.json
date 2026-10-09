@@ -40,7 +40,10 @@
         "citation_limit_reached": null,
         "citation_checks": null,
         "citation_issues": 0,
-        "citations_skipped": null
+        "citations_skipped": null,
+        "claims_found": null,
+        "claim_limit_exceeded": null,
+        "citation_limit_exceeded": null
       },
       "credits": {
         "charged": 0
@@ -57,7 +60,9 @@
         "failure_class": "invalid_input",
         "retryable": false,
         "hint": "No factual statement that can be checked against evidence was found in the input. Send one factual claim, or run the text through /extract to enumerate its claims.",
-        "docs_url": "https://lenz.io/docs/errors#invalid-input"
+        "docs_url": "https://lenz.io/docs/errors#invalid-input",
+        "code": "no_checkable_claim",
+        "detail": null
       },
       "more_claims": null,
       "more_claim_locations": null,

@@ -9,6 +9,30 @@
     "status": "failed",
     "error": "",
     "failureClass": "internal",
-    "retryable": false
+    "retryable": false,
+    "failure": {
+      "code": null,
+      "detail": null,
+      "hint": null,
+      "failure_class": "internal",
+      "retryable": false,
+      "docs_url": null,
+      "failure_reason": null
+    },
+    "verification": {
+      "status": "failed",
+      "task_id": "237ee3d0d66932ed162e0fc9cb3decf3",
+      "failure_class": "internal",
+      "retryable": false,
+      "failure": {
+        "code": null,
+        "detail": null,
+        "hint": null,
+        "failure_class": "internal",
+        "retryable": false,
+        "docs_url": null,
+        "failure_reason": null
+      }
+    }
   }
 }

@@ -41,6 +41,8 @@
           "failed": 0
         },
         "issues": 2,
+        "claims_found": null,
+        "claim_limit_exceeded": false,
         "citations_found": null,
         "citations_selected": null,
         "citation_limit": null,
@@ -119,6 +121,7 @@
             "identified_claims": [],
             "hint": null,
             "failure": null,
+            "more_claims": [],
             "suggested_rewrite": null
           },
           "escalation": {
@@ -185,6 +188,7 @@
             "identified_claims": [],
             "hint": null,
             "failure": null,
+            "more_claims": [],
             "suggested_rewrite": null
           },
           "escalation": {
@@ -215,6 +219,7 @@
             "identified_claims": [],
             "hint": null,
             "failure": null,
+            "more_claims": [],
             "suggested_rewrite": null
           },
           "escalation": {
@@ -245,6 +250,7 @@
             "identified_claims": [],
             "hint": null,
             "failure": null,
+            "more_claims": [],
             "suggested_rewrite": null
           },
           "escalation": {

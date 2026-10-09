@@ -26,7 +26,8 @@
         "citation_limit": 20,
         "citation_limit_reached": null,
         "citation_checks": null,
-        "citation_issues": 0
+        "citation_issues": 0,
+        "citation_limit_exceeded": null
       },
       "credits": {
         "charged": 0
@@ -39,7 +40,9 @@
         "failure_class": "invalid_input",
         "retryable": false,
         "hint": "The text has no citation to check: no link, DOI or numbered reference with one.",
-        "docs_url": "https://lenz.io/docs/errors#invalid-input"
+        "docs_url": "https://lenz.io/docs/errors#invalid-input",
+        "code": "no_citations",
+        "detail": null
       },
       "more_citations": null
     }

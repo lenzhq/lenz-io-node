@@ -12,11 +12,25 @@
       "claims": [
         {
           "text": "The Eiffel Tower is in Berlin.",
-          "domain": ""
+          "domain": "",
+          "claim": "The Eiffel Tower is in Berlin."
         }
       ],
       "hint": null
     },
-    "hint": ""
+    "hint": "",
+    "verification": {
+      "status": "needs_input",
+      "task_id": "425adff0c4b5391aab3d85e84c1deae6",
+      "reason": "multi_claim",
+      "claims": [
+        {
+          "text": "The Eiffel Tower is in Berlin.",
+          "domain": "",
+          "claim": "The Eiffel Tower is in Berlin."
+        }
+      ],
+      "hint": null
+    }
   }
 }
