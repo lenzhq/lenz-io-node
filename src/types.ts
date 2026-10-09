@@ -1061,6 +1061,10 @@ export interface VerifyInput {
  * plain objects at runtime — this interface exists purely for IDE
  * autocompletion (mirrors Python's `VerifyBatchItem` TypedDict).
  *
+ * Fields are camelCase (`sourceUrl`, `webhookUrl`); the 2.x snake_case names
+ * still work and are deprecated. Giving both spellings with different values
+ * throws before anything is sent.
+ *
  * Precedence on conflicting language: per-item `language` overrides the
  * batch-wide `language` on `VerifyBatchInput`, which overrides the
  * implicit English default. SDK forwards both verbatim; server is
@@ -1076,7 +1080,16 @@ export interface VerifyBatchItem {
   text?: string | null;
   /** Output language (ISO 639-1). `"auto"` is not accepted. */
   language?: string;
+  /** The page the claim came from, if any. */
+  sourceUrl?: string;
+  /**
+   * Where this item's webhook goes; overrides the batch-wide `webhookUrl`.
+   * An empty or blank value is not sent (the credential's default URL).
+   */
+  webhookUrl?: string;
+  /** @deprecated Use `sourceUrl`. Still sent as before; must equal `sourceUrl` if both are given. */
   source_url?: string;
+  /** @deprecated Use `webhookUrl`. Still sent as before; must equal `webhookUrl` if both are given. */
   webhook_url?: string;
   /**
    * @deprecated Has no effect: it is not sent. The batch is keyed as a whole
@@ -2004,6 +2017,10 @@ export interface GetReviewOptions {
  * One statement and the source it cites, for `citecheck({ pairs })`:
  * `statement` (1 to 1,000 characters) and exactly one of `url` (http or
  * https) and `doi` (the DOI alone, like `10.1038/nature12373`).
+ *
+ * Fields are camelCase (`citedTitle`, `citedAuthors`, `citedYear`,
+ * `citedJournal`); the 2.x snake_case names still work and are deprecated.
+ * Giving both spellings with different values throws before anything is sent.
  */
 export interface CitationPair {
   statement: string;
@@ -2012,12 +2029,20 @@ export interface CitationPair {
   /** Up to 3 excerpts the statement quotes from the source, each 15 to 500 characters and words of the statement. */
   quotes?: string[];
   /** With `doi`: the title the reference gives. */
-  cited_title?: string;
+  citedTitle?: string;
   /** With `doi`: the authors, family names, at most 10. */
-  cited_authors?: string[];
+  citedAuthors?: string[];
   /** With `doi`: the year the reference gives, four digits. */
-  cited_year?: string;
+  citedYear?: string;
   /** With `doi`: the journal the reference gives. */
+  citedJournal?: string;
+  /** @deprecated Use `citedTitle`. Still sent as before; must equal `citedTitle` if both are given. */
+  cited_title?: string;
+  /** @deprecated Use `citedAuthors`. Still sent as before; must equal `citedAuthors` if both are given. */
+  cited_authors?: string[];
+  /** @deprecated Use `citedYear`. Still sent as before; must equal `citedYear` if both are given. */
+  cited_year?: string;
+  /** @deprecated Use `citedJournal`. Still sent as before; must equal `citedJournal` if both are given. */
   cited_journal?: string;
 }
 

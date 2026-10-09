@@ -516,6 +516,97 @@ function sendsWebhookUrl(url: unknown): boolean {
   return typeof url === "string" ? url.trim() !== "" : Boolean(url);
 }
 
+/** The camelCase names a batch item takes beside its 2.x snake_case ones. */
+const BATCH_ITEM_ALIASES: Readonly<Record<string, string>> = {
+  sourceUrl: "source_url",
+  webhookUrl: "webhook_url",
+};
+
+/** The camelCase names a citation pair takes beside its 2.x snake_case ones. */
+const CITATION_PAIR_ALIASES: Readonly<Record<string, string>> = {
+  citedTitle: "cited_title",
+  citedAuthors: "cited_authors",
+  citedYear: "cited_year",
+  citedJournal: "cited_journal",
+};
+
+/** Equal for an alias pair: the same value, or arrays equal element by element, in order. */
+function sameAliasValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+}
+
+/**
+ * Throws when an input gives both spellings of a field with different
+ * values. `undefined` counts as absent. Only the alias pairs are checked.
+ */
+function checkAliases(
+  input: Record<string, unknown>,
+  aliases: Readonly<Record<string, string>>,
+  where: string,
+): void {
+  for (const [camel, snake] of Object.entries(aliases)) {
+    const a = input[camel];
+    const b = input[snake];
+    if (a !== undefined && b !== undefined && !sameAliasValue(a, b)) {
+      throw new Error(`${where}: ${camel} and ${snake} differ; send one of them.`);
+    }
+  }
+}
+
+/**
+ * Citation pairs as the API names their fields. Pairs with no camelCase key
+ * go as given (the same array when none has one), so a 2.x call sends the
+ * same bytes; a pair with one is copied with the key renamed in place.
+ */
+function pairsToWire(pairs: unknown): unknown {
+  if (!Array.isArray(pairs)) return pairs;
+  let changed = false;
+  const out = pairs.map((pair: unknown, i) => {
+    if (pair === null || typeof pair !== "object" || Array.isArray(pair)) return pair;
+    const fields = pair as Record<string, unknown>;
+    checkAliases(fields, CITATION_PAIR_ALIASES, `citecheck() pairs[${i}]`);
+    const wire = toWireNames(fields, CITATION_PAIR_ALIASES);
+    if (wire !== fields) changed = true;
+    return wire;
+  });
+  return changed ? out : pairs;
+}
+
+/** The value of an alias pair: the snake_case one when set, else the camelCase one. */
+function aliasValue(input: Record<string, unknown>, camel: string, snake: string): unknown {
+  return input[snake] !== undefined ? input[snake] : input[camel];
+}
+
+/**
+ * The object with each camelCase alias renamed to its wire name, at the
+ * same place in the caller's key order. An object with no alias key is
+ * returned as it is (the same object), so a 2.x input sends the same bytes.
+ * The input is never changed.
+ */
+function toWireNames(
+  input: Record<string, unknown>,
+  aliases: Readonly<Record<string, string>>,
+): Record<string, unknown> {
+  const keys = Object.keys(input);
+  if (!keys.some((k) => Object.hasOwn(aliases, k))) return input;
+  const snakes = new Set(Object.values(aliases));
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const value = input[k];
+    const camel = Object.hasOwn(aliases, k);
+    // An unset spelling of an aliased field is absent: the other one places it.
+    if (value === undefined && (camel || snakes.has(k))) continue;
+    const name = camel ? aliases[k]! : k;
+    // Both spellings given (equal, checked before): the first one places it.
+    if (Object.hasOwn(out, name)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
 /**
  * The server's machine-readable `code` from the response body, or `""`.
  *
@@ -827,14 +918,20 @@ export class Lenz {
     const body: Record<string, unknown> = {
       // Per-item shape passes through verbatim — `VerifyBatchItem` allows
       // any subset including a per-item `language` override.
-      claims: input.claims.map((c) => {
+      claims: input.claims.map((c, i) => {
+        // `sourceUrl` / `webhookUrl` are the camelCase names of `source_url` /
+        // `webhook_url`; the body is built in a fixed key order either way.
+        const fields = c as Record<string, unknown>;
+        checkAliases(fields, BATCH_ITEM_ALIASES, `verifyBatch() claims[${i}]`);
+        const sourceUrl = aliasValue(fields, "sourceUrl", "source_url");
+        const webhookUrl = aliasValue(fields, "webhookUrl", "webhook_url");
         const item: Record<string, unknown> = {
           text: c.claim || c.text,
-          source_url: c.source_url ?? "",
+          source_url: sourceUrl ?? "",
         };
         // Omitted when unset: an omitted webhook_url means the key's default
         // URL. An empty string is never sent in its place.
-        if (sendsWebhookUrl(c.webhook_url)) item.webhook_url = c.webhook_url;
+        if (sendsWebhookUrl(webhookUrl)) item.webhook_url = webhookUrl;
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
         if (c.depth) item.depth = c.depth;
@@ -1183,7 +1280,9 @@ export class Lenz {
     if (input.pairs !== undefined && input.maxCitations !== undefined) {
       throw new Error("maxCitations goes with text: every pair is checked.");
     }
-    const body: Record<string, unknown> = hasText ? { text: input.text } : { pairs: input.pairs };
+    const body: Record<string, unknown> = hasText
+      ? { text: input.text }
+      : { pairs: pairsToWire(input.pairs) };
     if (input.maxCitations !== undefined) body.max_citations = input.maxCitations;
     if (input.language) body.language = input.language;
     if (input.webhookUrl !== undefined && input.webhookUrl !== null)
