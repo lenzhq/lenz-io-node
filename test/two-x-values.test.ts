@@ -119,7 +119,9 @@ const SERVER_DIFFERS: Record<string, string[]> = {
 };
 
 function pattern(p: string): RegExp {
-  return new RegExp("^" + p.replace(/\./g, "\\.").replace(/\*/g, "\\d+") + "$");
+  // Escape every regex metacharacter, then let `*` stand for an array index.
+  const escaped = p.replace(/[\\^$.|?+()[\]{}]/g, "\\$&");
+  return new RegExp("^" + escaped.replace(/\*/g, "\\d+") + "$");
 }
 
 function differs(name: string, path: string): boolean {
