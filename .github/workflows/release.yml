@@ -17,20 +17,10 @@ permissions:
 
 jobs:
   smoke:
-    name: staging smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-      - run: npm ci
-      - name: Run smoke tests against staging
-        env:
-          LENZ_E2E_KEY: ${{ secrets.LENZ_E2E_KEY }}
-          LENZ_BASE_URL: ${{ vars.LENZ_BASE_URL }}
-        run: npm run test:smoke || true # opt-in; if no key, pass
+    # The live API smoke (smoke.yml). `publish` needs it, so a failed or
+    # keyless smoke run stops the release.
+    uses: ./.github/workflows/smoke.yml
+    secrets: inherit
 
   publish:
     name: publish to npm
