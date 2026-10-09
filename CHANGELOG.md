@@ -113,6 +113,13 @@ must handle). Some upgrades need a change first: see "Migrating".
 Intentional behaviour changes; apart from these and "Breaking", nothing that
 worked on 2.21 behaves differently:
 
+- **Every id in a request path is sent as one encoded path segment**, and an
+  empty id, `.` or `..` is refused locally with a plain `Error` before any
+  request (`getStatus`, `select`, `verifications.*` and `ask.*` used to send an
+  empty id to the server and get an API error back). Ordinary ids are sent
+  exactly as before. `verifications.getCertificate`, `verifications.related`
+  and `ask.history` now reject their promise on a bad id instead of throwing
+  synchronously.
 - **`verifyBatch` / `verifyBatchAndWait` and `ask.send` send an
   `Idempotency-Key` by default**, like `verify`, `assess`, `extract` and
   `select` already did: a random key per call, reused across that call's own
