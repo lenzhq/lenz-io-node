@@ -90,6 +90,21 @@ describe("index.browser runtime exports", () => {
         const Ctor = browser[name] as { prototype: object };
         expect(Ctor.prototype instanceof Base, name).toBe(true);
       }
+      // isEvent, which needs no crypto, is in the browser entry too.
+      const isEvent = browser["isEvent"] as (e: unknown, k: string) => boolean;
+      expect(typeof isEvent).toBe("function");
+      expect(isEvent({ event: "review.completed", raw: {} }, "review.completed")).toBe(false);
+      expect(
+        isEvent(
+          {
+            event: "verification.failed",
+            taskId: "t",
+            raw: { verification: { status: "failed", task_id: "t" } },
+            verification: { status: "failed", task_id: "t" },
+          },
+          "verification.failed",
+        ),
+      ).toBe(true);
       // The bundle carries no Node-only import.
       const text = (await import("node:fs")).readFileSync(out, "utf-8");
       expect(text).not.toMatch(/from\s+["']node:/);

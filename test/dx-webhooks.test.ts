@@ -129,3 +129,106 @@ describe("B7: isEvent", () => {
     for (const [, kind] of KINDS) expect(isEvent(event, kind)).toBe(false);
   });
 });
+
+describe("N2: isEvent narrows only when the narrowed type's members are there", () => {
+  const ALL = [...KINDS.map(([, k]) => k), "certificate.timestamped"] as const;
+
+  it("an empty object never narrows", () => {
+    const event = parse({});
+    for (const kind of ALL) expect(isEvent(event, kind)).toBe(false);
+  });
+
+  const V = { task_id: "t1" };
+  it.each([
+    // wrong nested status for the kind
+    [
+      "verification.completed",
+      { verification: { ...V, status: "failed", result: { verdict: "True" } } },
+    ],
+    ["verification.completed", { verification: { ...V, status: "processing", result: {} } }],
+    ["verification.failed", { verification: { ...V, status: "completed" } }],
+    ["verification.needs_input", { verification: { ...V, status: "failed" } }],
+    // wrong types
+    ["verification.completed", { verification: { ...V, status: 7, result: {} } }],
+    ["verification.completed", { verification: { status: "completed", task_id: 7, result: {} } }],
+    ["verification.completed", { verification: { status: "completed", result: {} } }],
+    ["verification.completed", { verification: { ...V, status: "completed", result: "x" } }],
+    ["verification.completed", { verification: { ...V, status: "completed" } }],
+    ["verification.failed", { verification: { ...V } }],
+    // a review without the members ReviewFull requires
+    ["review.completed", { review: {} }],
+    ["review.completed", { review: { review_id: "r", status: "completed", issues: "x" } }],
+    [
+      "review.failed",
+      {
+        review: {
+          review_id: "r",
+          status: 3,
+          issues: [],
+          failures: [],
+          claims: [],
+          summary: {},
+          credits: {},
+        },
+      },
+    ],
+    // a citation check without the members Citecheck requires
+    ["citecheck.completed", { citecheck: {} }],
+    ["citecheck.failed", { citecheck: { citecheck_id: "c", status: "failed" } }],
+  ] as const)("%s with %j does not narrow", (kind, extra) => {
+    expect(isEvent(parse({ event: kind, ...extra }), kind)).toBe(false);
+  });
+
+  it("a minimal well-formed event of each kind narrows", () => {
+    expect(
+      isEvent(
+        parse({
+          event: "verification.completed",
+          verification: { ...V, status: "completed", result: {} },
+        }),
+        "verification.completed",
+      ),
+    ).toBe(true);
+    expect(
+      isEvent(
+        parse({ event: "verification.failed", verification: { ...V, status: "failed" } }),
+        "verification.failed",
+      ),
+    ).toBe(true);
+    const review = {
+      review_id: "r",
+      status: "completed",
+      issues: [],
+      failures: [],
+      claims: [],
+      summary: {},
+      credits: {},
+    };
+    expect(isEvent(parse({ event: "review.completed", review }), "review.completed")).toBe(true);
+    const citecheck = { citecheck_id: "c", status: "completed", summary: {}, credits: {} };
+    const check = parse({ event: "citecheck.completed", citecheck });
+    expect(isEvent(check, "citecheck.completed")).toBe(true);
+    if (isEvent(check, "citecheck.completed")) expect(check.citecheck.citation_issues).toEqual([]);
+  });
+
+  it("the README receiver never throws on a minimal payload", () => {
+    const handle = (event: WebhookEvent): number => {
+      let seen = 0;
+      if (isEvent(event, "verification.completed")) {
+        seen += event.verification.result.verdict ? 1 : 0;
+      } else if (isEvent(event, "verification.failed")) {
+        seen += event.failure?.retryable ? 1 : 0;
+      } else if (isEvent(event, "review.completed")) {
+        for (const i of event.review.issues) seen += i.claim ? 1 : 0;
+      } else if (isEvent(event, "citecheck.completed")) {
+        seen += event.citecheck.citation_issues.length;
+      }
+      return seen;
+    };
+    for (const kind of ALL) {
+      for (const member of [{}, { review: {} }, { citecheck: {} }, { verification: {} }]) {
+        expect(() => handle(parse({ event: kind, ...member }))).not.toThrow();
+      }
+    }
+  });
+});

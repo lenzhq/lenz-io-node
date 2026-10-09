@@ -173,11 +173,15 @@ undefined`), the timeout of a `*AndWait` included. A resend is safe only
 - **`idempotency` option** on `verifyBatch`, `verifyBatchAndWait` and
   `ask.send`.
 - **`isEvent(event, kind)`** narrows a parsed webhook event without a cast,
-  only when the event's name is `kind` and the member it promises
-  (`verification` with its `result`, `review`, `citecheck`, `coverage`) was
-  parsed; `WebhookEventMap` names the narrowed types. **`eventId`**
-  (optional) on every webhook event, from the payload's `event_id` in either
-  shape.
+  only when the event's name is `kind` and the members the narrowed type
+  requires were parsed: a `verification.*` event's `verification` with a
+  string `task_id` and the kind's own `status` (on `verification.completed`,
+  `"completed"` with an object `result`); a review's or citation check's id,
+  `status`, lists, `summary` and `credits`; a certificate's `coverage`. A
+  malformed event under a known name never narrows. `WebhookEventMap` names
+  the narrowed types. It needs no crypto, so the browser entry exports it
+  too. **`eventId`** (optional) on every webhook event, from the payload's
+  `event_id` in either shape.
 - **`verifications.listAll()` and `library.listAll(filters)`**: every item
   across pages, as an `AsyncIterable`, one page request at a time. The page
   size is read from each response and the start page is honoured (one below

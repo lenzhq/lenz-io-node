@@ -27,15 +27,9 @@ import {
   normalizeVerification,
   webhookResultDefaults,
 } from "./compat.js";
-import type {
-  Citecheck,
-  Coverage,
-  FailureClass,
-  ReviewFailureBlock,
-  ReviewFull,
-  TaskStatus,
-  Verification,
-} from "./types.js";
+import { asObject, has } from "./events.js";
+import type { WebhookEvent, WebhookEventBase } from "./events.js";
+import type { Citecheck, Coverage, ReviewFailureBlock, ReviewFull, TaskStatus } from "./types.js";
 
 export const SIGNATURE_HEADER = "X-Lenz-Signature";
 const SIGNATURE_PREFIX = "sha256=";
@@ -83,192 +77,25 @@ export function verifySignature(rawBody: RawBody, signature: string, secret: str
   return true;
 }
 
-// ── Typed events ─────────────────────────────────────────────────────────
-
-export type WebhookEventKind =
-  | "verification.completed"
-  | "verification.failed"
-  | "verification.needs_input"
-  | "certificate.timestamped"
-  | "review.completed"
-  | "review.failed"
-  | "citecheck.completed"
-  | "citecheck.failed"
-  // The `string & NonNullable<unknown>` trick preserves the autocomplete
-  // hints from the literal union while still permitting any future
-  // event-kind string the server adds. `(string & {})` reads cleaner but
-  // trips @typescript-eslint/ban-types.
-  | (string & NonNullable<unknown>);
-
-export interface WebhookEventBase {
-  event: WebhookEventKind;
-  /**
-   * The verification's `task_id`. On `review.*` / `citecheck.*` it is the
-   * delivery's identity, not pollable, and `""` when the payload carries none.
-   */
-  taskId: string;
-  attempt: number;
-  deliveredAt: string;
-  verificationId: string | null;
-  batchId: string | null;
-  status: string;
-  /**
-   * The delivery's stable id (`event_id`): the same on every retry of one
-   * event, so dedupe on it. Absent when the payload carries none (the
-   * original shape of `verification.*` events).
-   */
-  eventId?: string;
-  /** The payload exactly as delivered, in whichever shape the server sent. */
-  raw: Record<string, unknown>;
-}
-
-/**
- * The verification as `client.getStatus` returns it: on the newer payload
- * shape the event carries it as `verification`; on the original shape it is
- * built from the flat fields. `undefined` only when neither is there.
- */
-interface VerificationEventBody {
-  verification?: TaskStatus;
-}
-
-export interface VerificationCompleted extends WebhookEventBase, VerificationEventBody {
-  event: "verification.completed";
-  /** @deprecated Read `verification.result`. */
-  result: Record<string, unknown>;
-}
-
-export interface VerificationFailed extends WebhookEventBase, VerificationEventBody {
-  event: "verification.failed";
-  /**
-   * @deprecated Read `failure.code`. The failure code, with its original
-   * words (`not_a_claim` where `failure.code` says `no_checkable_claim`).
-   */
-  error: string;
-  /** Why it failed: `code`, `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. */
-  failure?: ReviewFailureBlock | null;
-  /**
-   * WHY it failed — the closed `FailureClass` set; "" when an older server omits it.
-   *
-   * @deprecated Read `failure.failure_class`.
-   */
-  failureClass: FailureClass;
-  /**
-   * true iff `upstream_unavailable` — resubmit the same claim after a short wait.
-   *
-   * @deprecated Read `failure.retryable`.
-   */
-  retryable: boolean | null;
-}
-
-export interface VerificationNeedsInput extends WebhookEventBase, VerificationEventBody {
-  event: "verification.needs_input";
-  needsInput: Record<string, unknown>;
-  /**
-   * One sentence on what was unclear and how `select` resolves it (on a
-   * `multi_claim` pause); "" when the server sent none.
-   */
-  hint: string;
-}
-
-/**
- * `event=certificate.timestamped` — the qualified timestamp landed.
- *
- * **This is the event to publish on, not `verification.completed`.** The
- * warranty requires the certificate's timestamp to PRECEDE what you publish
- * or send, so a pipeline that publishes on `completed` races the anchor and
- * can put the statement out before cover exists. `completed` says a verdict
- * was produced; this says the qualified timestamp is in hand and cover is in
- * force.
- *
- * Carries `coverage` INSTEAD of `result`: the event reports that a timestamp
- * landed, not that a verdict was produced, so `result` is null here and
- * reading it will not give you the verification.
- */
-export interface CertificateTimestamped extends WebhookEventBase {
-  event: "certificate.timestamped";
-  coverage: Coverage;
-}
-
-/**
- * `event=review.completed` / `review.failed` — a review ended.
- *
- * `review` is the whole review (`view: "full"`), exactly as
- * `client.getReview` returns it. **Dedupe on `eventId`**: it is stable for
- * the review and event across every retry, while `attempt` changes. A
- * review's own deep checks fire no `verification.*` events.
- *
- * `taskId` is the delivery's identity, not a task you can poll on
- * `/verify/status`; read the review with `client.getReview(reviewId)`. In the
- * API's newer payload shape, which sends no `task_id`, it is the `reviewId`.
- */
-export interface ReviewEventBase extends WebhookEventBase {
-  event: "review.completed" | "review.failed";
-  eventId: string;
-  reviewId: string;
-  review: ReviewFull;
-}
-
-export interface ReviewCompleted extends ReviewEventBase {
-  event: "review.completed";
-}
-
-/** The review's `failure` block says why; `review.outcome` is `unchecked` or `incomplete`. */
-export interface ReviewFailed extends ReviewEventBase {
-  event: "review.failed";
-}
-
-/** Either review event. */
-export type ReviewEvent = ReviewCompleted | ReviewFailed;
-
-/**
- * `event=citecheck.completed` / `citecheck.failed` — a citation check ended.
- * `citecheck` is the whole check, as `client.getCitecheck` returns it.
- * **Dedupe on `eventId`**: it is stable across every retry, while `attempt`
- * changes. `taskId` is the delivery's identity, not pollable (the
- * `citecheckId` in the API's newer payload shape, which sends no `task_id`).
- */
-export interface CitecheckEventBase extends WebhookEventBase {
-  event: "citecheck.completed" | "citecheck.failed";
-  eventId: string;
-  citecheckId: string;
-  citecheck: Citecheck;
-}
-
-export interface CitecheckCompleted extends CitecheckEventBase {
-  event: "citecheck.completed";
-}
-
-/** The check's `failure` block says why. */
-export interface CitecheckFailed extends CitecheckEventBase {
-  event: "citecheck.failed";
-}
-
-/** Either citation-check event. */
-export type CitecheckEvent = CitecheckCompleted | CitecheckFailed;
-
-/**
- * Every event `parse` returns, discriminated on `event`. Ignore an event you
- * do not recognise: new kinds are added without a major release and arrive
- * as the base shape.
- */
-export type WebhookEvent =
-  | ReviewCompleted
-  | ReviewFailed
-  | CitecheckCompleted
-  | CitecheckFailed
-  | VerificationCompleted
-  | VerificationFailed
-  | VerificationNeedsInput
-  | CertificateTimestamped
-  | WebhookEventBase; // catch-all for forward compatibility
-
-function has(o: Record<string, unknown>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(o, key);
-}
-
-function asObject(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
+export type {
+  CertificateTimestamped,
+  CitecheckCompleted,
+  CitecheckEvent,
+  CitecheckEventBase,
+  CitecheckFailed,
+  ReviewCompleted,
+  ReviewEvent,
+  ReviewEventBase,
+  ReviewFailed,
+  VerificationCompleted,
+  VerificationFailed,
+  VerificationNeedsInput,
+  WebhookEvent,
+  WebhookEventBase,
+  WebhookEventKind,
+  WebhookEventMap,
+} from "./events.js";
+export { isEvent } from "./events.js";
 
 /**
  * The verification body of a `verification.*` event: the newer shape's
@@ -427,66 +254,6 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     }
   }
   return base;
-}
-
-/**
- * Each known event kind, as {@link isEvent} narrows it: the member the kind
- * promises is present (a `verification.*` event's `verification`, with its
- * `result` on `completed`).
- */
-export interface WebhookEventMap {
-  "verification.completed": VerificationCompleted & {
-    verification: TaskStatus & { result: Verification };
-  };
-  "verification.failed": VerificationFailed & { verification: TaskStatus };
-  "verification.needs_input": VerificationNeedsInput & { verification: TaskStatus };
-  "certificate.timestamped": CertificateTimestamped;
-  "review.completed": ReviewCompleted;
-  "review.failed": ReviewFailed;
-  "citecheck.completed": CitecheckCompleted;
-  "citecheck.failed": CitecheckFailed;
-}
-
-/** Whether the payload carries a `verification.*` event's verification, in either shape. */
-function carriesVerification(raw: Record<string, unknown>, kind: string): boolean {
-  if (has(raw, "verification")) return asObject(raw["verification"]) !== null;
-  // The original shape: flat fields beside the task id.
-  if (typeof raw["task_id"] !== "string" || raw["task_id"] === "") return false;
-  if (kind === "verification.completed") return asObject(raw["result"]) !== null;
-  if (kind === "verification.failed") return has(raw, "error");
-  return asObject(raw["needs_input"]) !== null;
-}
-
-/**
- * Narrow a parsed event to one kind, without a cast:
- *
- * ```ts
- * const event = hooks.parse(rawBody, req.headers);
- * if (isEvent(event, "verification.completed")) {
- *   console.log(event.verification.result.verdict);
- * }
- * ```
- *
- * True only when the event's name is `kind` AND the member that kind
- * promises was parsed (`verification`, `review`, `citecheck`, `coverage`),
- * so a malformed event under a known name never narrows.
- */
-export function isEvent<K extends keyof WebhookEventMap>(
-  event: WebhookEvent,
-  kind: K,
-): event is WebhookEventMap[K] {
-  if (!event || event.event !== kind) return false;
-  const e = event as unknown as Record<string, unknown>;
-  const raw = asObject(e["raw"]) ?? {};
-  if (kind.startsWith("verification.")) {
-    const verification = asObject(e["verification"]);
-    if (!verification || !carriesVerification(raw, kind)) return false;
-    return kind !== "verification.completed" || asObject(verification["result"]) !== null;
-  }
-  if (kind === "certificate.timestamped") return asObject(raw["coverage"]) !== null;
-  if (kind.startsWith("review.")) return asObject(e["review"]) !== null;
-  if (kind.startsWith("citecheck.")) return asObject(e["citecheck"]) !== null;
-  return false;
 }
 
 export interface LenzWebhooksOptions {

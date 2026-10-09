@@ -2,7 +2,8 @@
  * Browser entry point for `lenz-io`.
  *
  * Identical to the main entry (`./index.ts`) EXCEPT it omits the webhook
- * *value* exports (`LenzWebhooks`, `verifySignature`, …). Those live in
+ * signature *value* exports (`LenzWebhooks`, `verifySignature`, …); the
+ * `isEvent` guard, which needs no crypto, is exported here too. Those live in
  * `./webhooks.ts`, which imports `node:crypto` / `node:buffer` — Node-only
  * modules that break a browser bundle. Webhook signature verification is a
  * server-only concern, so browser consumers never need it.
@@ -47,8 +48,10 @@ export {
   mapResponseToError,
 } from "./errors.js";
 
+// `isEvent` and the event types live in `./events.ts`, which needs no crypto.
+export { isEvent } from "./events.js";
+export type { LenzWebhooksOptions } from "./webhooks.js";
 export type {
-  LenzWebhooksOptions,
   CertificateTimestamped,
   CitecheckCompleted,
   CitecheckEvent,
@@ -65,7 +68,7 @@ export type {
   WebhookEventBase,
   WebhookEventKind,
   WebhookEventMap,
-} from "./webhooks.js";
+} from "./events.js";
 
 export type {
   ConfidenceBand,
