@@ -135,9 +135,9 @@ describe("package.json exports", () => {
     }
   });
 
-  it("leaves browser, import and require where they were", () => {
+  it("leaves browser, import and require where they were (browser has its own types)", () => {
     expect(dot["browser"]).toEqual({
-      types: "./dist/index.d.ts",
+      types: "./dist/index.browser.d.ts",
       default: "./dist/index.browser.js",
     });
     expect(dot["import"]).toEqual({ types: "./dist/index.d.ts", default: "./dist/index.js" });
