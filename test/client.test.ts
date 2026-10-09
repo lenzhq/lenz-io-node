@@ -842,11 +842,13 @@ describe("Automatic idempotency keys (extract, select, verify)", () => {
     expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ texts: ["a"] });
   });
 
-  it("ask.send still generates no key", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }]);
+  it("ask.send generates a key too (3.0); idempotency: false sends none", async () => {
+    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }, { body: { reply: "r" } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.ask.send("vid_1", { message: "Why?" });
-    expect(key(calls[0]!)).toBeNull();
+    await client.ask.send("vid_1", { message: "Why?", idempotency: false });
+    expect(key(calls[0]!)).toMatch(/^[0-9a-f]{32}$/);
+    expect(key(calls[1]!)).toBeNull();
   });
 });
 
@@ -1713,12 +1715,11 @@ describe("Resource namespaces", () => {
     expect(reply.created_at).toBe("2026-05-27T12:00:05Z");
   });
 
-  it("ask.send sends the Idempotency-Key it is given, and none when it is not", async () => {
+  it("ask.send sends the Idempotency-Key it is given, and a fresh one per call when it is not", async () => {
     // With a key, a retry of a question that already got a reply replays that
     // reply instead of spending a second credit and appending the question
-    // plus a second answer to the conversation. Never auto-generated: asking
-    // the same question again is a normal thing to do here, and each reply
-    // depends on the history the previous turn wrote.
+    // plus a second answer to the conversation. A generated key is random per
+    // call, so asking the same question again is a new turn.
     const { fetch, calls } = makeFetch([
       { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:05Z" } },
       { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:09Z" } },
@@ -1727,7 +1728,7 @@ describe("Resource namespaces", () => {
     await client.ask.send("vid_1", { message: "Why?", idempotencyKey: "ask-key-1" });
     await client.ask.send("vid_1", { message: "Why?" });
     expect(new Headers(calls[0]!.init.headers).get("Idempotency-Key")).toBe("ask-key-1");
-    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toBeNull();
+    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f]{32}$/);
   });
 
   it("ask.reset hits DELETE /ask/{id}", async () => {

@@ -67,10 +67,13 @@ import {
   LenzAPIError,
   LenzApiVersionError,
   LenzAuthError,
+  LenzConnectionError,
   LenzError,
   LenzGoneError,
   LenzNeedsInputError,
+  LenzNotFoundError,
   LenzPipelineError,
+  LenzRequestTimeoutError,
   LenzTimeoutError,
   LenzValidationError,
   MAX_RETRY_AFTER_SLEEP,
@@ -169,6 +172,11 @@ const POLL_HINT_MAX_S = 30;
 // than this, whatever the body says.
 const REVIEW_POLL_FLOOR_S = 5;
 const REVIEW_DEFAULT_TIMEOUT_MS = 600_000;
+/**
+ * The least time a verification poll is given, even at its wait's deadline,
+ * so the last poll can still answer. Each poll ends by the deadline plus this.
+ */
+const POLL_REQUEST_FLOOR_MS = 5_000;
 
 /**
  * 429 codes that throw at once instead of sleeping the stated wait.
@@ -235,6 +243,19 @@ function envVar(name: string): string | undefined {
   return typeof process !== "undefined" ? process.env?.[name] : undefined;
 }
 
+/**
+ * Where the client may say what it is doing. Every method is optional; the
+ * client is silent without one. `console` fits.
+ */
+export interface LenzLogger {
+  /** A retry of a failed attempt, with the reason and the wait. */
+  debug?(message: string): void;
+  /** A `verifyAndWait` submission: `[lenz-io] Submitted task: <task_id>`. */
+  info?(message: string): void;
+  /** Reserved for warnings; nothing is sent here yet. */
+  warn?(message: string): void;
+}
+
 export interface LenzOptions {
   apiKey?: string;
   baseUrl?: string;
@@ -242,6 +263,12 @@ export interface LenzOptions {
   maxRetries?: number;
   /** Inject a custom fetch implementation (testing). Defaults to global fetch. */
   fetch?: typeof fetch;
+  /**
+   * Receives the client's progress lines (`console` works). Without one the
+   * client prints nothing; 2.x printed `Submitted task: …` to the console on
+   * every `verifyAndWait`.
+   */
+  logger?: LenzLogger;
 }
 
 interface RequestOptions {
@@ -492,7 +519,7 @@ class VerificationsNamespace {
    * and their own cap, so this returns YOUR certificate over this analysis
    * and never another customer's.
    *
-   * Rejects with a 404 `LenzError` when this verification carries no
+   * Rejects with {@link LenzNotFoundError} (404) when this verification carries no
    * certificate for your account — which is also what an uncovered verdict
    * returns, so check `verification.coverage?.status` first rather than using
    * a 404 here to mean "not covered".
@@ -565,17 +592,19 @@ class AskNamespace {
   /**
    * Ask a follow-up question about a verification. Paid, one credit per turn.
    *
-   * Pass `idempotencyKey` to make a retry safe: with a key, a retry of a
-   * question that already got a reply replays that reply rather than asking
-   * again. It is never generated here — see {@link AskSendInput.idempotencyKey}.
+   * Sends a random `Idempotency-Key` per call, reused across this client's
+   * own retries, so a retried question replays its reply rather than asking
+   * (and charging) again. Pin one with `idempotencyKey`, or send none with
+   * `idempotency: false`. See {@link AskSendInput.idempotencyKey}.
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  send(verificationId: string, input: AskSendInput): Promise<AskReply> {
+  async send(verificationId: string, input: AskSendInput): Promise<AskReply> {
     const body: Record<string, unknown> = { message: input.message };
     if (input.language) body.language = input.language;
+    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
-    if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return this.client.request<AskReply>({
       method: "POST",
       path: `/ask/${verificationId}`,
@@ -621,6 +650,7 @@ export class Lenz {
   private timeoutMs: number;
   private maxRetries: number;
   private fetchImpl: typeof fetch;
+  private logger: LenzLogger | undefined;
 
   readonly verifications: VerificationsNamespace;
   readonly ask: AskNamespace;
@@ -632,6 +662,7 @@ export class Lenz {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
+    this.logger = opts.logger;
 
     this.verifications = new VerificationsNamespace(this);
     this.ask = new AskNamespace(this);
@@ -668,8 +699,11 @@ export class Lenz {
     if (input.language) body["language"] = input.language;
     if (input.visibility) body["visibility"] = input.visibility;
     if (input.depth) body["depth"] = input.depth;
+    // One key per call, reused across its own retries, so a retried batch
+    // does not start (and charge for) its claims twice.
+    const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
-    if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     const accepted = await this.request<BatchAccepted>({
       method: "POST",
       path: "/verify/batch",
@@ -856,9 +890,17 @@ export class Lenz {
    * never answers 410.
    */
   async getStatus(taskId: string): Promise<TaskStatus> {
+    return this._getStatus(taskId);
+  }
+
+  private async _getStatus(
+    taskId: string,
+    transport: Pick<RequestOptions, "timeoutMs" | "deadlineAt"> = {},
+  ): Promise<TaskStatus> {
     const body = await this.request<TaskStatus>({
       method: "GET",
       path: `/verify/status/${taskId}`,
+      ...transport,
     });
     return normalizeTaskStatus(body) as TaskStatus;
   }
@@ -1213,8 +1255,7 @@ export class Lenz {
   async verifyAndWait(input: VerifyAndWaitInput): Promise<Verification> {
     const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const accepted = await this.submit(input);
-    // eslint-disable-next-line no-console
-    console.info(`[lenz-io] Submitted task: ${accepted.task_id}`);
+    this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
     return this.wait(accepted, { timeoutMs, onProgress: input.onProgress });
   }
 
@@ -1233,13 +1274,15 @@ export class Lenz {
       throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
     }
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
-    const { terminal, timedOut, gone } = await this._pollToTerminal(
+    const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       [taskId],
       timeoutMs,
       opts.onProgress,
     );
     const goneErr = gone.get(taskId);
     if (goneErr) throw goneErr;
+    const stopped = permanent.get(taskId);
+    if (stopped) throw stopped;
     if (timedOut.has(taskId)) {
       const err = new LenzTimeoutError({
         message: `wait timed out after ${timeoutMs}ms`,
@@ -1258,22 +1301,26 @@ export class Lenz {
    * `BatchItemResult` per task the batch accepted, in input order. Never throws
    * on a per-item outcome — a claim that fails, pauses, or times out becomes a
    * `BatchItemResult` with the matching `status`. A claim removed under the
-   * account's retention period reads `"failed"` with no `status_detail`.
-   * (Transport/auth errors on the initial submit still throw.)
+   * account's retention period reads `"failed"` with no `status_detail`, and
+   * so does a claim whose poll answered an error waiting will not change
+   * (401, 403, 404); the other claims keep being polled. (Transport/auth
+   * errors on the initial submit still throw.)
    */
   async verifyBatchAndWait(input: VerifyBatchAndWaitInput): Promise<BatchItemResult[]> {
     const timeoutMs = input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const accepted = await this.verifyBatch(input);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
-    const { terminal, timedOut, gone } = await this._pollToTerminal(
+    const { terminal, timedOut, gone, permanent } = await this._pollToTerminal(
       ids,
       timeoutMs,
       input.onProgress,
     );
 
     return accepted.items.map((it): BatchItemResult => {
-      // Removed under the account's retention period: final, with no result.
-      if (gone.has(it.task_id)) {
+      // Removed under the account's retention period, or a poll answered an
+      // error polling again will not change (401, 403, 404): final, with no
+      // result.
+      if (gone.has(it.task_id) || permanent.has(it.task_id)) {
         return {
           task_id: it.task_id,
           claim: it.claim ?? it.claim_text,
@@ -1346,6 +1393,7 @@ export class Lenz {
     terminal: Map<string, TaskStatus>;
     timedOut: Set<string>;
     gone: Map<string, LenzGoneError>;
+    permanent: Map<string, LenzError>;
   }> {
     let pending = [...taskIds];
     const terminal = new Map<string, TaskStatus>();
@@ -1353,10 +1401,20 @@ export class Lenz {
     // A 410 is final: the run finished and its account's retention period has
     // since removed it. Polling again would only spin to the deadline.
     const gone = new Map<string, LenzGoneError>();
+    // An answer polling again cannot change: the key is refused (401/403) or
+    // the task is not there (404). Final for that task.
+    const permanent = new Map<string, LenzError>();
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
     while (pending.length > 0) {
-      const settled = await Promise.allSettled(pending.map((id) => this.getStatus(id)));
+      // Every poll request is bounded by the deadline: its attempts (and any
+      // retry inside it) end by then, with a short floor so the poll made
+      // right at the deadline still gets an answer.
+      const transport = {
+        timeoutMs: Math.min(this.timeoutMs, Math.max(deadline - Date.now(), POLL_REQUEST_FLOOR_MS)),
+        deadlineAt: Math.max(deadline, Date.now() + POLL_REQUEST_FLOOR_MS),
+      };
+      const settled = await Promise.allSettled(pending.map((id) => this._getStatus(id, transport)));
       const stillPending: string[] = [];
       let serverHintMs: number | undefined;
       settled.forEach((res, i) => {
@@ -1390,6 +1448,8 @@ export class Lenz {
         } else if (res.reason instanceof LenzApiVersionError) {
           // Another API version answered: polling again reads the same.
           throw res.reason;
+        } else if (res.reason instanceof LenzAuthError || res.reason instanceof LenzNotFoundError) {
+          permanent.set(id, res.reason);
         } else {
           // Poll errored this round (after _request exhausted its retries) —
           // keep pending and retry next round rather than aborting the batch.
@@ -1410,7 +1470,7 @@ export class Lenz {
       );
       backoffIdx += 1;
     }
-    return { terminal, timedOut, gone };
+    return { terminal, timedOut, gone, permanent };
   }
 
   /**
@@ -1500,6 +1560,15 @@ export class Lenz {
     });
   }
 
+  /** A line to the caller's logger, if any; a logger that throws is ignored. */
+  private log(level: keyof LenzLogger, message: string): void {
+    try {
+      this.logger?.[level]?.(message);
+    } catch {
+      // A logger's bug must never break the call.
+    }
+  }
+
   /** Internal: dispatch an HTTP call with auth + retry. Public so the
    *  namespace classes can use it; not part of the documented surface. */
   async request<T>(opts: RequestOptions): Promise<T> {
@@ -1562,14 +1631,36 @@ export class Lenz {
       } catch (exc) {
         lastErr = exc;
         clearTimeout(timer);
+        const timedOut = controller.signal.aborted;
         if (attempt >= maxRetries || !fits(retrySleepMs(attempt))) {
-          throw new LenzAPIError({
-            message: `${opts.method} ${opts.path} failed after ${attempt + 1} attempts: ${String(exc)}`,
-            cause: String(exc),
-            fix: "Check your network connection; verify baseUrl is reachable.",
-            docUrl: "https://lenz.io/docs/errors",
-          });
+          const attempts = `${attempt + 1} attempt${attempt === 0 ? "" : "s"}`;
+          if (timedOut) {
+            throw new LenzRequestTimeoutError(
+              {
+                message: `${opts.method} ${opts.path} timed out after ${attemptMs}ms (${attempts}).`,
+                cause: String(exc),
+                fix:
+                  "Retry; a call sent with an Idempotency-Key is safe to resend with the same key. " +
+                  "If it persists, raise timeoutMs or check the network between you and baseUrl.",
+                docUrl: "https://lenz.io/docs/errors",
+              },
+              { cause: exc },
+            );
+          }
+          throw new LenzConnectionError(
+            {
+              message: `${opts.method} ${opts.path} failed after ${attempt + 1} attempts: ${String(exc)}`,
+              cause: String(exc),
+              fix: "Check your network connection; verify baseUrl is reachable.",
+              docUrl: "https://lenz.io/docs/errors",
+            },
+            { cause: exc },
+          );
         }
+        this.log(
+          "debug",
+          `[lenz-io] Retrying ${opts.method} ${opts.path} after ${timedOut ? "a timeout" : "a network error"} in ${retrySleepMs(attempt)}ms (attempt ${attempt + 2} of ${maxRetries + 1})`,
+        );
         await sleep(retrySleepMs(attempt));
         continue;
       }
@@ -1619,12 +1710,15 @@ export class Lenz {
           return (await response.json()) as T;
         } catch (exc) {
           if (controller.signal.aborted) {
-            throw new LenzAPIError({
-              message: `${opts.method} ${opts.path} timed out reading the response body`,
-              cause: String(exc),
-              fix: "Retry; if it persists, check the network between you and baseUrl.",
-              docUrl: "https://lenz.io/docs/errors",
-            });
+            throw new LenzRequestTimeoutError(
+              {
+                message: `${opts.method} ${opts.path} timed out reading the response body`,
+                cause: String(exc),
+                fix: "Retry; if it persists, check the network between you and baseUrl.",
+                docUrl: "https://lenz.io/docs/errors",
+              },
+              { cause: exc },
+            );
           }
           throw exc;
         } finally {
@@ -1663,15 +1757,19 @@ export class Lenz {
         (response.status >= 500 || response.status === 429)
       ) {
         const stated = await statedRetryAfterSeconds(response);
+        const retryLine = (ms: number) =>
+          `[lenz-io] Retrying ${opts.method} ${opts.path} after HTTP ${response.status} in ${ms}ms (attempt ${attempt + 2} of ${maxRetries + 1})`;
         if (stated !== null && stated <= MAX_RETRY_AFTER_SLEEP) {
           if (fits(stated * 1000)) {
             clearTimeout(timer);
+            this.log("debug", retryLine(stated * 1000));
             await sleep(stated * 1000);
             continue;
           }
         } else if (stated === null || !(await abortsOnLongStatedWait(response))) {
           if (fits(retrySleepMs(attempt))) {
             clearTimeout(timer);
+            this.log("debug", retryLine(retrySleepMs(attempt)));
             await sleep(retrySleepMs(attempt));
             continue;
           }
@@ -1699,10 +1797,10 @@ export class Lenz {
     }
 
     if (lastErr) {
-      throw new LenzAPIError({
-        message: String(lastErr),
-        cause: String(lastErr),
-      });
+      throw new LenzConnectionError(
+        { message: String(lastErr), cause: String(lastErr) },
+        { cause: lastErr },
+      );
     }
     throw new LenzAPIError({ message: `${opts.method} ${opts.path} failed without diagnostic` });
   }

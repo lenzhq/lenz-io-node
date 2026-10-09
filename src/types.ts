@@ -1078,6 +1078,10 @@ export interface VerifyBatchItem {
   language?: string;
   source_url?: string;
   webhook_url?: string;
+  /**
+   * @deprecated Has no effect: it is not sent. The batch is keyed as a whole
+   * (`VerifyBatchInput.idempotencyKey`, generated per call by default).
+   */
   idempotency_key?: string;
   /** Per-item "private" | "unlisted"; overrides the batch-wide default. */
   visibility?: "private" | "unlisted";
@@ -1095,6 +1099,18 @@ export interface VerifyBatchInput {
   visibility?: "private" | "unlisted";
   /** Batch-wide "standard" | "low" default; per-item `depth` overrides. */
   depth?: "standard" | "low";
+  /**
+   * Send an `Idempotency-Key` for the whole batch, so a retry after a network
+   * drop or a client timeout replays the first receipt instead of starting
+   * (and charging for) every claim again. Defaults to `true`, generating a
+   * random key per call that is reused across this client's own retries.
+   * Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`.
+   */
   idempotencyKey?: string;
 }
 
@@ -1215,17 +1231,19 @@ export interface AskSendInput {
    */
   language?: string;
   /**
-   * Pin an `Idempotency-Key` so a retry of a question that already got a
+   * Send an `Idempotency-Key` so a retry of a question that already got a
    * reply replays that reply instead of spending a second credit and leaving
-   * the question plus a second answer in the conversation. A retry sent while
-   * the first call is still running gets a 409 — there is no reply to replay
-   * yet.
-   *
-   * Never generated for you and never derived from the message, unlike
-   * `assess`: a reply depends on the conversation so far, so asking the same
-   * question again is a normal thing to do, and a key you did not choose would
-   * replay a stale answer. Without one, the call behaves exactly as before:
-   * a retry asks again.
+   * the question plus a second answer in the conversation. Defaults to
+   * `true`, generating a random key per call that is reused across this
+   * client's own retries only: asking the same question again in a new call
+   * is a new turn. Set `false` to send none.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin the `Idempotency-Key` yourself, so a retry from a different process
+   * replays too. Wins over `idempotency`. A retry sent while the first call
+   * is still running gets a 409: there is no reply to replay yet. Never
+   * derived from the message.
    */
   idempotencyKey?: string;
 }

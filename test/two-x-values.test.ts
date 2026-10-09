@@ -54,6 +54,7 @@ const NEW_NAMES = new Set([
   "citation_limit_exceeded", // review and citation check summary
   "verification", // verification.* webhook events
   "completed_at", // verifications from the newer shape
+  "retryable", // every error (3.0); a failed run's keeps its 2.x value
 ]);
 
 /**
@@ -117,6 +118,39 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   webhook__citecheck_failed: TASK_ID,
   webhook__citecheck_completed: TASK_ID,
 };
+
+/**
+ * 3.0's intentional changes (CHANGELOG "Changed"), applied to the 2.x oracle
+ * before it is compared, so nothing else may differ:
+ *
+ * - a 404 is a `LenzNotFoundError` (a `LenzError`, as before), whose fix says
+ *   to check the id instead of to retry;
+ * - a wait whose poll answers 404 throws that error at once instead of
+ *   polling to its deadline.
+ */
+const NOT_FOUND_FIX =
+  "Check the id or key the call names: nothing with it is visible to this credential. Retrying will not help.";
+
+function intended(oracle: unknown): unknown {
+  const visit = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(visit);
+    if (!node || typeof node !== "object") return node;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node)) out[k] = visit(v);
+    if (out["class"] === "LenzError" && out["statusCode"] === 404) {
+      out["class"] = "LenzNotFoundError";
+      out["name"] = "LenzNotFoundError";
+      out["fix"] = NOT_FOUND_FIX;
+    }
+    return out;
+  };
+  const o = visit(oracle) as Record<string, Record<string, Record<string, unknown>> | undefined>;
+  const polled = o["getStatus"]?.["error"];
+  if (o["wait"]?.["error"]?.["class"] === "LenzTimeoutError" && polled?.["statusCode"] === 404) {
+    o["wait"]["error"] = polled;
+  }
+  return o;
+}
 
 function pattern(p: string): RegExp {
   // Escape every regex metacharacter, then let `*` stand for an array index.
@@ -197,7 +231,7 @@ describe("both response shapes give what the previous release gave", () => {
     it.each(shapes)(`${name} (%s)`, async (shape) => {
       const recorded = load(shape, `${name}.json`) as Recorded;
       const actual = await runScenario(sdk as unknown as SdkUnderTest, name, recorded);
-      const oracle = load("oracle", `${name}.json`);
+      const oracle = intended(load("oracle", `${name}.json`));
       expect(differences(actual, oracle, name, shape === "canonical").join("\n")).toBe("");
     });
   }
@@ -205,8 +239,8 @@ describe("both response shapes give what the previous release gave", () => {
   it.each(Object.keys(SERVER_DIFFERS))("every allowance for %s is still needed", async (name) => {
     const recorded = load("canonical", `${name}.json`) as Recorded;
     const actual = await runScenario(sdk as unknown as SdkUnderTest, name, recorded);
-    const paths = differences(actual, load("oracle", `${name}.json`), name, false).map((line) =>
-      line.slice(0, line.indexOf(": ")),
+    const paths = differences(actual, intended(load("oracle", `${name}.json`)), name, false).map(
+      (line) => line.slice(0, line.indexOf(": ")),
     );
     const unused = SERVER_DIFFERS[name]!.filter((p) => !paths.some((at) => pattern(p).test(at)));
     expect(unused).toEqual([]);
