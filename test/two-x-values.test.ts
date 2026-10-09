@@ -78,14 +78,7 @@ const MESSAGE = ["error.message", "error.cause_"];
  * plain read returns (it states the status and nothing else) and the nested
  * rows' own `failure.detail` sentence.
  */
-const CANCELLED_TASK = [
-  "getStatus.value.status",
-  "getStatus.value.error",
-  "getStatus.value.failure_reason",
-  "getStatus.value.failure_class",
-  "getStatus.value.retryable",
-  "getStatus.value.docs_url",
-];
+const CANCELLED_TASK = ["getStatus.value.status"];
 const rows = (at: string, ...lists: string[]) => [
   `${at}.status`,
   `${at}.failure`,
@@ -149,11 +142,7 @@ const SERVER_DIFFERS: Record<string, string[]> = {
   // states the original shape's live sentence, which the newer shape no
   // longer tells apart from the stored one.
   verify__status_cancelled_durable: CANCELLED_TASK,
-  verify__status_cancelled_live: [
-    ...CANCELLED_TASK,
-    "getStatus.value.failure",
-    ...STATUS_SENTENCE.slice(1),
-  ],
+  verify__status_cancelled_live: [...CANCELLED_TASK, "getStatus.value.failure", ...STATUS_SENTENCE],
   review__get_cancelled: CANCELLED_REVIEW,
   citecheck__get_cancelled: CANCELLED_CITECHECK,
   webhook__verification_cancelled: [
@@ -163,9 +152,8 @@ const SERVER_DIFFERS: Record<string, string[]> = {
     "value.retryable",
     "value.failure",
     "value.verification.status",
-    "value.verification.failure_reason",
-    "value.verification.failure_class",
-    "value.verification.retryable",
+    "value.verification.error",
+    "value.verification.docs_url",
     "value.verification.failure",
   ],
   webhook__review_cancelled: [

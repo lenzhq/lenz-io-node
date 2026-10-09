@@ -280,6 +280,10 @@ const VERIFICATION_STATUS: Record<string, string> = {
   "verification.needs_input": "needs_input",
 };
 
+function nestedStatus(v: unknown): unknown {
+  return asObject(v)?.["status"];
+}
+
 function isArray(v: unknown): boolean {
   return Array.isArray(v);
 }
@@ -331,7 +335,8 @@ function isCitecheckShape(v: unknown): boolean {
  * type requires were parsed: a `verification.*` event's `verification` with
  * a string `task_id` and the kind's own `status` (`"completed"` with an
  * object `result` on `verification.completed`); a review's or citation
- * check's id, `status`, lists, `summary` and `credits`; a certificate's
+ * check's id, lists, `summary` and `credits`, and its `status` equal to the
+ * event's (`review.cancelled` carries a `cancelled` review); a certificate's
  * `coverage`. A malformed event under a known name never narrows.
  *
  * Needs no crypto, so the browser entry exports it too.
@@ -351,7 +356,15 @@ export function isEvent<K extends keyof WebhookEventMap>(
     return kind !== "verification.completed" || asObject(verification["result"]) !== null;
   }
   if (kind === "certificate.timestamped") return asObject(raw["coverage"]) !== null;
-  if (kind.startsWith("review.")) return isReviewShape(e["review"]);
-  if (kind.startsWith("citecheck.")) return isCitecheckShape(e["citecheck"]);
+  // The nested review / check must be in the state the event names.
+  if (kind.startsWith("review.")) {
+    return isReviewShape(e["review"]) && nestedStatus(e["review"]) === kind.slice("review.".length);
+  }
+  if (kind.startsWith("citecheck.")) {
+    return (
+      isCitecheckShape(e["citecheck"]) &&
+      nestedStatus(e["citecheck"]) === kind.slice("citecheck.".length)
+    );
+  }
   return false;
 }

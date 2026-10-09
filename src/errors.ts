@@ -17,7 +17,7 @@
  *     Request ID: {id}
  */
 
-import { legacyErrorBody, type RequestContext } from "./compat.js";
+import { CANCELLED_DOCS_URL, legacyErrorBody, type RequestContext } from "./compat.js";
 import type { Citecheck, ReviewFailureBlock, ReviewFull } from "./types.js";
 
 export interface LenzErrorContext {
@@ -485,7 +485,7 @@ const CANCELLED_FAILURE: ReviewFailureBlock = {
   failure_class: "cancelled",
   retryable: false,
   hint: null,
-  docs_url: "https://lenz.io/docs/errors#cancelled",
+  docs_url: CANCELLED_DOCS_URL,
 };
 
 /**

@@ -19,24 +19,33 @@ declare function value<T>(): T;
 
 /**
  * The one intentional widening of this release: API version 2026-10-11 ends a
- * task cancelled elsewhere with the status `cancelled` (and the events
- * `*.cancelled`), which 2.21.0's closed unions do not name. The reading
- * direction (new value into an old type) is therefore checked with that one
- * literal taken out; everything else must still fit exactly.
+ * task cancelled elsewhere with the status `cancelled` and the events
+ * `*.cancelled`, which 2.21.0's closed unions do not name. The reading
+ * direction (a new value into an old type) is checked with exactly that taken
+ * out: the literal `"cancelled"` from every property named `status`, and
+ * `"<noun>.cancelled"` from every property named `event`. Every other
+ * property, union member, literal and string field must still fit unchanged.
+ * Functions are left as they are (overloads stay intact): methods are checked
+ * through real call forms below, where the returned value goes through it.
  */
-type WithoutCancelled<T> = T extends "cancelled" | `${string}.cancelled`
-  ? never
-  : T extends string | number | boolean | bigint | null | undefined
-    ? T
-    : T extends (...args: infer A) => infer R
-      ? (...args: { [K in keyof A]: WithoutCancelled<A[K]> }) => WithoutCancelled<R>
-      : T extends Promise<infer U>
-        ? Promise<WithoutCancelled<U>>
-        : T extends readonly unknown[]
-          ? { [K in keyof T]: WithoutCancelled<T[K]> }
-          : T extends object
-            ? { [K in keyof T]: WithoutCancelled<T[K]> }
-            : T;
+type WithoutCancelled<T> = T extends string | number | boolean | bigint | null | undefined
+  ? T
+  : T extends readonly unknown[]
+    ? { [K in keyof T]: WithoutCancelled<T[K]> }
+    : T extends (...args: never[]) => unknown
+      ? T
+      : T extends object
+        ? {
+            [K in keyof T]: K extends "status"
+              ? Exclude<T[K], "cancelled">
+              : K extends "event"
+                ? Exclude<T[K], `${string}.cancelled`>
+                : WithoutCancelled<T[K]>;
+          }
+        : T;
+
+/** `WithoutCancelled` of a returned value, for the call-form checks. */
+declare function withoutCancelled<T>(v: T): WithoutCancelled<T>;
 
 export const new_LenzOptions: New.LenzOptions = value<Old.LenzOptions>();
 export const old_LenzOptions: Old.LenzOptions = value<New.LenzOptions>();
@@ -100,8 +109,10 @@ export const new_CitationPair: New.CitationPair = value<Old.CitationPair>();
 export const old_CitationPair: Old.CitationPair = value<New.CitationPair>();
 export const new_Citecheck: New.Citecheck = value<Old.Citecheck>();
 export const old_Citecheck: Old.Citecheck = value<WithoutCancelled<New.Citecheck>>();
-export const new_CitecheckAndWaitOptions: WithoutCancelled<New.CitecheckAndWaitOptions> =
-  value<Old.CitecheckAndWaitOptions>();
+// `onUpdate` takes the widened `Citecheck` / `ReviewFull` now, so a callback
+// annotated with the 2.21 type no longer fits it; it is the one member left out.
+export const new_CitecheckAndWaitOptions: New.CitecheckAndWaitOptions =
+  value<Omit<Old.CitecheckAndWaitOptions, "onUpdate">>();
 export const old_CitecheckAndWaitOptions: Old.CitecheckAndWaitOptions =
   value<New.CitecheckAndWaitOptions>();
 export const new_CitecheckInput: New.CitecheckInput = value<Old.CitecheckInput>();
@@ -112,13 +123,13 @@ export const new_CitecheckStarted: New.CitecheckStarted = value<Old.CitecheckSta
 export const old_CitecheckStarted: Old.CitecheckStarted = value<New.CitecheckStarted>();
 export const new_CitecheckStatus: New.CitecheckStatus = value<Old.CitecheckStatus>();
 export const old_CitecheckStatus: Old.CitecheckStatus =
-  value<WithoutCancelled<New.CitecheckStatus>>();
+  value<Exclude<New.CitecheckStatus, "cancelled">>();
 export const new_CitecheckSummary: New.CitecheckSummary = value<Old.CitecheckSummary>();
 export const old_CitecheckSummary: Old.CitecheckSummary = value<New.CitecheckSummary>();
 export const new_GetReviewOptions: New.GetReviewOptions = value<Old.GetReviewOptions>();
 export const old_GetReviewOptions: Old.GetReviewOptions = value<New.GetReviewOptions>();
-export const new_ReviewAndWaitOptions: WithoutCancelled<New.ReviewAndWaitOptions> =
-  value<Old.ReviewAndWaitOptions>();
+export const new_ReviewAndWaitOptions: New.ReviewAndWaitOptions =
+  value<Omit<Old.ReviewAndWaitOptions, "onUpdate">>();
 export const old_ReviewAndWaitOptions: Old.ReviewAndWaitOptions = value<New.ReviewAndWaitOptions>();
 export const new_ReviewAssessment: New.ReviewAssessment = value<Old.ReviewAssessment>();
 export const old_ReviewAssessment: Old.ReviewAssessment = value<New.ReviewAssessment>();
@@ -187,7 +198,7 @@ export const old_ReviewResult: Old.ReviewResult = value<New.ReviewResult>();
 export const new_ReviewStarted: New.ReviewStarted = value<Old.ReviewStarted>();
 export const old_ReviewStarted: Old.ReviewStarted = value<New.ReviewStarted>();
 export const new_ReviewStatus: New.ReviewStatus = value<Old.ReviewStatus>();
-export const old_ReviewStatus: Old.ReviewStatus = value<WithoutCancelled<New.ReviewStatus>>();
+export const old_ReviewStatus: Old.ReviewStatus = value<Exclude<New.ReviewStatus, "cancelled">>();
 export const new_ReviewSummary: New.ReviewSummary = value<Old.ReviewSummary>();
 export const old_ReviewSummary: Old.ReviewSummary = value<New.ReviewSummary>();
 export const new_ReviewVerification: New.ReviewVerification = value<Old.ReviewVerification>();
@@ -358,27 +369,12 @@ export const method_verifyBatch: Old.Lenz["verifyBatch"] = value<New.Lenz["verif
 export const method_extract: Old.Lenz["extract"] = value<New.Lenz["extract"]>();
 export const method_assess: Old.Lenz["assess"] = value<New.Lenz["assess"]>();
 export const method_select: Old.Lenz["select"] = value<New.Lenz["select"]>();
-export const method_getStatus: Old.Lenz["getStatus"] =
-  value<WithoutCancelled<New.Lenz["getStatus"]>>();
 export const method_usage: Old.Lenz["usage"] = value<New.Lenz["usage"]>();
 export const method_review: Old.Lenz["review"] = value<New.Lenz["review"]>();
-// Overloaded, so `WithoutCancelled` cannot read it: the returns are checked by the
-// `old_ReviewFull` / `old_ReviewIssues` lines, the cast keeps the overload set.
-export const method_getReview: Old.Lenz["getReview"] = value<
-  New.Lenz["getReview"]
->() as Old.Lenz["getReview"];
 export const method_citecheck: Old.Lenz["citecheck"] = value<New.Lenz["citecheck"]>();
-export const method_getCitecheck: Old.Lenz["getCitecheck"] =
-  value<WithoutCancelled<New.Lenz["getCitecheck"]>>();
-export const method_citecheckAndWait: Old.Lenz["citecheckAndWait"] =
-  value<WithoutCancelled<New.Lenz["citecheckAndWait"]>>();
 
-export const method_reviewAndWait: Old.Lenz["reviewAndWait"] =
-  value<WithoutCancelled<New.Lenz["reviewAndWait"]>>();
 export const method_verifyAndWait: Old.Lenz["verifyAndWait"] = value<New.Lenz["verifyAndWait"]>();
 export const method_wait: Old.Lenz["wait"] = value<New.Lenz["wait"]>();
-export const method_verifyBatchAndWait: Old.Lenz["verifyBatchAndWait"] =
-  value<WithoutCancelled<New.Lenz["verifyBatchAndWait"]>>();
 
 export const method_request: Old.Lenz["request"] = value<New.Lenz["request"]>();
 export const verifications_list: Old.Lenz["verifications"]["list"] =
@@ -441,3 +437,25 @@ export const failureBlockMock: New.ReviewFailureBlock = {
   docs_url: "https://lenz.io/docs/errors",
 };
 export const docsUrl: string = value<New.ReviewFailureBlock>().docs_url;
+
+/**
+ * The methods whose result carries a status, called the 2.21 way, with the
+ * value they return checked against the 2.21 type (through `WithoutCancelled`).
+ * Each call form, overloads included, must still be there and still fit.
+ */
+export async function callFormsOf2x(c: New.Lenz): Promise<void> {
+  const status: Old.TaskStatus = withoutCancelled(await c.getStatus("t"));
+  const full: Old.ReviewFull = withoutCancelled(await c.getReview("r"));
+  const fullView: Old.ReviewFull = withoutCancelled(await c.getReview("r", { view: "full" }));
+  const issues: Old.ReviewIssues = withoutCancelled(await c.getReview("r", { view: "issues" }));
+  const either: Old.ReviewFull | Old.ReviewIssues = withoutCancelled(
+    await c.getReview("r", {} as Old.GetReviewOptions),
+  );
+  const check: Old.Citecheck = withoutCancelled(await c.getCitecheck("c"));
+  const checked: Old.Citecheck = withoutCancelled(await c.citecheckAndWait({ text: "x" }));
+  const reviewed: Old.ReviewFull = withoutCancelled(await c.reviewAndWait({ text: "x" }));
+  const batch: Old.BatchItemResult[] = withoutCancelled(
+    await c.verifyBatchAndWait({ claims: [{ claim: "a" }] }),
+  );
+  void [status, full, fullView, issues, either, check, checked, reviewed, batch];
+}

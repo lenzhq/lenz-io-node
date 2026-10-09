@@ -349,12 +349,28 @@ function legacyStatusError(code: unknown, detail: unknown): string | null {
   return str(detail);
 }
 
+/** The sentence of a task cancelled elsewhere (the stored original's `error`). */
+export const CANCELLED_SENTENCE = "Cancelled.";
+export const CANCELLED_DOCS_URL = "https://lenz.io/docs/errors#cancelled";
+
 /** A `GET /verify/status/{task_id}` body (and the body a 3.0 verification webhook carries). */
 export function normalizeTaskStatus(body: unknown): unknown {
   if (!isObj(body)) return body;
   const out: Obj = { ...body };
   if (has(body, "result")) out["result"] = normalizeVerification(body["result"]);
   if (Array.isArray(body["claims"])) out["claims"] = normalizeOptions(body["claims"]);
+  if (body["status"] === "cancelled") {
+    // The newer shape's own status for a task cancelled elsewhere; the
+    // original said `failed` with failure class `cancelled`. The 2.x flat
+    // fields stay readable, so code that branches on `retryable` or
+    // `failure_class` sees what it saw.
+    fill(out, "error", CANCELLED_SENTENCE);
+    fill(out, "failure_reason", "cancelled");
+    fill(out, "failure_class", "cancelled");
+    fill(out, "retryable", false);
+    fill(out, "docs_url", CANCELLED_DOCS_URL);
+    return out;
+  }
   if (body["status"] !== "failed") return out;
   if (isObj(body["failure"])) {
     const failure = normalizeFailureBlock(body["failure"], "not_a_claim") as Obj;

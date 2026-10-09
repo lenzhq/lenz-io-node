@@ -194,6 +194,7 @@ import {
   normalizeCitecheck,
   normalizeBatchAccepted,
   normalizeExtract,
+  CANCELLED_SENTENCE,
   normalizeTaskStatus,
   normalizeUsage,
   normalizeVerification,
@@ -369,9 +370,6 @@ async function bodyNames(response: Response, key: string): Promise<boolean> {
     return false;
   }
 }
-
-/** The sentence a verification cancelled elsewhere ends a wait with. */
-const CANCELLED_SENTENCE = "Cancelled.";
 
 const REVIEW_STATUSES: readonly string[] = [
   "queued",

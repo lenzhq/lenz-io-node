@@ -78,6 +78,20 @@ describe("a cancelled verification", () => {
     expect(status.task_id).toBe(body["task_id"]);
   });
 
+  it("the cancelled status carries the 2.x flat fields a failed one did (durable)", async () => {
+    const body = bodyOf("verify__status_cancelled_durable");
+    const oracle = JSON.parse(
+      readFileSync(join(ROOT, "oracle", "verify__status_cancelled_durable.json"), "utf-8"),
+    ) as { getStatus: { value: Record<string, unknown> } };
+    const status = await client(serving([[/verify\/status/, () => json(200, body)]])).getStatus(
+      "t",
+    );
+    // What 2.21 read for the same task, with the one new thing: the status.
+    expect(status).toEqual({ ...oracle.getStatus.value, status: "cancelled" });
+    expect(status.retryable).toBe(false);
+    expect(status.failure_class).toBe("cancelled");
+  });
+
   it.each(STATUS_CASES)("%s: wait throws the failed error at once", async (name) => {
     const fetch = vi.fn(serving([[/verify\/status/, () => json(200, bodyOf(name))]]));
     const started = Date.now();
@@ -140,12 +154,23 @@ describe("a cancelled verification", () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(out.map((r) => r.status)).toEqual(["failed", "completed"]);
     expect(out[0]!.task_id).toBe("a");
-    expect(out[0]!.status_detail?.status).toBe("cancelled");
+    // The full status, so code that resubmits unless `retryable === false` keeps working.
+    expect(out[0]!.status_detail).toEqual({
+      status: "cancelled",
+      task_id: bodyOf("verify__status_cancelled_live")["task_id"],
+      error: "Cancelled.",
+      failure_reason: "cancelled",
+      failure_class: "cancelled",
+      retryable: false,
+      docs_url: "https://lenz.io/docs/errors#cancelled",
+    });
     expect(out[0]!.verification).toBeUndefined();
   });
 
   it("the status type carries cancelled", () => {
-    expectTypeOf<"cancelled">().toMatchTypeOf<TaskStatus["status"]>();
+    expectTypeOf<TaskStatus["status"]>().toEqualTypeOf<
+      "processing" | "needs_input" | "completed" | "failed" | "cancelled"
+    >();
   });
 });
 
@@ -179,7 +204,9 @@ describe("a cancelled review", () => {
   });
 
   it("the status type carries cancelled", () => {
-    expectTypeOf<"cancelled">().toMatchTypeOf<ReviewStatus>();
+    expectTypeOf<ReviewStatus>().toEqualTypeOf<
+      "queued" | "assessing" | "verifying" | "completed" | "failed" | "cancelled"
+    >();
     expectTypeOf<ReviewFull["status"]>().toEqualTypeOf<ReviewStatus>();
   });
 });
@@ -214,7 +241,9 @@ describe("a cancelled citation check", () => {
   });
 
   it("the status type carries cancelled", () => {
-    expectTypeOf<"cancelled">().toMatchTypeOf<CitecheckStatus>();
+    expectTypeOf<CitecheckStatus>().toEqualTypeOf<
+      "queued" | "checking" | "completed" | "failed" | "cancelled"
+    >();
     expectTypeOf<Citecheck["status"]>().toEqualTypeOf<CitecheckStatus>();
   });
 });
@@ -269,6 +298,8 @@ describe("*.cancelled webhook events", () => {
     expect(event.verification.status).toBe("cancelled");
     expect(event.taskId).toBe(payload["task_id"]);
     expect(event.verification.task_id).toBe(payload["task_id"]);
+    expect(event.verification.failure_class).toBe("cancelled");
+    expect(event.verification.retryable).toBe(false);
   });
 
   it("a review.cancelled carries the whole review", () => {
@@ -315,6 +346,36 @@ describe("*.cancelled webhook events", () => {
     ],
   ] as const)("a malformed recognised event never narrows: %j", (payload, kind) => {
     expect(isEvent(parse(payload), kind)).toBe(false);
+  });
+
+  it.each(CANCELLED)("%s: a nested status that is not the event's never narrows", (name, kind) => {
+    const noun = kind.split(".")[0]!;
+    if (noun === "verification") return;
+    const payload = payloadOf("canonical", name);
+    for (const status of ["banana", "completed", "failed", 7]) {
+      const nested = { ...(payload[noun] as Record<string, unknown>), status };
+      expect(isEvent(parse({ ...payload, [noun]: nested }), kind)).toBe(false);
+    }
+  });
+
+  it.each([
+    ["webhook__review_completed", "review.completed", "review"],
+    ["webhook__review_failed", "review.failed", "review"],
+    ["webhook__citecheck_completed", "citecheck.completed", "citecheck"],
+    ["webhook__citecheck_failed", "citecheck.failed", "citecheck"],
+  ] as const)("%s: a mismatched nested status never narrows", (name, kind, noun) => {
+    for (const shape of ["canonical", "legacy"] as const) {
+      const payload = payloadOf(shape, name);
+      expect(isEvent(parse(payload), kind)).toBe(true);
+      for (const status of [
+        "banana",
+        "cancelled",
+        kind.endsWith("failed") ? "completed" : "failed",
+      ]) {
+        const nested = { ...(payload[noun] as Record<string, unknown>), status };
+        expect(isEvent(parse({ ...payload, [noun]: nested }), kind)).toBe(false);
+      }
+    }
   });
 
   it("a minimal well-formed verification.cancelled narrows", () => {
