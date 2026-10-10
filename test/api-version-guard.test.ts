@@ -75,9 +75,7 @@ describe("a response from another API version is refused", () => {
     const err = await thrown(() => client.verify({ claim: "The sky is blue." }));
     expect(err).toBeInstanceOf(LenzApiVersionError);
     expect(err).toBeInstanceOf(LenzError);
-    expect(err.message).toBe(
-      "The API answered in version 2026-05-13; lenz-io 3.x reads 2026-10-11 only.",
-    );
+    expect(err.message).toBe("The API answered 2026-05-13; this SDK reads 2026-10-11 only.");
     expect((err as LenzApiVersionError).apiVersion).toBe("2026-05-13");
     expect(err.statusCode).toBe(200);
     expect(err.body).toEqual(legacy);

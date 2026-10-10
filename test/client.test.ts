@@ -130,6 +130,48 @@ describe("Construction", () => {
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("Authorization")).toBe("Bearer lenz_env_key");
   });
+
+  it("an explicit empty apiKey does not read LENZ_API_KEY", async () => {
+    process.env["LENZ_API_KEY"] = "lenz_env_key";
+    const { fetch, calls } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: "", fetch });
+    await expect(client.usage()).rejects.toBeInstanceOf(LenzAuthError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(["   ", "\t\n"])("a whitespace-only apiKey %j counts as no key", async (apiKey) => {
+    process.env["LENZ_API_KEY"] = "lenz_env_key";
+    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const client = new Lenz({ apiKey, fetch });
+    let captured: unknown;
+    try {
+      await client.usage();
+    } catch (e) {
+      captured = e;
+    }
+    expect(captured).toBeInstanceOf(LenzAuthError);
+    expect((captured as LenzAuthError).message).toContain("API key required");
+    expect(calls).toHaveLength(0);
+    // A keyless read still works, and sends no Authorization header.
+    await client.library.list();
+    expect(new Headers(calls[0]!.init.headers).has("Authorization")).toBe(false);
+  });
+
+  it("a whitespace-only LENZ_API_KEY counts as no key", async () => {
+    process.env["LENZ_API_KEY"] = "  ";
+    const { fetch, calls } = makeFetch([]);
+    const client = new Lenz({ fetch });
+    await expect(client.usage()).rejects.toBeInstanceOf(LenzAuthError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("apiKey: undefined still reads LENZ_API_KEY", async () => {
+    process.env["LENZ_API_KEY"] = "lenz_env_key";
+    const { fetch, calls } = makeFetch([{ body: USAGE_BODY }]);
+    const client = new Lenz({ apiKey: undefined, fetch });
+    await client.usage();
+    expect(new Headers(calls[0]!.init.headers).get("Authorization")).toBe("Bearer lenz_env_key");
+  });
 });
 
 describe("Marquee verbs", () => {

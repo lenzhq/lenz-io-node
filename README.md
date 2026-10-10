@@ -360,7 +360,7 @@ throws an `Error` naming both before anything is sent.)
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
-- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll()) …`), one request a page. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
+- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.list({ page, pageSize })` reads one page; `pageSize` is a whole number from 1 to 100 (anything else throws before a request) and, when omitted, the server's default of 20 applies. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll({ pageSize: 100 })) …`), one request a page, each asking for the same `pageSize`. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed). `library.listAll(filters)` iterates every page of a filtered list (any `sort` but `"random"`).
 - **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
@@ -937,12 +937,21 @@ A response that names an API version other than `2026-10-11` in its
 `X-Lenz-API-Version` header (for example `2026-05-13`, as an older stored
 replay of an idempotent call can) is not parsed: the call throws
 `LenzApiVersionError` with `apiVersion` (the version named), `statusCode` and
-`body` (as sent). If it persists, contact support with the request id;
+`body` (as sent); its message names the version the API answered. If it persists, contact support with the request id;
 lenz-io 2.x reads both versions. An idempotent request first sent with 2.x
 (before lenz.io served `2026-10-11`) and replayed with the same key is
 answered this way: finish such work with 2.x, and never change the key to
 get past it, which would run the call again. A response with no such header is not
 checked, and neither are webhook events.
+
+A 2xx answer whose body is not JSON (a proxy's or captive portal's page, a
+body cut short) throws `LenzInvalidResponseError`, a `LenzAPIError` with the
+real `statusCode`, the `requestId` and `bodyText` (the first 1000 characters
+as received); `retryable` is `null`, so resend a paid call only with its
+`idempotencyKey`. An empty or blank body counts as not JSON; only a 204, a
+205 or a `Content-Length: 0` answer reads as `{}`. `statusCode` 0 means the
+request got no HTTP answer at all (`LenzConnectionError`). Before 3.2 such a
+body threw the runtime's `SyntaxError`.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
@@ -1185,17 +1194,20 @@ new Lenz({
 `maxRetries` (a whole number, 0 or more) is how many times a failed request is
 retried. Any other value throws an `Error` when the client is made.
 
+A text containing a lone UTF-16 surrogate (half of an emoji cut by a
+`slice`) is sent with each one replaced by U+FFFD; valid pairs are unchanged.
+
 Environment variables:
 
-- `LENZ_API_KEY` — read if `apiKey` is not passed
-- `LENZ_BASE_URL` — read if `baseUrl` is not passed
+- `LENZ_API_KEY` — read if `apiKey` is not passed An explicit `apiKey: ""` (or one of only whitespace) means no key and never reads the environment: a call that needs a key throws `LenzAuthError`.
+- `LENZ_BASE_URL` — read if `baseUrl` is not passed.
 
 ### Per-call options
 
 Every method takes request options for one call: in its options argument
 (`verify(input, options)`, `getStatus(taskId, options)`, `usage(options)`, …),
 or merged into the options object it already takes (the waits' options,
-`getReview`'s `{ view }`, `verifications.list`'s `{ page }`,
+`getReview`'s `{ view }`, `verifications.list`'s `{ page, pageSize }`,
 `verifications.related`'s `{ limit }`):
 
 ```ts
@@ -1266,7 +1278,47 @@ export async function POST(request: Request): Promise<Response> {
 }
 ```
 
+`withOptions` also takes `apiKey`: a copy that sends another key (or OAuth
+access token) on the same transport, for a server that calls Lenz for several
+accounts. Only when `apiKey` is absent does the copy keep the client's key;
+given as `undefined`, `null`, an empty or a whitespace-only string (a tenant
+with no key), the copy has no key, and a call that needs one throws
+`LenzAuthError` before sending. A copy never reads `LENZ_API_KEY`. Any key
+string is accepted as given. An option name `withOptions` does not take
+(`apikey`, `api_key`, ...) throws.
+
+```ts
+const client = new Lenz({ apiKey: process.env.LENZ_API_KEY });
+const forTenant = client.withOptions({ apiKey: tenant.lenzKey });
+await forTenant.assess({ claim });
+```
+
 An OAuth access token for the Lenz API works wherever the API key goes: pass it as `apiKey` or in `LENZ_API_KEY`.
+
+### Results as the API sends them (`legacyAliases`)
+
+3.x results also carry the names and values 2.x returned, computed from the
+`2026-10-11` response (see [Newer field names](#newer-field-names)).
+`new Lenz({ legacyAliases: false })` turns that off: each result is exactly
+the body the API sent. The default is `true`, so 3.x behaviour is unchanged.
+It is set on the client; a `withOptions` copy keeps it (and throws if given
+it). The result types are unchanged; with `false`, these are not added:
+
+| Result                                                                                                                                                                         | Not added with `legacyAliases: false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A verification (`verifications.get`, `list` / `listAll` items, `library.list` items, `wait` / `verifyAndWait`, a batch result's `verification`, a review row's `verification`) | `modified_at`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `getStatus` (also a batch result's `status_detail` and a needs-input error's `payload`)                                                                                        | on a pause, each option's `text` (options carry `claim` only); on `failed`, the flat `error`, `failure_reason`, `failure_class`, `retryable`, `docs_url`, `hint` and `failure.failure_reason`; on `cancelled`, the same flat fields and the `failure` block built when the API sent none                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `assess`                                                                                                                                                                       | on a failed row, `verdict: "Error"` and `confidence: "low"` (both stay `null`), and on every row `error_code`, `hint`, `identified_claims`, `candidate_claims`, `failure.failure_reason`; at the top, `error`, `error_code`, `candidate_claims`, `status`, `failure.failure_reason`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `extract`                                                                                                                                                                      | `claim`, `identified_claims`, `candidate_claims`, `locations`, and `status` stays `no_checkable_claim` (not `not_a_claim`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `verifyBatch` / `select` receipts, `verifyBatchAndWait` results                                                                                                                | each item's `claim_text`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `usage`                                                                                                                                                                        | `credits.bonus`, `quota_resets_at` and the `verify` / `ask` / `assess` blocks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `getReview`, `reviewAndWait`, `cancelReview`                                                                                                                                   | `failure_reason` in every failure block (the review's, `failures`, `issues`, each claim row's assessment and verification, each citation row's check, `citation_issues`, `citation_failures`); on an assessment, `identified_claims`, `error_code`, `hint`; in `summary`, `claim_limit_reached` and the second name of `citation_limit_reached` / `citation_limit_exceeded`; and the defaults for keys the body lacks (`[]` for `citations`, `citation_issues`, `citation_failures`; `null` for `more_claims`, `more_claim_locations`, `more_citations`, rows' `positions`, `suggested_edits`, `suggested_rewrite`, `missing_quote`, the summary's citation counts and `policy.max_citations`; `0` for `summary.citation_issues`; `false` for `policy.suggest_edits`) |
+| `getCitecheck`, `citecheckAndWait`, `cancelCitecheck`                                                                                                                          | `failure_reason` in every failure block, the second name of the citation limit, and the `[]` / `null` defaults for `citations`, `citation_issues`, `citation_failures`, `more_citations`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+Errors (their classes and fields, `ReviewFailedError` / `CitecheckFailedError`
+included), webhook events and the requests sent are the same either way, with
+one exception: the `partial` of a `ReviewTimeoutError` / `CitecheckTimeoutError`
+(the last body the wait saw) is that body as the API sent it.
 
 ## Compatibility
 

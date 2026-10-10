@@ -73,6 +73,7 @@ import {
   LenzConnectionError,
   LenzError,
   LenzGoneError,
+  LenzInvalidResponseError,
   LenzNeedsInputError,
   LenzNotFoundError,
   LenzPipelineError,
@@ -278,6 +279,35 @@ async function withIdempotencyKey<T>(key: string | undefined, run: () => Promise
   }
 }
 
+/**
+ * `fn(body)` when the client's results carry the 2.x names (the default),
+ * else the body as the API sent it (`legacyAliases: false`).
+ */
+function aliased<T>(client: object, fn: (body: unknown) => unknown, body: T): T {
+  return (aliasesOn(client) ? fn(body) : body) as T;
+}
+
+/** Whether a client (or a copy) was made with `legacyAliases` on. */
+function aliasesOn(client: object): boolean {
+  return (client as { legacyAliases?: boolean }).legacyAliases !== false;
+}
+
+/** The options `withOptions` takes. */
+const COPY_OPTION_NAMES: ReadonlySet<string> = new Set([
+  "signal",
+  "timeoutMs",
+  "maxRetries",
+  "headers",
+  "apiKey",
+  // Refused by checkOptions when true; false is harmless, as on a call.
+  "cancelOnAbort",
+]);
+
+/** A key as the client keeps it: one of only whitespace (or none) is no key, `""`. */
+function usableKey(key: unknown): string {
+  return typeof key === "string" && key.trim() !== "" ? key : "";
+}
+
 /** Read an env var without assuming a Node `process` exists (browser-safe). */
 function envVar(name: string): string | undefined {
   return typeof process !== "undefined" ? process.env?.[name] : undefined;
@@ -300,6 +330,11 @@ export interface LenzLogger {
 }
 
 export interface LenzOptions {
+  /**
+   * The API key (or an OAuth access token). Omitted, `LENZ_API_KEY` is read;
+   * an explicit empty or whitespace-only string means no key (the environment
+   * is not read), so a call that needs one throws `LenzAuthError`.
+   */
   apiKey?: string;
   baseUrl?: string;
   timeoutMs?: number;
@@ -312,6 +347,32 @@ export interface LenzOptions {
    * every `verifyAndWait`.
    */
   logger?: LenzLogger;
+  /**
+   * Whether results also carry the names and values 2.x returned, computed
+   * from the 2026-10-11 response (the 3.x default, `true`). With `false`,
+   * each result is exactly what the API sent: no `text` beside `claim` on a
+   * pause's options, `verdict` / `confidence` left `null` on a failed
+   * `assess` or review row (not `"Error"` / `"low"`), no derived `/me/usage`
+   * blocks, and no other 2.x field (the README lists them). Errors, webhooks
+   * and the request sent are the same either way. Set once, on the client;
+   * a `withOptions` copy keeps it.
+   */
+  legacyAliases?: boolean;
+}
+
+/**
+ * The options of a `withOptions` copy: the request options, plus `apiKey`,
+ * the copy's own key.
+ */
+export interface ClientCopyOptions extends RequestOptions {
+  /**
+   * The key (or OAuth access token) the copy sends instead of the client's.
+   * Only when the property is absent does the copy keep the client's key;
+   * given as `undefined`, `null`, `""` or whitespace, the copy has no key (a
+   * call that needs one throws `LenzAuthError`). A copy never reads
+   * `LENZ_API_KEY`.
+   */
+  apiKey?: string | null | undefined;
 }
 
 interface SendOptions {
@@ -801,6 +862,29 @@ async function* walkPages<T>(
   }
 }
 
+/** The most items a list page may ask for (`GET /verifications` clamps to 1-100). */
+const MAX_PAGE_SIZE = 100;
+
+/** A `pageSize`: omitted, or a whole number from 1 to 100, checked before any request. */
+function checkPageSize(value: unknown, where: string): void {
+  if (value === undefined) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_PAGE_SIZE) {
+    throw new Error(
+      `${where}: pageSize must be a whole number from 1 to ${MAX_PAGE_SIZE} (got ${shown(value)}).`,
+    );
+  }
+}
+
+/** A value as an error shows it: `"10"` and `10` read differently. */
+function shown(value: unknown): string {
+  if (typeof value === "number") return String(value); // NaN, Infinity
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /** The start page of a `listAll`: a whole number from 1, checked when it is called. */
 function startPage(page: number | undefined): number {
   const first = page ?? 1;
@@ -867,6 +951,87 @@ function unexpectedAnswer(method: string, path: string): LenzAPIError {
     fix: "Retry; if it persists, contact support (https://lenz.io/contact) with the request id.",
     docUrl: "https://lenz.io/docs/errors",
   });
+}
+
+/**
+ * `s` with each lone UTF-16 surrogate replaced by U+FFFD; valid pairs, and a
+ * string with none, are returned unchanged. (`String.prototype.toWellFormed`,
+ * which not every supported runtime has.)
+ */
+function wellFormed(s: string): string {
+  let out: string | undefined;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0xd800 || c > 0xdfff) continue;
+    if (c <= 0xdbff && i + 1 < s.length) {
+      const next = s.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i++;
+        continue;
+      }
+    }
+    out = (out ?? "") + s.slice(out === undefined ? 0 : out.length, i) + "\ufffd";
+    // Keep `out` aligned with `s`: one code unit replaced by one.
+  }
+  return out === undefined ? s : out + s.slice(out.length);
+}
+
+/**
+ * A request body as JSON, every string (keys too) with its lone surrogates
+ * sent as U+FFFD. `JSON.stringify` alone would send a lone surrogate as a
+ * `\ud800` escape, which the server cannot store; replaced here, the text the
+ * server reads (and any idempotency key it derives from the body) is the same
+ * as the Python SDK sends. A body with none is serialised exactly as before.
+ */
+function jsonBody(json: unknown): string {
+  return JSON.stringify(json, function (this: unknown, _key: string, value: unknown) {
+    if (typeof value === "string") return wellFormed(value);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const keys = Object.keys(value);
+      if (keys.some((k) => wellFormed(k) !== k)) {
+        const out: Record<string, unknown> = {};
+        for (const k of keys) out[wellFormed(k)] = (value as Record<string, unknown>)[k];
+        return out;
+      }
+    }
+    return value;
+  });
+}
+
+/** The most of a non-JSON body an error keeps. */
+const BODY_TEXT_MAX = 1000;
+
+/** A 2xx whose body is not JSON. */
+function invalidResponse(
+  method: string,
+  path: string,
+  response: Response,
+  text: string,
+  exc: unknown,
+): LenzInvalidResponseError {
+  const err = new LenzInvalidResponseError(
+    {
+      message: `${method} ${path} answered HTTP ${response.status} with a body that is not JSON.`,
+      cause: `The body (${response.headers.get("content-type") ?? "no content type"}) did not parse as JSON.`,
+      fix:
+        "Check that baseUrl points at the Lenz API and nothing between you rewrites the answer; " +
+        "if it persists, contact support (https://lenz.io/contact) with the request id.",
+      docUrl: "https://lenz.io/docs/errors",
+      requestId: response.headers.get("X-Request-ID") ?? "",
+      statusCode: response.status,
+      retryable: null,
+    },
+    { cause: exc },
+  );
+  if (text.length > BODY_TEXT_MAX) {
+    // Never end on half of a surrogate pair.
+    const last = text.charCodeAt(BODY_TEXT_MAX - 1);
+    const end = last >= 0xd800 && last <= 0xdbff ? BODY_TEXT_MAX - 1 : BODY_TEXT_MAX;
+    err.bodyText = `${text.slice(0, end)}…`;
+  } else {
+    err.bodyText = text;
+  }
+  return err;
 }
 
 /**
@@ -1248,18 +1413,25 @@ function pollHintMs(progress: Progress | undefined): number | undefined {
 class VerificationsNamespace {
   constructor(private readonly client: Lenz) {}
 
+  /**
+   * One page of the account's verifications, newest first. `pageSize` (a
+   * whole number from 1 to 100) is sent as `page_size` only when given; the
+   * server's default is 20, and the size it used comes back as `page_size`.
+   */
   async list({
     page = 1,
+    pageSize,
     ...options
-  }: { page?: number } & RequestOptions = {}): Promise<VerificationList> {
+  }: { page?: number; pageSize?: number } & RequestOptions = {}): Promise<VerificationList> {
+    checkPageSize(pageSize, "verifications.list");
     const call = resolveCall(this.client, options, "verifications.list");
     const body = await this.client.request<VerificationList>({
       method: "GET",
       path: "/verifications",
-      query: { page },
+      query: { page, page_size: pageSize },
       ...transportOf(call),
     });
-    return normalizeVerificationList(body) as VerificationList;
+    return aliased(this.client, normalizeVerificationList, body);
   }
 
   /**
@@ -1271,7 +1443,9 @@ class VerificationsNamespace {
    *
    * One `list` request per page, made when the previous page has been read;
    * starts at `page` (default 1; a page below 1 throws when called) and stops
-   * on a short or empty page, or one that reaches `total`.
+   * on a short or empty page, or one that reaches `total`. `pageSize` (1-100,
+   * checked when called) is asked of every page; without it the server's
+   * default applies.
    *
    * The request options apply to every page request; they are checked when
    * `listAll` is called. A `signal` also stops the items of a page already
@@ -1279,12 +1453,17 @@ class VerificationsNamespace {
    */
   listAll({
     page,
+    pageSize,
     ...options
-  }: { page?: number } & RequestOptions = {}): AsyncIterable<VerificationListItem> {
+  }: {
+    page?: number;
+    pageSize?: number;
+  } & RequestOptions = {}): AsyncIterable<VerificationListItem> {
     const first = startPage(page);
+    checkPageSize(pageSize, "verifications.listAll");
     const call = resolveCall(this.client, options, "verifications.listAll", "request", false);
     // Every page uses the options as they were when listAll was called.
-    return walkPages((p) => this.list({ ...call.own, page: p }), first, call.signals);
+    return walkPages((p) => this.list({ ...call.own, page: p, pageSize }), first, call.signals);
   }
 
   /**
@@ -1310,7 +1489,7 @@ class VerificationsNamespace {
       authOptional: true, // send the key if we have one → owner sees private rows
       ...transportOf(call),
     });
-    return normalizeVerification(body) as Verification;
+    return aliased(this.client, normalizeVerification, body);
   }
 
   /**
@@ -1466,7 +1645,7 @@ class LibraryNamespace {
       authRequired: false,
       ...transportOf(call),
     });
-    return normalizeVerificationList(body) as LibraryList;
+    return aliased(this.client, normalizeVerificationList, body);
   }
 
   /**
@@ -1567,6 +1746,8 @@ export class Lenz {
   private maxRetries: number;
   private fetchImpl: typeof fetch;
   private logger: LenzLogger | undefined;
+  /** Whether results carry the 2.x names (see {@link LenzOptions.legacyAliases}). */
+  private legacyAliases: boolean;
 
   readonly verifications: VerificationsNamespace;
   readonly ask: AskNamespace;
@@ -1576,7 +1757,18 @@ export class Lenz {
     // One rule for every per-request timeout and retry count, checked first.
     checkTimeoutMs(opts.timeoutMs, "new Lenz()", true);
     checkMaxRetries(opts.maxRetries, "new Lenz()", true);
-    this.apiKey = opts.apiKey ?? envVar("LENZ_API_KEY") ?? "";
+    // Only an omitted key (undefined, or null from JS) reads LENZ_API_KEY: an explicit "" stays "" (no
+    // key), and a key of only whitespace counts as no key, whichever source
+    // it came from, so the call fails with the SDK's own "API key required"
+    // rather than sending an empty bearer the server rejects.
+    const key = opts.apiKey ?? envVar("LENZ_API_KEY");
+    this.apiKey = usableKey(key);
+    if (opts.legacyAliases !== undefined && typeof opts.legacyAliases !== "boolean") {
+      throw new Error(
+        `new Lenz(): legacyAliases must be true or false (got ${shown(opts.legacyAliases)}).`,
+      );
+    }
+    this.legacyAliases = opts.legacyAliases ?? true;
     this.baseUrl = (opts.baseUrl ?? envVar("LENZ_BASE_URL") ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -1601,11 +1793,41 @@ export class Lenz {
    * throws `LenzAbortError`. Make one per request
    * (`client.withOptions({ signal: request.signal })`), and cancel server-side
    * work through the client you made it from.
+   *
+   * `apiKey` gives the copy its own key (or OAuth token) on the same
+   * transport, for a server that calls Lenz for several accounts:
+   * `client.withOptions({ apiKey: tenantKey })`. Only an absent `apiKey`
+   * keeps the client's key; given as `undefined`, `null`, empty or
+   * whitespace, the copy has no key. A copy never reads `LENZ_API_KEY`.
+   * An option name it does not take throws.
    */
-  withOptions(opts: RequestOptions): this {
+  withOptions(opts: ClientCopyOptions): this {
     const o = checkOptions(opts, "withOptions()", "request");
+    const given = (opts ?? {}) as Record<string, unknown>;
+    if ("legacyAliases" in given) {
+      throw new Error(
+        "withOptions(): legacyAliases is set when the client is made " +
+          "(new Lenz({ legacyAliases })); a copy keeps the client's.",
+      );
+    }
+    for (const name of Object.keys(given)) {
+      if (!COPY_OPTION_NAMES.has(name)) {
+        throw new Error(
+          `withOptions(): unknown option ${JSON.stringify(name)} ` +
+            `(it takes ${[...COPY_OPTION_NAMES].join(", ")}).`,
+        );
+      }
+    }
+    // Only an absent `apiKey` keeps the client's key: one given as
+    // undefined, null, "" or whitespace (a tenant with no key) means none.
+    const hasKey = "apiKey" in given;
+    const apiKey = given["apiKey"];
+    if (apiKey !== undefined && apiKey !== null && typeof apiKey !== "string") {
+      throw new Error(`withOptions(): apiKey must be a string (got ${typeof apiKey}).`);
+    }
     const base = COPY_OPTIONS.get(this);
     const copy = Object.assign(Object.create(Object.getPrototypeOf(this) as object) as this, this);
+    if (hasKey) copy.apiKey = usableKey(apiKey);
     if (o.timeoutMs !== undefined) copy.timeoutMs = o.timeoutMs;
     if (o.maxRetries !== undefined) copy.maxRetries = o.maxRetries;
     COPY_OPTIONS.set(copy, {
@@ -1685,7 +1907,7 @@ export class Lenz {
       headers,
       ...transportOf(call),
     });
-    return normalizeBatchAccepted(accepted) as BatchAccepted;
+    return aliased(this, normalizeBatchAccepted, accepted);
   }
 
   /**
@@ -1730,7 +1952,7 @@ export class Lenz {
       // (in the options, or the deprecated input field) is used as given.
       timeoutMs: call.timeoutMs ?? input.timeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
     });
-    return normalizeExtract(out, input.locate) as ExtractedClaims;
+    return aliased(this, (b) => normalizeExtract(b, input.locate), out);
   }
 
   /**
@@ -1816,7 +2038,9 @@ export class Lenz {
       // Sent only when asked, so a request without the option (and what its
       // idempotency key covers) is exactly what it was before.
       if (input.suggestRewrite) body.suggest_rewrite = true;
-      return normalizeAssess(
+      return aliased(
+        this,
+        normalizeAssess,
         await this.request<AssessResponse>({
           method: "POST",
           path: "/assess",
@@ -1824,12 +2048,14 @@ export class Lenz {
           headers,
           ...transport,
         }),
-      ) as AssessResponse;
+      );
     }
     const body: Record<string, unknown> = { text: single };
     if (input.language) body.language = input.language;
     if (input.suggestRewrite) body.suggest_rewrite = true;
-    return normalizeAssess(
+    return aliased(
+      this,
+      normalizeAssess,
       await this.request<AssessResponse>({
         method: "POST",
         path: "/assess",
@@ -1837,7 +2063,7 @@ export class Lenz {
         headers,
         ...transport,
       }),
-    ) as AssessResponse;
+    );
   }
 
   /**
@@ -1871,7 +2097,7 @@ export class Lenz {
       headers,
       ...transportOf(call),
     });
-    return normalizeBatchAccepted(accepted) as BatchAccepted;
+    return aliased(this, normalizeBatchAccepted, accepted);
   }
 
   /**
@@ -1900,7 +2126,7 @@ export class Lenz {
       ...transportOf(call),
       ...(deadlineAt !== undefined ? { deadlineAt } : {}),
     });
-    return normalizeTaskStatus(body) as TaskStatus;
+    return aliased(this, normalizeTaskStatus, body);
   }
 
   /**
@@ -1965,7 +2191,7 @@ export class Lenz {
     // Both response shapes: `credits.extra` / `credits.bonus` (the same
     // number), `quota_resets_at`, and the per-capability blocks, recomputed
     // from `credits` and `costs` when the server sends only the pool.
-    return normalizeUsage(usage) as Usage;
+    return aliased(this, normalizeUsage, usage);
   }
 
   // ── Review: the whole recipe in one call ──
@@ -2124,7 +2350,10 @@ export class Lenz {
     citecheckId: string,
     transport: Partial<SendOptions> = {},
   ): Promise<Citecheck> {
-    return withCitecheckDefaults(await this._readCitecheck(citecheckId, transport)) as Citecheck;
+    return withCitecheckDefaults(
+      await this._readCitecheck(citecheckId, transport),
+      aliasesOn(this),
+    ) as Citecheck;
   }
 
   /** The body as the server sent it, before any default is filled. */
@@ -2169,7 +2398,7 @@ export class Lenz {
     if (!isJobBody(body, "citecheck_id", citecheckId, CITECHECK_LISTS)) {
       throw unexpectedAnswer("POST", `/citechecks/${id}/cancel`);
     }
-    return withCitecheckDefaults(body) as Citecheck;
+    return withCitecheckDefaults(body, aliasesOn(this)) as Citecheck;
   }
 
   /**
@@ -2230,10 +2459,11 @@ export class Lenz {
         const raw = await this._readCitecheck(citecheckId, transport);
         // Both response shapes' names, on a body that already passes as this
         // check, so the guard still judges what the server sent.
-        return isCitecheckBody(raw, citecheckId) ? normalizeCitecheck(raw) : raw;
+        return isCitecheckBody(raw, citecheckId) && aliasesOn(this) ? normalizeCitecheck(raw) : raw;
       },
       isBody: (body) => isCitecheckBody(body, citecheckId),
-      failed: (check) => new CitecheckFailedError(check),
+      // The error is the same either way: built from the body with the 2.x names.
+      failed: (check) => new CitecheckFailedError(withCitecheckDefaults(check)),
       timedOut: (last) => new CitecheckTimeoutError(citecheckId, last, timeoutMs),
       onUpdate,
     });
@@ -2251,7 +2481,7 @@ export class Lenz {
       query: opts.view && opts.view !== "full" ? { view: opts.view } : undefined,
       ...transport,
     });
-    return withReviewDefaults(body);
+    return withReviewDefaults(body, aliasesOn(this));
   }
 
   /**
@@ -2284,7 +2514,7 @@ export class Lenz {
     if (!isJobBody(body, "review_id", reviewId, REVIEW_LISTS)) {
       throw unexpectedAnswer("POST", `/reviews/${id}/cancel`);
     }
-    return withReviewDefaults(body) as ReviewFull;
+    return withReviewDefaults(body, aliasesOn(this)) as ReviewFull;
   }
 
   /**
@@ -2329,7 +2559,8 @@ export class Lenz {
               call,
               read: (transport) => this._getReview(reviewId, {}, transport),
               isBody: (body) => isReviewBody(body, reviewId),
-              failed: (review) => new ReviewFailedError(review),
+              // The error is the same either way: built from the body with the 2.x names.
+              failed: (review) => new ReviewFailedError(withReviewDefaults(review)),
               timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
               onUpdate,
               ended,
@@ -2619,6 +2850,15 @@ export class Lenz {
         ),
     );
 
+    // Each result's claim, and its 2.x `claim_text` unless the client was
+    // made with `legacyAliases: false`.
+    const legacy = aliasesOn(this);
+    const names = (
+      it: BatchAccepted["items"][number],
+    ): Pick<BatchItemResult, "claim" | "claim_text"> =>
+      legacy
+        ? { claim: it.claim ?? it.claim_text, claim_text: it.claim_text ?? it.claim }
+        : { claim: it.claim };
     return accepted.items.map((it): BatchItemResult => {
       // Removed under the account's retention period, or a poll answered an
       // error polling again will not change (401, 403, 404): final, with no
@@ -2626,8 +2866,7 @@ export class Lenz {
       if (gone.has(it.task_id) || permanent.has(it.task_id)) {
         return {
           task_id: it.task_id,
-          claim: it.claim ?? it.claim_text,
-          claim_text: it.claim_text ?? it.claim,
+          ...names(it),
           status: "failed",
         };
       }
@@ -2635,16 +2874,14 @@ export class Lenz {
       if (!it.task_id || timedOut.has(it.task_id) || !status) {
         return {
           task_id: it.task_id,
-          claim: it.claim ?? it.claim_text,
-          claim_text: it.claim_text ?? it.claim,
+          ...names(it),
           status: "timeout",
         };
       }
       if (status.status === "completed" && status.result) {
         return {
           task_id: it.task_id,
-          claim: it.claim ?? it.claim_text,
-          claim_text: it.claim_text ?? it.claim,
+          ...names(it),
           status: "completed",
           verification: status.result,
           status_detail: status,
@@ -2653,8 +2890,7 @@ export class Lenz {
       if (status.status === "needs_input") {
         return {
           task_id: it.task_id,
-          claim: it.claim ?? it.claim_text,
-          claim_text: it.claim_text ?? it.claim,
+          ...names(it),
           status: "needs_input",
           status_detail: status,
         };
@@ -2662,8 +2898,7 @@ export class Lenz {
       // failed, or completed-without-result (treated as failed).
       return {
         task_id: it.task_id,
-        claim: it.claim ?? it.claim_text,
-        claim_text: it.claim_text ?? it.claim,
+        ...names(it),
         status: "failed",
         status_detail: status,
       };
@@ -2914,7 +3149,10 @@ export class Lenz {
    * Map a terminal `TaskStatus` to a `Verification` or throw the matching typed
    * error. Shared by `wait` (and thus `verifyAndWait`).
    */
-  private _verificationFromTerminal(status: TaskStatus, taskId: string): Verification {
+  private _verificationFromTerminal(polled: TaskStatus, taskId: string): Verification {
+    // Errors are the same either way: their fields are read with the 2.x
+    // names; a needs-input error's payload is the poll as returned.
+    const status = normalizeTaskStatus(polled) as TaskStatus;
     if (status.status === "completed") {
       if (!status.result) {
         const emptyErr = new LenzPipelineError({
@@ -2926,7 +3164,7 @@ export class Lenz {
         emptyErr.taskId = taskId; // parity: the Python SDK sets task_id here too
         throw emptyErr;
       }
-      return status.result;
+      return polled.result!;
     }
     if (status.status === "needs_input") {
       const err = new LenzNeedsInputError({
@@ -2937,7 +3175,7 @@ export class Lenz {
       });
       err.taskId = taskId;
       err.kind = status.reason ?? "";
-      err.payload = status as unknown as Record<string, unknown>;
+      err.payload = polled as unknown as Record<string, unknown>;
       err.hint = status.hint ?? "";
       throw err;
     }
@@ -3232,7 +3470,7 @@ export class Lenz {
           response = await this.fetchImpl(url.toString(), {
             method: opts.method,
             headers,
-            body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
+            body: opts.json !== undefined ? jsonBody(opts.json) : undefined,
             signal: controller.signal,
           });
         } catch (exc) {
@@ -3300,7 +3538,7 @@ export class Lenz {
             // not JSON: stays null
           }
           const err = new LenzApiVersionError({
-            message: `The API answered in version ${served}; lenz-io 3.x reads ${API_VERSION} only.`,
+            message: `The API answered ${served}; this SDK reads ${API_VERSION} only.`,
             cause: `The response carries X-Lenz-API-Version: ${served}.`,
             fix:
               "If this persists, contact support (https://lenz.io/contact) with the request id; " +
@@ -3317,11 +3555,16 @@ export class Lenz {
           // The attempt's timer stays armed until the body is read: headers
           // arriving is not the response arriving, and a body that stalls
           // after them must not hang the call.
+          let text: string;
           try {
-            if (response.status === 204 || response.headers.get("content-length") === "0") {
+            if (
+              response.status === 204 ||
+              response.status === 205 ||
+              response.headers.get("content-length") === "0"
+            ) {
               return { done: true, value: {} as T };
             }
-            return { done: true, value: (await response.json()) as T };
+            text = await response.text();
           } catch (exc) {
             rethrowIfCallerAbort(signals);
             if (controller.signal.aborted) {
@@ -3339,6 +3582,15 @@ export class Lenz {
             throw exc;
           } finally {
             clearTimeout(timer);
+          }
+          // Only a 204, a 205 or `Content-Length: 0` reads as `{}` (above);
+          // any other body, an empty or blank one included, must be JSON.
+          try {
+            return { done: true, value: JSON.parse(text) as T };
+          } catch (exc) {
+            // An HTTP answer that is not JSON: the real status, not a parse
+            // error or a transport failure (status 0 means no HTTP answer).
+            throw invalidResponse(opts.method, opts.path, response, text, exc);
           }
         }
         // Error path. Retry on 5xx + 429; otherwise throw. The attempt's

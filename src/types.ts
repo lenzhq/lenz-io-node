@@ -225,7 +225,13 @@ export type CoverageStatus = "covered" | "uncovered" | "pending_timestamp";
  * your claim.
  */
 export type CoverageReason =
-  "plan" | "account" | "depth" | "verdict" | "quality" | "withdrawn" | "issue_failed";
+  | "plan"
+  | "account"
+  | "depth"
+  | "verdict"
+  | "quality"
+  | "withdrawn"
+  | "issue_failed";
 
 /**
  * Whether this verdict carries Lenz's warranty, for YOUR account.
@@ -1479,7 +1485,12 @@ export type Depth = "standard" | "low";
  * class `cancelled`).
  */
 export type ReviewStatus =
-  "queued" | "assessing" | "verifying" | "completed" | "failed" | "cancelled";
+  | "queued"
+  | "assessing"
+  | "verifying"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /**
  * The one field to branch on once a review is terminal (`null` before):
@@ -1506,7 +1517,12 @@ export type ReviewOutcome = "clean" | "issues_found" | "incomplete" | "unchecked
  * `account_cap`: the account's allowance of running deep checks was reached.
  */
 export type EscalationDisposition =
-  "not_selected" | "planned" | "cap" | "credits" | "account_cap" | (string & NonNullable<unknown>);
+  | "not_selected"
+  | "planned"
+  | "cap"
+  | "credits"
+  | "account_cap"
+  | (string & NonNullable<unknown>);
 
 /** The escalation policy as the review resolved it (defaults filled in). */
 export interface EscalationPolicy {
@@ -1620,7 +1636,11 @@ export interface ReviewSummary {
    * draft was one URL), `insufficient_credits` or `switched_off`.
    */
   citations_skipped:
-    "url_input" | "insufficient_credits" | "switched_off" | (string & NonNullable<unknown>) | null;
+    | "url_input"
+    | "insufficient_credits"
+    | "switched_off"
+    | (string & NonNullable<unknown>)
+    | null;
 }
 
 export interface ReviewCredits {
