@@ -17,6 +17,8 @@
  *   - lenz_score  : number | null  — integer 1–10 (deep / list; /assess omits)
  */
 
+import type { LenzError } from "./errors.js";
+
 export interface Source extends RawBody {
   source_name?: string;
   title?: string;
@@ -842,6 +844,17 @@ export interface BatchItemResult {
   status: "completed" | "needs_input" | "failed" | "timeout";
   verification?: Verification;
   status_detail?: TaskStatus;
+  /**
+   * On a `"failed"` row, the error that ended its polling (since 3.2): a
+   * `LenzGoneError` (removed under the retention period), a
+   * `LenzNotFoundError`, a `LenzApiVersionError`, or a
+   * `LenzInvalidResponseError` for a poll that said the run ended but could
+   * not be read (its `body` the poll as received, which `status_detail` also
+   * holds). `undefined` on a run that failed on the server (read
+   * `status_detail`) and on every other row. Non-enumerable: not in
+   * `JSON.stringify`, a spread or a deep-equal.
+   */
+  readonly error?: LenzError;
 }
 
 /**

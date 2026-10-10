@@ -1311,6 +1311,21 @@ function keepRaw<T>(from: unknown, to: T, key?: string): T {
 }
 
 /**
+ * A failed `verifyBatchAndWait` row with a non-enumerable `error`: the error
+ * that ended its polling (kept out of `JSON.stringify`, a spread and a
+ * deep-equal).
+ */
+function withRowError(row: BatchItemResult, error: LenzError): BatchItemResult {
+  Object.defineProperty(row, "error", {
+    value: error,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return row;
+}
+
+/**
  * A receipt read from a 409 that names the job: its `raw` that 409's body,
  * its `httpStatus` and `headers` that 409's, and `settledByConflict` true.
  */
@@ -3619,12 +3634,16 @@ export class Lenz {
       // Removed under the account's retention period, or a poll answered an
       // error polling again will not change (401, 403, 404): final, with no
       // result.
-      if (gone.has(it.task_id) || permanent.has(it.task_id)) {
-        return {
-          task_id: it.task_id,
-          ...names(it),
-          status: "failed",
-        };
+      const ended = gone.get(it.task_id) ?? permanent.get(it.task_id);
+      if (ended !== undefined) {
+        return withRowError(
+          {
+            task_id: it.task_id,
+            ...names(it),
+            status: "failed",
+          },
+          ended,
+        );
       }
       const status = terminal.get(it.task_id);
       if (!it.task_id || timedOut.has(it.task_id) || !status) {
@@ -3653,13 +3672,17 @@ export class Lenz {
           status_detail: status,
         };
       }
-      // failed, or completed-without-result (treated as failed).
-      return {
+      // failed, or completed-without-result (treated as failed). The latter
+      // ended but cannot be read: its row's `error` says so.
+      const row: BatchItemResult = {
         task_id: it.task_id,
         ...names(it),
         status: "failed",
         status_detail: status,
       };
+      return status.status === "completed"
+        ? withRowError(row, wrongType(status, "GET", `/verify/status/${it.task_id}`, "result"))
+        : row;
     });
   }
 

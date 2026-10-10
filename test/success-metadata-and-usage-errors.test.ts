@@ -14,7 +14,10 @@ import {
   Lenz,
   LenzAuthError,
   LenzInvalidKeyError,
+  LenzApiVersionError,
+  LenzGoneError,
   LenzInvalidResponseError,
+  LenzNotFoundError,
   LenzTimeoutError,
   LenzValidationError,
   LenzWebhooks,
@@ -575,6 +578,48 @@ describe("a field of the wrong type where the SDK reads it", () => {
     expect(rows[1]!.verification?.verification_id).toBe("v2");
     // Not polled again.
     expect(polls.filter((p) => p === "t1")).toHaveLength(1);
+    // The row's error: the poll as received, kept out of serialisation.
+    const err = rows[0]!.error as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.body).toEqual({ task_id: "t1", status: "completed", result: "x" });
+    expect(Object.keys(rows[0]!)).not.toContain("error");
+    expect(JSON.parse(JSON.stringify(rows[0]))).not.toHaveProperty("error");
+    expect(rows[1]!.error).toBeUndefined();
+  });
+
+  it("a failed batch row carries the error that ended its polling", async () => {
+    const { fetch } = server((s) => {
+      if (s.url.endsWith("/verify/batch")) {
+        return {
+          status: 202,
+          body: {
+            batch_id: "b",
+            items: ["t1", "t2", "t3", "t4"].map((task_id) => ({ task_id, claim: task_id })),
+          },
+        };
+      }
+      if (s.url.endsWith("/t1")) {
+        return { status: 410, body: { detail: "purged", code: "purged", purged_at: "x" } };
+      }
+      if (s.url.endsWith("/t2")) return { status: 404, body: { detail: "Not found." } };
+      if (s.url.endsWith("/t3")) {
+        return {
+          body: { task_id: "t3", status: "processing" },
+          headers: { "X-Lenz-API-Version": "2026-05-13" },
+        };
+      }
+      return { body: { task_id: "t4", status: "failed", failure: { failure_class: "internal" } } };
+    });
+    const rows = await new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 }).verifyBatchAndWait({
+      claims: ["t1", "t2", "t3", "t4"].map((claim) => ({ claim })),
+    });
+    expect(rows.map((r) => r.status)).toEqual(["failed", "failed", "failed", "failed"]);
+    expect(rows[0]!.error).toBeInstanceOf(LenzGoneError);
+    expect(rows[1]!.error).toBeInstanceOf(LenzNotFoundError);
+    expect(rows[2]!.error).toBeInstanceOf(LenzApiVersionError);
+    // A run that failed on the server: read status_detail; no error.
+    expect(rows[3]!.error).toBeUndefined();
+    expect(rows[3]!.status_detail?.status).toBe("failed");
   });
 
   it("a poll that cannot be read and is not ended is polled again", async () => {

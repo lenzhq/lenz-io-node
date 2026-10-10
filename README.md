@@ -923,7 +923,10 @@ resubmit it.
 answers an error waiting cannot change: `wait` throws it (401, 403, 404,
 `LenzApiVersionError`). In a batch, a 404 or an answer in another API version
 for one claim makes that claim read `"failed"` while the others keep being
-polled; a 401 or 403 is about the key, so `verifyBatchAndWait` throws it. A
+polled (since 3.2 the row's non-enumerable `error` holds that error, as it
+does a `LenzGoneError` for a purged claim and a `LenzInvalidResponseError`
+for an ended poll that could not be read; `undefined` on a run that failed on
+the server, whose `status_detail` says why); a 401 or 403 is about the key, so `verifyBatchAndWait` throws it. A
 5xx, a 429 or a network drop is polled through. No poll runs past the wait's
 `timeoutMs`; once it is spent, the claims still running read `"timeout"`
 (`wait` throws `LenzTimeoutError`).
@@ -1018,8 +1021,8 @@ about the run. One that says the run ended (a `completed` status whose
 `completed`, `failed` or `cancelled` but missing what the SDK reads) throws
 that `LenzInvalidResponseError` at once: polling again would only run to a
 timeout that hides why. In `verifyBatchAndWait` it ends only that row, as
-`"failed"` with the poll as received in `status_detail`, and the other rows
-complete. Any other unreadable poll (no readable status, a 2xx
+`"failed"` with the poll as received in `status_detail` and the error in the
+row's `error`, and the other rows complete. Any other unreadable poll (no readable status, a 2xx
 that is not JSON, another job's body) is polled again like a 5xx; if the wait
 then reaches its `timeoutMs`, and its last poll was such an answer, the
 timeout error (`LenzTimeoutError`, `ReviewTimeoutError`,
