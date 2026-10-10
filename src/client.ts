@@ -3915,7 +3915,10 @@ export class Lenz {
             : // Removed after it finished, or not there. A poll answered in
               // another API version says nothing about the run: it stays
               // eligible.
-              res.reason instanceof LenzGoneError || res.reason instanceof LenzNotFoundError;
+              // A run that completed with no result has ended too.
+              res.reason instanceof LenzGoneError ||
+              res.reason instanceof LenzNotFoundError ||
+              ENDED_UNREADABLE.has(res.reason as object);
         if (done) ended.add(pending[i]!);
       });
     };
