@@ -117,6 +117,9 @@ must handle). Some upgrades need a change first: see "Migrating".
 Intentional behaviour changes; apart from these and "Breaking", nothing that
 worked on 2.21 behaves differently:
 
+- **`dissent` on `assess` rows and review assessments is deprecated and
+  always null.** The field stays on `AssessClaim` and `ReviewAssessment`
+  (optional, `null`) so code that reads it keeps working.
 - **Per-request timeouts and retry counts are checked before any request.**
   A `timeoutMs` must be a number of ms above 0 and at most 2,147,483,647 (the
   longest a timer can hold), and a `maxRetries` a whole number, 0 or more,
@@ -441,6 +444,7 @@ replacement).
 |                                                                                    | `hint`                                                             | `failure.hint` on a failed row; `more_claims` on a completed compound row        |
 |                                                                                    | `identified_claims`                                                | `more_claims`                                                                    |
 |                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |
+|                                                                                    | `dissent` (also on a review assessment)                            | none (always `null`)                                                             |
 | `assess` body                                                                      | `error`                                                            | `failure.detail`                                                                 |
 |                                                                                    | `error_code`                                                       | `failure.code`                                                                   |
 |                                                                                    | `candidate_claims`                                                 | none (always `[]`)                                                               |

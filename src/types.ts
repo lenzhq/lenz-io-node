@@ -503,11 +503,7 @@ export interface AssessClaim {
    * replayed from before the API added it.
    */
   rationale?: string | null;
-  /**
-   * When set, the reasoning of the reviewer farthest from the panel's
-   * verdict. A reviewer's note, not a checked source. `null` or absent
-   * otherwise.
-   */
+  /** @deprecated Always null. Kept so code that reads it keeps working. */
   dissent?: string | null;
   /**
    * The claim with its wrong part corrected, when the request set
@@ -1648,7 +1644,7 @@ export interface ReviewAssessment {
   confidence: ConfidenceBand | null;
   /** A reviewer's reasoning for the verdict, not sourced evidence. */
   rationale: string | null;
-  /** When set, the reasoning of the reviewer who disagreed. */
+  /** @deprecated Always null. Kept so code that reads it keeps working. */
   dissent: string | null;
   /** Set when the quick check served an existing deep verdict. */
   verification_url: string | null;
