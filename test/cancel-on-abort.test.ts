@@ -18,6 +18,7 @@ import {
   LenzError,
   LenzTimeoutError,
   ReviewTimeoutError,
+  type TaskStatus,
 } from "../src/index.js";
 import { settle } from "./support/recorder.js";
 
@@ -352,6 +353,45 @@ describe("nothing to cancel", () => {
     );
     expectAbort(err);
     expect(cancels()).toHaveLength(0);
+  });
+});
+
+describe("a task seen to end in the round the abort came in is not cancelled", () => {
+  // A getStatus that aborts the call and then answers: the answer lands in
+  // the same round as the abort.
+  function endingClient(final: unknown) {
+    const controller = new AbortController();
+    const { fetch, cancels } = router({
+      "POST /verify": [{ status: 202, body: { task_id: "t1", status: "queued" } }],
+    });
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+    let polls = 0;
+    class Ending extends Lenz {
+      override getStatus(): Promise<TaskStatus> {
+        polls++;
+        if (polls === 1) return Promise.resolve(PROCESSING as unknown as TaskStatus);
+        controller.abort(new Error("caller went away"));
+        return Promise.resolve(final as TaskStatus);
+      }
+    }
+    const c = new Ending({ apiKey: "lenz_t", fetch, logger });
+    return { c, controller, cancels, logger };
+  }
+
+  it.each([
+    ["wait", (c: Lenz, signal: AbortSignal) => c.wait("t1", { signal, cancelOnAbort: true })],
+    [
+      "verifyAndWait (through its nested wait)",
+      (c: Lenz, signal: AbortSignal) =>
+        c.verifyAndWait({ claim: SECRET }, { signal, cancelOnAbort: true }),
+    ],
+  ] as const)("%s", async (_name, run) => {
+    const { c, controller, cancels, logger } = endingClient(COMPLETED);
+    const pending = settle(run(c, controller.signal));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expectAbort(await pending);
+    expect(cancels()).toHaveLength(0);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
 

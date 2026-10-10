@@ -1525,6 +1525,14 @@ const ENDED_TASK_STATUSES: ReadonlySet<string> = new Set([
   "cancelled",
 ]);
 
+/**
+ * The set a nested `wait` records ended tasks in, keyed on the options object
+ * `verifyAndWait` hands it: the outer wait owns the cancel, so it must know
+ * what the inner one saw end. An override of `wait` given other options just
+ * shares nothing (the cancel is then sent, and logged if the run had ended).
+ */
+const NESTED_WAIT_ENDED = new WeakMap<object, Set<string>>();
+
 /** The kinds of run `cancelOnAbort` cancels, and the noun its log lines use. */
 type AbortCancelKind = "task" | "review" | "citecheck";
 
@@ -2463,20 +2471,23 @@ export class Lenz {
       const accepted = await this.submit(input, idempotencyKey, transportOf(call));
       acceptedId("task_id", accepted.task_id);
       this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
-      // This call owns the cancel: the wait below is not handed the flag.
+      // This call owns the cancel: the wait below is not handed the flag,
+      // only a set to record what it saw end.
+      const waitOpts: WaitOptions = { timeoutMs, onProgress, ...ownOptions(call) };
+      const ended = new Set<string>();
+      if (cancelOnAbort) NESTED_WAIT_ENDED.set(waitOpts, ended);
       return this._cancellingOnAbort(
         cancelOnAbort,
         call,
         "task",
-        () => [accepted.task_id],
+        () => (ended.has(accepted.task_id) ? [] : [accepted.task_id]),
         () =>
-          withAbortContext({ taskId: accepted.task_id }, () =>
-            // Raced, in case an override of `wait` ignores the signal.
-            raceAbort(
-              this.wait(accepted, { timeoutMs, onProgress, ...ownOptions(call) }),
-              call.signals,
-            ),
-          ),
+          withAbortContext({ taskId: accepted.task_id }, () => {
+            const waiting = this.wait(accepted, waitOpts);
+            // The SDK's own wait honours the signal, and records what it saw
+            // end before it throws. An override may not, so it is raced.
+            return this.wait === Lenz.prototype.wait ? waiting : raceAbort(waiting, call.signals);
+          }),
       );
     });
   }
@@ -2501,7 +2512,7 @@ export class Lenz {
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const onProgress = opts.onProgress;
     const call = resolveCall(this, opts, "wait()", "wait");
-    const ended = new Set<string>();
+    const ended = (opts && NESTED_WAIT_ENDED.get(opts)) ?? new Set<string>();
     const { terminal, timedOut, gone, permanent } = await this._cancellingOnAbort(
       opts.cancelOnAbort === true,
       call,
