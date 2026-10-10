@@ -207,6 +207,28 @@ describe("httpStatus and headers on a result read from an answer", () => {
     expect((rows[0] as unknown as { httpStatus?: number }).httpStatus).toBeUndefined();
   });
 
+  it("a body with its own raw key still carries httpStatus and headers, in both modes", async () => {
+    const body = { task_id: "t1", status: "processing", raw: "server's" };
+    const { fetch } = server(() => ({ body, headers: { "X-Request-ID": "req5" } }));
+    for (const legacyAliases of [true, false]) {
+      const st = await new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).getStatus("t1");
+      expect(st.httpStatus).toBe(200);
+      expect(st.headers?.["x-request-id"]).toBe("req5");
+      expect((st as unknown as Record<string, unknown>)["raw"]).toBe("server's");
+    }
+  });
+
+  it("and a wrong-typed field in such a body still reports the body", async () => {
+    const body = { task_id: "t1", status: "completed", result: "x", raw: 1 };
+    const { fetch } = server(() => ({ body }));
+    const err = (await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).wait("t1"),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.body).toEqual(body);
+    expect(err.bodyText).toBe(JSON.stringify(body));
+  });
+
   it("an object that carries its own headers key keeps it", async () => {
     const { fetch } = server(() => ({ body: { headers: "server's", httpStatus: 7 } }));
     const out = (await new Lenz({

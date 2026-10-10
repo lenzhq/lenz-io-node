@@ -1100,11 +1100,11 @@ function invalidShape(
 ): LenzInvalidResponseError {
   const object = from !== null && typeof from === "object" ? from : undefined;
   const meta = object ? RESPONSE_META.get(object) : undefined;
-  const source = object ? RAW_SOURCE.get(object) : undefined;
+  const text = (object ? RAW_SOURCE.get(object)?.text : undefined) ?? meta?.text;
   const headers = meta?.headers;
   let body: Record<string, unknown> | null = null;
-  if (source !== undefined) {
-    const parsed: unknown = JSON.parse(source.text);
+  if (text !== undefined) {
+    const parsed: unknown = JSON.parse(text);
     if (isPlainObject(parsed)) body = parsed;
   }
   const err = new LenzInvalidResponseError({
@@ -1121,7 +1121,7 @@ function invalidShape(
     err.headers = { ...headers };
     err.servedVersion = (headers["x-lenz-api-version"] ?? "").trim();
   }
-  err.bodyText = source !== undefined ? clippedBodyText(source.text) : "";
+  err.bodyText = text !== undefined ? clippedBodyText(text) : "";
   return err;
 }
 
@@ -1252,13 +1252,15 @@ function attachRaw(node: unknown, part: unknown, text: string, path: RawPath): v
 /** A parsed 2xx answer: it and every object in it carry `raw`; it carries the answer's status and headers. */
 function setRaw(value: object, text: string, response: Response): void {
   attachRaw(value, value, text, []);
-  defineMeta(value, { status: response.status, headers: headersOf(response) });
+  defineMeta(value, { status: response.status, headers: headersOf(response), text });
 }
 
 /** The HTTP status and headers (names in lower case) of the answer a result was read from. */
 interface ResponseMetaSource {
   status: number;
   headers: Record<string, string>;
+  /** The body as received, when it was one (a receipt built from a 409 has none). */
+  text?: string;
 }
 
 /** For each top-level result read from an answer, that answer's status and headers. */
@@ -1295,14 +1297,16 @@ function defineMeta(target: object, meta: ResponseMetaSource): void {
  */
 function keepRaw<T>(from: unknown, to: T, key?: string): T {
   if (!from || typeof from !== "object" || !to || typeof to !== "object") return to;
-  const source = RAW_SOURCE.get(from);
-  if (source === undefined || (to === from && key === undefined)) return to;
-  const path = key === undefined ? source.path : [...source.path, key];
-  attachRaw(to, partAt(JSON.parse(source.text), path), source.text, path);
+  if (to === from && key === undefined) return to;
   // Only a result built from the whole answer is the answer: one read from a
-  // part of it (a status's `result`) is a nested object, without them.
+  // part of it (a status's `result`) is a nested object, without them. Kept
+  // apart from `raw`, which a body carrying its own `raw` key does not get.
   const meta = key === undefined ? RESPONSE_META.get(from) : undefined;
   if (meta !== undefined) defineMeta(to, meta);
+  const source = RAW_SOURCE.get(from);
+  if (source === undefined) return to;
+  const path = key === undefined ? source.path : [...source.path, key];
+  attachRaw(to, partAt(JSON.parse(source.text), path), source.text, path);
   return to;
 }
 
