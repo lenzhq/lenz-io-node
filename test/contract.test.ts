@@ -63,6 +63,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "key_entities",
     "presumed_intent",
     "original_input",
+    "language",
     "locations",
   ]),
   ExtractedEntity: new Set(["name", "type"]),
@@ -776,6 +777,9 @@ describe("contract", () => {
     // the leading emoji.
     const first = locations[0]!.positions![0]!;
     expect(text.slice(first.start!, first.end!)).not.toBe(first.text);
+
+    // The language the claims are written in rides along, in English here.
+    expect(out.language).toBe("en");
 
     // The other extract fixtures predate `locations`; they read as null.
     const plain = loadFixture("extract_response.json") as ExtractedClaims;

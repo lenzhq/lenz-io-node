@@ -343,6 +343,49 @@ describe("explicit language wire format", () => {
     expect(bodyOf(calls).language).toBe("es");
   });
 
+  it("extract: sends language auto unchanged", async () => {
+    const { fetch, calls } = makeFetch([
+      { body: { status: "ready", claims: [{ claim: "x", positions: null }], language: "de" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.extract({ text: "x", language: "auto" });
+    expect(bodyOf(calls).language).toBe("auto");
+  });
+
+  it("extract: the result carries the language the claims are written in", async () => {
+    const { fetch } = makeFetch([
+      {
+        body: {
+          status: "ready",
+          claims: [{ claim: "Die Erde ist rund.", positions: null }],
+          language: "de",
+        },
+      },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "Die Erde ist rund.", language: "auto" });
+    expect(out.language).toBe("de");
+  });
+
+  it("extract: a body without language (an older replay) reads undefined", async () => {
+    const { fetch } = makeFetch([
+      { body: { status: "ready", claims: [{ claim: "x", positions: null }] } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "x" });
+    expect(out.language).toBeUndefined();
+    expect(out.claims).toHaveLength(1);
+  });
+
+  it("extract: language also passes through a 2026-05-13 shaped body", async () => {
+    const { fetch } = makeFetch([
+      { body: { status: "ready", claim: "x", identified_claims: [], language: "fr" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const out = await client.extract({ text: "x" });
+    expect(out.language).toBe("fr");
+  });
+
   it("ask.send: sends language", async () => {
     const { fetch, calls } = makeFetch([{ body: { reply: "ok" } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });

@@ -8,10 +8,11 @@
  *   body, preserving byte-identical wire format for existing English
  *   callers. Set `language: "es"` (or any of the 12 supported codes)
  *   to receive prose fields in that language. `assess`, `verify`,
- *   `verifyAndWait` and `ask.send` also take `language: "auto"`: the answer
- *   comes back in the language of the submitted text (for `ask.send`, the
- *   language of the claim being discussed). `extract`, `verifyBatch`,
- *   `citecheck` and `review` do not take `"auto"`.
+ *   `verifyAndWait`, `extract` and `ask.send` also take `language: "auto"`: the
+ *   answer comes back in the language of the submitted text (for `ask.send`,
+ *   the language of the claim being discussed; for `extract`, the claims are
+ *   written in it). `verifyBatch`, `citecheck` and `review` do not take
+ *   `"auto"`.
  * - Response shapes (Verification, VerificationListItem, AssessClaim)
  *   expose `language?: string` populated by the server. Verdict /
  *   domain / status enums stay English regardless of language; only
@@ -1701,6 +1702,12 @@ export class Lenz {
    *
    * `status` is `"ready"`, `"not_a_claim"` (no verifiable claim in the text
    * at all), or `"no_match"` (claims were found, none fell within `focus`).
+   *
+   * The claims are written in English unless you pass `language`: a code such
+   * as `"de"`, or `"auto"` to write them in the language of the text (of the
+   * fetched page when `text` is a single URL). The result's `language` is the
+   * code they were written in; pass it on to `assess` or `verify` to keep a
+   * chain in one language.
    */
   async extract(input: ExtractInput, options?: RequestOptions): Promise<ExtractedClaims> {
     checkTimeoutMs(input.timeoutMs, "extract() input", true);

@@ -6,6 +6,11 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `extract` accepts `language: "auto"`: the claims are written in the language of the text (of the fetched page when `text` is a single URL); a short or undetectable text gives English. Omitting `language` is still English, and a concrete code always wins.
+- `ExtractedClaims.language`: the ISO 639-1 code the claims are written in (never `"auto"`). Pass it on to `assess` or `verify` as `language` to keep a chain in one language. It reads `undefined` on a response from an API that predates it.
+
 ## [3.1.0] - 2026-10-10
 
 ### Added

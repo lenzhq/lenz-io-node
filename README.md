@@ -1131,11 +1131,15 @@ https://lenz.io/contact.
 
 ### Answer in the language of the text
 
-Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait` or `ask.send` and
-the answer comes back in the language of the text you submitted. A concrete code
+Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait`, `extract` or
+`ask.send` and the answer comes back in the language of the text you submitted. A concrete code
 such as `"es"` always wins, and omitting `language` still means English. On
-`ask.send`, `"auto"` uses the language of the claim being discussed. `extract`,
-`verifyBatch`, `citecheck` and `review` do not accept `"auto"` (the API answers
+`ask.send`, `"auto"` uses the language of the claim being discussed. On
+`extract`, the claims are written in the language of the text (of the fetched
+page when `text` is a single URL); a short or undetectable text gives English,
+and the result's `language` is the code that was used. Pass it on to `assess`
+or `verify` to keep a chain in one language, rather than sending `"auto"` again
+on short extracted claims. `verifyBatch`, `citecheck` and `review` do not accept `"auto"` (the API answers
 422, as for any unsupported language).
 
 ```ts
