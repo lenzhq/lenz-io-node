@@ -236,8 +236,10 @@ function isNewVerification(v: unknown): v is Obj {
 }
 
 /** A verification (detail, list item, a review's deep check, a webhook result). */
-export function normalizeVerification(v: unknown): unknown {
-  const named = entityNames(v);
+export function normalizeVerification(v: unknown, unsent = false): unknown {
+  // An entity's null `name` reads as `""` only on a call's verification,
+  // where `EntityRef.name` is a string; a review row's and a webhook's keep it.
+  const named = unsent ? entityNames(v) : v;
   if (!isNewVerification(named)) return named;
   return { ...named, modified_at: legacyModifiedAt(named["created_at"], named["completed_at"]) };
 }
@@ -343,10 +345,13 @@ export function webhookResultDefaults(result: unknown): unknown {
 }
 
 /** A page of verifications (`verifications.list`, `library.list`). */
-export function normalizeVerificationList(body: unknown): unknown {
+export function normalizeVerificationList(body: unknown, unsent = false): unknown {
   if (!isObj(body) || !Array.isArray(body["items"])) return body;
-  if (!body["items"].some(isNewVerification)) return body;
-  return { ...body, items: body["items"].map(normalizeVerification) };
+  const items = body["items"] as unknown[];
+  if (!items.some(isNewVerification) && !(unsent && items.some((v) => entityNames(v) !== v))) {
+    return body;
+  }
+  return { ...body, items: items.map((v) => normalizeVerification(v, unsent)) };
 }
 
 // ── /verify/status ──
@@ -396,7 +401,7 @@ export function normalizeTaskStatus(body: unknown, unsent = true): unknown {
           "failure_reason",
         ],
   );
-  if (has(body, "result")) out["result"] = normalizeVerification(body["result"]);
+  if (has(body, "result")) out["result"] = normalizeVerification(body["result"], unsent);
   if (Array.isArray(out["claims"])) out["claims"] = normalizeOptions(out["claims"], unsent);
   if (body["status"] === "cancelled") {
     // The newer shape's own status for a task cancelled elsewhere; the

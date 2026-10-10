@@ -1711,7 +1711,7 @@ class VerificationsNamespace {
       query: { page, page_size: pageSize },
       ...transportOf(call),
     });
-    return aliased(this.client, normalizeVerificationList, body);
+    return aliased(this.client, (b) => normalizeVerificationList(b, true), body);
   }
 
   /**
@@ -1769,7 +1769,7 @@ class VerificationsNamespace {
       authOptional: true, // send the key if we have one → owner sees private rows
       ...transportOf(call),
     });
-    return aliased(this.client, normalizeVerification, body);
+    return aliased(this.client, (b) => normalizeVerification(b, true), body);
   }
 
   /**
@@ -1930,7 +1930,7 @@ class LibraryNamespace {
       authRequired: false,
       ...transportOf(call),
     });
-    return aliased(this.client, normalizeVerificationList, body);
+    return aliased(this.client, (b) => normalizeVerificationList(b, true), body);
   }
 
   /**
