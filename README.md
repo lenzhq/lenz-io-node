@@ -1137,7 +1137,9 @@ text you submitted (for a review, one language for the whole draft). A concrete
 code such as `"es"` always wins, and omitting `language` still means English. On
 `ask.send`, `"auto"` uses the language of the claim being discussed. `extract`,
 `verifyBatch` and `citecheck` do not accept `"auto"` (the API answers 422, as for
-any unsupported language).
+any unsupported language). A review of a draft that is only a link decides its
+language once the page is read: until then its `language` reads `"auto"`, and a
+page that cannot be read leaves English.
 
 ```ts
 const v = await client.verifyAndWait({
