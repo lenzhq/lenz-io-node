@@ -2748,9 +2748,10 @@ export class Lenz {
           const done =
             res.status === "fulfilled"
               ? ENDED_TASK_STATUSES.has(res.value.status)
-              : res.reason instanceof LenzGoneError ||
-                res.reason instanceof LenzNotFoundError ||
-                res.reason instanceof LenzApiVersionError;
+              : // Removed after it finished, or not there. A poll answered in
+                // another API version says nothing about the run: it stays
+                // eligible.
+                res.reason instanceof LenzGoneError || res.reason instanceof LenzNotFoundError;
           if (done) ended.add(pending[i]!);
         });
       }
