@@ -551,7 +551,7 @@ export async function POST(request: Request): Promise<Response> {
   `enable_request_signal` compatibility flag, and a disconnect may end the
   invocation before the cancel leaves: send the cancel yourself inside
   `ctx.waitUntil`, or do not rely on this. Express has no `request.signal`:
-  make an `AbortController`, call `controller.abort()` on `req.on("close", …)`
+  make an `AbortController`, call `controller.abort()` on `res.on("close", …)`
   when `!res.writableFinished`, and pass `controller.signal`.
 - The cancel is `cancel` for a verification (one per task a batch accepted and
   not yet seen to end, sent concurrently), `cancelReview` for a review and
