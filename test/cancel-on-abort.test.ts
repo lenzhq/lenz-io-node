@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Lenz,
   LenzAbortError,
+  LenzAuthError,
   LenzError,
   LenzTimeoutError,
   ReviewTimeoutError,
@@ -266,6 +267,30 @@ describe("on: an abort after the run was accepted cancels it", () => {
     expect(cancels()).toHaveLength(1);
   });
 
+  it("wait(id) whose signal already fired: the id is known, so it cancels, then throws with taskId", async () => {
+    const { fetch, seen } = router({
+      "POST /verify/t1/cancel": [{ body: taskCancelled("t1") }],
+    });
+    const { c, logger } = client(fetch);
+    const reason = new Error("caller went away");
+    const err = await settle(
+      c.wait("t1", { signal: AbortSignal.abort(reason), cancelOnAbort: true }),
+    );
+    expectAbort(err);
+    expect(err.taskId).toBe("t1");
+    expect(seen.map((s) => `${s.method} ${s.path}`)).toEqual(["POST /verify/t1/cancel"]);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("wait(id) whose signal already fired, without the flag: nothing sent, no taskId (as in 3.0)", async () => {
+    const fetch = vi.fn() as unknown as typeof globalThis.fetch;
+    const { c } = client(fetch);
+    const err = await settle(c.wait("t1", { signal: AbortSignal.abort(new Error("x")) }));
+    expect(err).toBeInstanceOf(LenzAbortError);
+    expect((err as LenzAbortError).taskId).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("a dead withOptions copy's signal cancels too, and the cancel is still sent", async () => {
     const { fetch, cancels } = router({
       "GET /verify/status/t1": [{ body: PROCESSING }],
@@ -325,12 +350,18 @@ describe("nothing to cancel", () => {
     }
   });
 
-  it("a signal already fired when the wait is called sends nothing at all", async () => {
+  it("a *AndWait whose signal already fired sends nothing (no submit, no id)", async () => {
     const fetch = vi.fn() as unknown as typeof globalThis.fetch;
     const { c } = client(fetch);
     const signal = AbortSignal.abort(new Error("gone"));
-    const err = await settle(c.wait("t1", { signal, cancelOnAbort: true }));
-    expect(err).toBeInstanceOf(LenzAbortError);
+    for (const run of [
+      () => c.verifyAndWait({ claim: "a" }, { signal, cancelOnAbort: true }),
+      () => c.verifyBatchAndWait({ claims: [{ claim: "a" }] }, { signal, cancelOnAbort: true }),
+      () => c.reviewAndWait({ text: "a" }, { signal, cancelOnAbort: true }),
+      () => c.citecheckAndWait({ text: "a" }, { signal, cancelOnAbort: true }),
+    ]) {
+      expect(await settle(run())).toBeInstanceOf(LenzAbortError);
+    }
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -395,6 +426,45 @@ describe("a task seen to end in the round the abort came in is not cancelled", (
   });
 });
 
+describe("a fatal poll answer in the abort round", () => {
+  it("a task seen completed in that round is still not cancelled", async () => {
+    const controller = new AbortController();
+    const { fetch, cancels } = router({
+      "POST /verify/batch": [
+        {
+          status: 202,
+          body: {
+            batch_id: "b1",
+            items: [
+              { task_id: "t1", claim: "a" },
+              { task_id: "t2", claim: "b" },
+            ],
+          },
+        },
+      ],
+      "POST /verify/t2/cancel": [{ body: taskCancelled("t2") }],
+    });
+    class Fatal extends Lenz {
+      override getStatus(taskId: string): Promise<TaskStatus> {
+        if (taskId === "t1") {
+          controller.abort(new Error("caller went away"));
+          return Promise.resolve(COMPLETED as unknown as TaskStatus);
+        }
+        return Promise.reject(new LenzAuthError({ message: "key refused" }));
+      }
+    }
+    const c = new Fatal({ apiKey: "lenz_t", fetch });
+    const err = await settle(
+      c.verifyBatchAndWait(
+        { claims: [{ claim: "a" }, { claim: "b" }] },
+        { signal: controller.signal, cancelOnAbort: true },
+      ),
+    );
+    expectAbort(err);
+    expect(cancels().map((s) => s.path)).toEqual(["/verify/t2/cancel"]);
+  });
+});
+
 describe("the SDK's own deadline is not an abort", () => {
   it("verifyAndWait: timeoutMs running out throws LenzTimeoutError and sends no cancel", async () => {
     const { fetch, cancels } = router({
@@ -445,8 +515,8 @@ describe("a cancel that does not cancel is logged, never thrown", () => {
     expectAbort(err);
     expect(cancels()).toHaveLength(1);
     expect(warnings(logger)).toEqual([
-      "[lenz-io] cancelOnAbort: task t1 was not cancelled: it had already ended " +
-        "(status completed), and a run that finished is charged as usual.",
+      "[lenz-io] cancelOnAbort: task t1 was not cancelled: the run had already finished " +
+        "(status: completed); it is billed as a completed run.",
     ]);
   });
 
@@ -679,6 +749,17 @@ describe("where the option is taken", () => {
       expect((err as Error).message).toMatch(/cancelOnAbort must be true or false/);
     }
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("withOptions and the plain calls take cancelOnAbort: false silently", async () => {
+    const { fetch, seen } = router({
+      "POST /verify": [{ status: 202, body: { task_id: "t1", status: "queued" } }],
+    });
+    const { c } = client(fetch);
+    const off = { cancelOnAbort: false } as unknown as Record<string, never>;
+    expect(() => c.withOptions(off)).not.toThrow();
+    await c.verify({ claim: "a" }, off);
+    expect(seen).toHaveLength(1);
   });
 
   it("withOptions and the plain calls refuse it: it belongs to one wait", async () => {

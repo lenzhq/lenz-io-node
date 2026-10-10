@@ -545,30 +545,36 @@ export async function POST(request: Request): Promise<Response> {
 }
 ```
 
-- The signal must fire when your caller goes away. Fetch-style handlers
-  (Next.js route handlers, Hono, Workers, Deno, Bun) give you one in
-  `request.signal`. Express has none: make an `AbortController`, call
-  `controller.abort()` on `res.on("close", …)` when `!res.writableFinished`,
-  and pass `controller.signal`.
+- The signal must fire when your caller goes away. Where your framework hands
+  you a `Request` whose `signal` fires on a client disconnect (Bun does),
+  pass `request.signal`. On Cloudflare Workers, `request.signal` needs the
+  `enable_request_signal` compatibility flag, and a disconnect may end the
+  invocation before the cancel leaves: send the cancel yourself inside
+  `ctx.waitUntil`, or do not rely on this. Express has no `request.signal`:
+  make an `AbortController`, call `controller.abort()` on `req.on("close", …)`
+  when `!res.writableFinished`, and pass `controller.signal`.
 - The cancel is `cancel` for a verification (one per task a batch accepted and
   not yet seen to end, sent concurrently), `cancelReview` for a review and
   `cancelCitecheck` for a citation check. It is best effort: one attempt each,
   no retry, all within 5 s, after which the abort is thrown whatever the
-  cancels did.
+  cancels did. So the abort is thrown up to 5 s after the signal fires: with
+  `AbortSignal.timeout(ms)`, the call can overrun `ms` by up to 5 s.
 - A cancel that fails, times out, or finds the run already ended is reported
   to the client's `logger.warn` with the job id only, never thrown. Without a
   logger it is silent.
 - What is charged: a cancelled verification is not charged; a cancelled review
   or citation check is still charged for what it had delivered (only the rest
-  is refunded); a run that finished before the cancel reached it is charged as
-  usual.
+  is refunded); a run that completed before the cancel reached it is billed as
+  a completed run.
 - An abort during the submit has nothing to cancel: resend with the error's
-  `idempotencyKey` to find the run, as above.
+  `idempotencyKey` to find the run, as above. A `*AndWait` called with a
+  signal that has already fired sends nothing; `wait(taskId, …)` already has
+  the id, so it sends the cancel, then throws with `taskId`.
 - The wait's own `timeoutMs` running out is not an abort and never cancels the
   run. A signal you pass, `AbortSignal.timeout(ms)` included, is an abort.
-- It is an option of one wait, not of `withOptions` (which throws if given it):
-  a copy's `signal` firing cancels the run only for the waits called with
-  `cancelOnAbort: true`.
+- It is an option of one wait, not of `withOptions` (which throws if given
+  `true`): a copy's `signal` firing cancels the run only for the waits called
+  with `cancelOnAbort: true`.
 
 ## Response shape — the unified vocabulary
 

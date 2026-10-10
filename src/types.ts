@@ -1375,7 +1375,8 @@ export interface RequestOptions {
   /**
    * Stops the call: every request it makes, every retry sleep and every
    * poll. The call then throws `LenzAbortError`. Nothing is cancelled on the
-   * server. `AbortSignal.timeout(ms)` bounds a whole call, retries included.
+   * server, unless a wait was called with `cancelOnAbort: true`.
+   * `AbortSignal.timeout(ms)` bounds a whole call, retries included.
    */
   signal?: AbortSignal;
   /**
@@ -1431,7 +1432,8 @@ export interface WaitOptions {
    * matching cancel once (`cancel` for each task not yet seen to end; a batch
    * sends them concurrently), one best-effort attempt within 5 s in all,
    * then throws the same `LenzAbortError` as without it. A cancelled
-   * verification is not charged; one that finished first is charged as usual. A
+   * verification is not charged; one that completed first is billed as a
+   * completed run. A
    * cancel that fails, or that finds the run already ended, is reported to
    * the client's `logger.warn` (with the id only) and never thrown. An abort
    * during the submit cancels nothing (resend with the error's
@@ -2296,8 +2298,8 @@ export interface CitecheckAndWaitOptions {
    * on and is charged for the citations it checks). With `true`, the call sends the
    * matching cancel once (`cancelCitecheck`), one best-effort attempt within 5 s,
    * then throws the same `LenzAbortError` as without it. A cancelled check
-   * refunds only the citations it had not checked; one that finished first
-   * is charged as usual. A
+   * refunds only the citations it had not checked; one that completed first
+   * is billed as a completed run. A
    * cancel that fails, or that finds the run already ended, is reported to
    * the client's `logger.warn` (with the id only) and never thrown. An abort
    * during the submit cancels nothing (resend with the error's
@@ -2333,7 +2335,7 @@ export interface ReviewAndWaitOptions {
    * matching cancel once (`cancelReview`), one best-effort attempt within 5 s,
    * then throws the same `LenzAbortError` as without it. A cancelled review
    * stays charged for what it had delivered (only the rest is refunded); one
-   * that finished first is charged as usual. A
+   * that completed first is billed as a completed run. A
    * cancel that fails, or that finds the run already ended, is reported to
    * the client's `logger.warn` (with the id only) and never thrown. An abort
    * during the submit cancels nothing (resend with the error's

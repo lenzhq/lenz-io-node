@@ -645,7 +645,7 @@ describe("contract", () => {
     // fixtures are the two halves of that contract.
     ["verify_status_processing.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
-    // Sources with `snippet_language`: a code, a regional code, null, and a
+    // Sources with `snippet_language`: null (English), two language codes, and a
     // source from an API that predates the key. Same fixture as Python.
     ["verifications_detail_snippet_language.json", "Verification"],
     // Both halves of the coverage contract: the server omits `coverage`

@@ -522,7 +522,8 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
   if (kind !== "wait") checkMaxRetries(o.maxRetries, where);
   checkHeaders(o.headers, where);
   const cancelOnAbort = (o as { cancelOnAbort?: unknown }).cancelOnAbort;
-  if (cancelOnAbort !== undefined) {
+  // `false` is harmless where the option is not taken; only `true` is refused.
+  if (cancelOnAbort !== undefined && !(kind === "request" && cancelOnAbort === false)) {
     if (kind === "request") {
       throw new Error(
         `${where}: cancelOnAbort is an option of one wait (wait, verifyAndWait, ` +
@@ -2511,17 +2512,23 @@ export class Lenz {
     requirePathId("wait", "task_id", taskId);
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const onProgress = opts.onProgress;
-    const call = resolveCall(this, opts, "wait()", "wait");
+    // With `cancelOnAbort` the task is known before anything is sent, so a
+    // signal that has already fired still cancels it (and the abort carries
+    // its id); without, such a call throws at once and sends nothing.
+    const call = resolveCall(this, opts, "wait()", "wait", false);
+    const cancelOnAbort = opts.cancelOnAbort === true;
+    if (!cancelOnAbort) throwIfAborted(call.signals);
     const ended = (opts && NESTED_WAIT_ENDED.get(opts)) ?? new Set<string>();
     const { terminal, timedOut, gone, permanent } = await this._cancellingOnAbort(
-      opts.cancelOnAbort === true,
+      cancelOnAbort,
       call,
       "task",
       () => (ended.has(taskId) ? [] : [taskId]),
       () =>
-        withAbortContext({ taskId }, () =>
-          this._pollToTerminal([taskId], timeoutMs, onProgress, call, ended),
-        ),
+        withAbortContext({ taskId }, () => {
+          throwIfAborted(call.signals);
+          return this._pollToTerminal([taskId], timeoutMs, onProgress, call, ended);
+        }),
     );
     const goneErr = gone.get(taskId);
     if (goneErr) throw goneErr;
@@ -2704,6 +2711,20 @@ export class Lenz {
     const permanent = new Map<string, LenzError>();
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
+    /** Adds to `ended` the tasks of `pending` a round's results show ended. */
+    const recordEnded = (results: PromiseSettledResult<TaskStatus>[]): void => {
+      if (!ended) return;
+      results.forEach((res, i) => {
+        const done =
+          res.status === "fulfilled"
+            ? ENDED_TASK_STATUSES.has(res.value.status)
+            : // Removed after it finished, or not there. A poll answered in
+              // another API version says nothing about the run: it stays
+              // eligible.
+              res.reason instanceof LenzGoneError || res.reason instanceof LenzNotFoundError;
+        if (done) ended.add(pending[i]!);
+      });
+    };
     for (let round = 0; pending.length > 0; round++) {
       const remaining = deadline - Date.now();
       // The budget is spent: no poll past the deadline. Only a wait given no
@@ -2745,7 +2766,8 @@ export class Lenz {
         settled = await Promise.race([all, fatal]);
       } catch (exc) {
         roundCtl.abort();
-        await all;
+        // What the round saw end counts even when a fatal answer ends it.
+        recordEnded(await all);
         // The caller's abort, if it came first, still wins.
         throwIfAborted(call.signals);
         throw exc;
@@ -2754,18 +2776,7 @@ export class Lenz {
       }
       // What this round saw end, recorded before an abort can be thrown, so
       // `cancelOnAbort` does not cancel a run that already finished.
-      if (ended) {
-        settled.forEach((res, i) => {
-          const done =
-            res.status === "fulfilled"
-              ? ENDED_TASK_STATUSES.has(res.value.status)
-              : // Removed after it finished, or not there. A poll answered in
-                // another API version says nothing about the run: it stays
-                // eligible.
-                res.reason instanceof LenzGoneError || res.reason instanceof LenzNotFoundError;
-          if (done) ended.add(pending[i]!);
-        });
-      }
+      recordEnded(settled);
       // The caller's abort, before any rejection is classified: never a
       // pending poll to try again.
       if (firedSignal(call.signals)) {
@@ -3091,8 +3102,10 @@ export class Lenz {
         if (ended !== null) {
           this.log(
             "warn",
-            `[lenz-io] cancelOnAbort: ${kind} ${id} was not cancelled: it had already ended ` +
-              `(status ${ended}), and a run that finished is charged as usual.`,
+            `[lenz-io] cancelOnAbort: ${kind} ${id} was not cancelled: ` +
+              (ended === "completed"
+                ? "the run had already finished (status: completed); it is billed as a completed run."
+                : `the run had already ended (status: ${ended}).`),
           );
         }
       } catch (exc) {
@@ -3111,7 +3124,13 @@ export class Lenz {
     }
   }
 
-  /** One cancel: `null` when the run is cancelled, else the status it ended with. */
+  /**
+   * One cancel: `null` when the run is cancelled, else the status it ended
+   * with. Deliberately through the private helpers, not the public `cancel`,
+   * `cancelReview` and `cancelCitecheck`: the cleanup after an abort must not
+   * depend on methods a subclass may override (and a copy's dead signal
+   * would refuse them at entry).
+   */
   private async _cancelOne(
     kind: AbortCancelKind,
     id: string,

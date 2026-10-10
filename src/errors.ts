@@ -448,9 +448,10 @@ export class LenzApiVersionError extends LenzError {
  * keyed request (resend with it to get the same answer back), and once the
  * server had accepted the work, its `taskId` (or a batch's `batchId` and
  * `taskIds`), `reviewId` or `citecheckId`. Nothing is cancelled on the
- * server: the work keeps running and is charged if it completes; stop it
- * with `cancel`, `cancelReview` or `cancelCitecheck` on a client whose signal
- * has not fired.
+ * server unless the wait was called with `cancelOnAbort: true`: the work
+ * keeps running and is charged if it completes. Stop it with `cancel`,
+ * `cancelReview` or `cancelCitecheck`, called without the fired signal (on
+ * the client, not a `withOptions` copy made with that signal).
  */
 export class LenzAbortError extends Error {
   /** The request's `Idempotency-Key`, when the call sent one. */
