@@ -1424,6 +1424,22 @@ export interface WaitOptions {
   signal?: AbortSignal;
   /** See {@link RequestOptions.headers}: sent on every request of the call. */
   headers?: Record<string, string | null | undefined>;
+  /**
+   * Cancel the run on the server when `signal` fires after the run was
+   * accepted (default `false`: an abort only stops waiting, and the run goes
+   * on and is charged if it completes). With `true`, the call sends the
+   * matching cancel once (`cancel` for each task not yet seen to end; a batch
+   * sends them concurrently), one best-effort attempt within 5 s in all,
+   * then throws the same `LenzAbortError` as without it. A cancelled
+   * verification is not charged; one that finished first is charged as usual. A
+   * cancel that fails, or that finds the run already ended, is reported to
+   * the client's `logger.warn` (with the id only) and never thrown. An abort
+   * during the submit cancels nothing (resend with the error's
+   * `idempotencyKey`), and the wait's own `timeoutMs` running out is not an
+   * abort: it never cancels. `AbortSignal.timeout(ms)` passed as `signal` is
+   * an abort. Per call only: `withOptions` does not take it.
+   */
+  cancelOnAbort?: boolean;
 }
 
 /**
@@ -2274,6 +2290,22 @@ export interface CitecheckAndWaitOptions {
   headers?: Record<string, string | null | undefined>;
   /** Retries of the submit (a whole number, 0 or more). Each poll is one attempt. */
   maxRetries?: number;
+  /**
+   * Cancel the run on the server when `signal` fires after the run was
+   * accepted (default `false`: an abort only stops waiting, and the run goes
+   * on and is charged for the citations it checks). With `true`, the call sends the
+   * matching cancel once (`cancelCitecheck`), one best-effort attempt within 5 s,
+   * then throws the same `LenzAbortError` as without it. A cancelled check
+   * refunds only the citations it had not checked; one that finished first
+   * is charged as usual. A
+   * cancel that fails, or that finds the run already ended, is reported to
+   * the client's `logger.warn` (with the id only) and never thrown. An abort
+   * during the submit cancels nothing (resend with the error's
+   * `idempotencyKey`), and the wait's own `timeoutMs` running out is not an
+   * abort: it never cancels. `AbortSignal.timeout(ms)` passed as `signal` is
+   * an abort. Per call only: `withOptions` does not take it.
+   */
+  cancelOnAbort?: boolean;
 }
 
 export interface ReviewAndWaitOptions {
@@ -2294,4 +2326,20 @@ export interface ReviewAndWaitOptions {
   headers?: Record<string, string | null | undefined>;
   /** Retries of the submit (a whole number, 0 or more). Each poll is one attempt. */
   maxRetries?: number;
+  /**
+   * Cancel the run on the server when `signal` fires after the run was
+   * accepted (default `false`: an abort only stops waiting, and the run goes
+   * on and is charged for what it delivers). With `true`, the call sends the
+   * matching cancel once (`cancelReview`), one best-effort attempt within 5 s,
+   * then throws the same `LenzAbortError` as without it. A cancelled review
+   * stays charged for what it had delivered (only the rest is refunded); one
+   * that finished first is charged as usual. A
+   * cancel that fails, or that finds the run already ended, is reported to
+   * the client's `logger.warn` (with the id only) and never thrown. An abort
+   * during the submit cancels nothing (resend with the error's
+   * `idempotencyKey`), and the wait's own `timeoutMs` running out is not an
+   * abort: it never cancels. `AbortSignal.timeout(ms)` passed as `signal` is
+   * an abort. Per call only: `withOptions` does not take it.
+   */
+  cancelOnAbort?: boolean;
 }
