@@ -266,8 +266,22 @@ function pattern(p: string): RegExp {
   return new RegExp("^" + escaped.replace(/\*/g, "\\d+") + "$");
 }
 
+/**
+ * What 3.2 changed on purpose, per recording. A completed review's issues
+ * view polled by `reviewAndWait` names the review as ended but is not the full
+ * review: 2.x polled it to a timeout, 3.2 throws `LenzInvalidResponseError`
+ * at once (pinned in `success-metadata-and-usage-errors.test.ts` and
+ * `review.test.ts`).
+ */
+const SDK_CHANGED: Record<string, string[]> = {
+  review__get_citations_issue_issues_view: ["reviewAndWait.error"],
+  review__get_completed_issues_view_issues: ["reviewAndWait.error"],
+};
+
 function differs(name: string, path: string): boolean {
-  return (SERVER_DIFFERS[name] ?? []).some((p) => pattern(p).test(path));
+  return [...(SERVER_DIFFERS[name] ?? []), ...(SDK_CHANGED[name] ?? [])].some((p) =>
+    pattern(p).test(path),
+  );
 }
 
 /** Every difference from the oracle, as `path: what` lines. */

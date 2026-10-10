@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  LenzInvalidResponseError,
   CitecheckFailedError,
   CitecheckTimeoutError,
   Lenz,
@@ -293,17 +294,19 @@ describe("citecheckAndWait()", () => {
     });
   }
 
-  it("a bare body with this id and a terminal status is a failed poll, not a result", async () => {
+  it("a bare body with this id and an ended status ends the wait at once", async () => {
     const { fetch } = makeFetch([
       { status: 202, body: ACCEPTED },
       { body: { citecheck_id: CHECK_ID, status: "completed" } },
       { body: COMPLETED },
     ]);
-    const check = await drain(
-      new Lenz({ apiKey: "lenz_t", fetch }).citecheckAndWait({ text: DRAFT }),
-    );
-    expect(check.summary.citations_found).toBe(10);
-    expect(check.credits.charged).toBe(3);
+    const err = (await drain(
+      new Lenz({ apiKey: "lenz_t", fetch })
+        .citecheckAndWait({ text: DRAFT })
+        .catch((e: unknown) => e),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.body).toEqual({ citecheck_id: CHECK_ID, status: "completed" });
   });
 
   it("a body that is not this check is a failed poll", async () => {

@@ -923,7 +923,10 @@ resubmit it.
 answers an error waiting cannot change: `wait` throws it (401, 403, 404,
 `LenzApiVersionError`). In a batch, a 404 or an answer in another API version
 for one claim makes that claim read `"failed"` while the others keep being
-polled; a 401 or 403 is about the key, so `verifyBatchAndWait` throws it. A
+polled (since 3.2 the row's non-enumerable `error` holds that error, as it
+does a `LenzGoneError` for a purged claim and a `LenzInvalidResponseError`
+for an ended poll that could not be read; `undefined` on a run that failed on
+the server, whose `status_detail` says why); a 401 or 403 is about the key, so `verifyBatchAndWait` throws it. A
 5xx, a 429 or a network drop is polled through. No poll runs past the wait's
 `timeoutMs`; once it is spent, the claims still running read `"timeout"`
 (`wait` throws `LenzTimeoutError`).
@@ -1004,6 +1007,29 @@ object, because every endpoint this client calls answers with one:
   address; the error names the `Location` when there is one, and is not
   retried.
 
+A JSON object with a field of the wrong type where the SDK itself reads it
+throws `LenzInvalidResponseError` too (since 3.2), with that answer's
+`statusCode`, `headers`, `requestId`, `body` and `bodyText`, instead of a
+`TypeError` deeper in or a result of the wrong type: `verifyBatchAndWait` on a
+receipt whose `items` is not a list of objects, and a cancel answered with
+another job's body (a `LenzAPIError` before, without the answer).
+
+Inside a wait (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`,
+`citecheckAndWait`), a poll that cannot be read is handled by what it says
+about the run. One that says the run ended (a `completed` status whose
+`result` is not an object; a body naming the review or check with status
+`completed`, `failed` or `cancelled` but missing what the SDK reads) throws
+that `LenzInvalidResponseError` at once: polling again would only run to a
+timeout that hides why. In `verifyBatchAndWait` it ends only that row, as
+`"failed"` with the poll as received in `status_detail` and the error in the
+row's `error`, and the other rows complete. Any other unreadable poll (no readable status, a 2xx
+that is not JSON, another job's body) is polled again like a 5xx; if the wait
+then reaches its `timeoutMs`, and its last poll was such an answer, the
+timeout error (`LenzTimeoutError`, `ReviewTimeoutError`,
+`CitecheckTimeoutError`) carries that `LenzInvalidResponseError` as its
+`cause`, and its message ends "the last polls could not be read". The SDK does
+not validate fields it does not read: those are returned as sent.
+
 `statusCode` 0 otherwise means the request got no HTTP answer at all
 (`LenzConnectionError`). Before 3.2 a body that is not JSON threw the runtime's
 `SyntaxError`, and one that is JSON but not an object failed later with a
@@ -1024,34 +1050,51 @@ body (a `cancel`, a `DELETE` or a `GET` sends none).
 A blank input is refused before anything is sent (since 3.2): `verify` /
 `verifyAndWait` with no `claim` (or one of only whitespace), and `assess` with
 no `claim`, an empty `claims` list or a blank item in it, throw
-`LenzValidationError` with the sentence and `code` the API's 422 would have
-given, read as the client reads it: with `legacyAliases: false` the API's
-own sentence and code (`"claim is required."` / `blank_input`,
-`"claims[1] is blank."` / `blank_input`, a non-string item
-`"claims.1: Input should be a valid string"` / `validation_error`), by default
-the 2.x reading of them (`"Text is required."` / `""`, `"claims[1] is
-blank."` / `blank_item`, `"Validation failed"` / `""`); `statusCode` 0 and no
-`body`. As on the API, the one of `claim` / `text` that has content is used,
-and blank means empty or whitespace by the API's rule (a BOM is content).
-`verifyBatch` items are not checked locally: the API answers a blank item.
+`LenzValidationError` with `statusCode` 0, no `body`, a local `code`
+(`blank_input`, `empty_list`, `blank_item`; an item that is not a string
+`invalid_argument`) and `param` (`"claim"`, `"claims"`, `"claims[1]"`). The
+code is the same whatever `legacyAliases` says; the message is the sentence
+the API's 422 would have given, read as the client reads it: with
+`legacyAliases: false` the API's own (`"claim is required."`, `"claims[1] is
+blank."`, `"claims.1: Input should be a valid string"`), by default the 2.x
+reading (`"Text is required."`, `"claims[1] is blank."`, `"Validation
+failed"`). As on the API, the one of `claim` / `text` that has content is
+used, and blank means empty or whitespace by the API's rule (a BOM is
+content). `verifyBatch` items are not checked locally: the API answers a blank item.
 
 **A bad argument** is refused before anything is sent, with
 `LenzValidationError` (since 3.2; before, a plain `Error`, and a `TypeError`
-for a webhook body that is not bytes): `statusCode` 0, no `body`, `code`
-`invalid_argument` (a blank input: the API's code, above), and the same
-message as before. It is still an `Error`, and a wait stops on it at once.
-This covers request options (`timeoutMs`, `maxRetries`, `headers`, `signal`,
-`cancelOnAbort`), `new Lenz()` options (`timeoutMs`, `maxRetries`,
-`legacyAliases`), `withOptions()` (an unknown option, `legacyAliases`, an
-`apiKey` that is not a string), `pageSize`, a `listAll` start page or
-`sort: "random"`, an id that cannot name one thing (empty, `.`, `..`, a lone
-surrogate), two spellings of a field that differ, `citecheck` without exactly
-one of `text` / `pairs` or with `maxCitations` beside `pairs`, `select`
-without claims, `wait` on an empty task id, `assess` given both forms, and
-`LenzWebhooks` without a secret or given a body that is not bytes. A runtime
-missing what the SDK needs (WebCrypto, Node's `crypto` for the synchronous
-webhook `parse`) and a webhook request whose body was already read still throw
-a plain `Error`.
+for a webhook body that is not bytes): `statusCode` 0, no `body`, the same
+message as before, a `code` saying what is wrong and `param` naming the
+argument (since 3.2; the codes are the Python SDK's, `param` in this SDK's
+camelCase). It is still an `Error`, and a wait stops on it at once.
+
+| `code`              | When                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `param`                                                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                                                | `"claim"`; `"text"`                                                                                                  |
+| `blank_item`        | a blank `assess` item                                                                                                                                                                                                                                                                                                                                                                                                                                | `"claims[1]"`                                                                                                        |
+| `empty_list`        | `select` without claims; `assess` with an empty `claims` list (and no `claim`)                                                                                                                                                                                                                                                                                                                                                                       | `"claims"`                                                                                                           |
+| `invalid_page_size` | `pageSize` on `verifications.list` / `listAll` that is not a whole number from 1 to 100                                                                                                                                                                                                                                                                                                                                                              | `"pageSize"`                                                                                                         |
+| `invalid_page`      | a `listAll` start page below 1                                                                                                                                                                                                                                                                                                                                                                                                                       | `"page"`                                                                                                             |
+| `invalid_id`        | an id that cannot name one thing (not a string, empty, `.`, `..`, a lone surrogate), on every method that puts one in a path, and `wait`                                                                                                                                                                                                                                                                                                             | `"taskId"`, `"reviewId"`, `"citecheckId"`, `"verificationId"`                                                        |
+| `invalid_header`    | an `idempotencyKey` a header cannot carry; request-option `headers` that are not an object, or with a bad name, a reserved name, or a value a header cannot carry                                                                                                                                                                                                                                                                                    | `"idempotencyKey"`; `"headers"`                                                                                      |
+| `invalid_option`    | request options (`timeoutMs`, `maxRetries`, `signal`, `cancelOnAbort`, options that are not an object), a wait's `timeoutMs` that is not a finite number (`NaN`, `Infinity`, a string), `new Lenz()` / `new LenzWebhooks()` options that are not an object, `new Lenz()` (`timeoutMs`, `maxRetries`, `legacyAliases`), `withOptions()` (an unknown option, `legacyAliases`, an `apiKey` that is not a string), `new LenzWebhooks()` without a secret | the option's name; for an unknown `withOptions()` option, the name as given (`withOptions({ apikey })` → `"apikey"`) |
+| `conflicting_input` | `assess` given both `claim` and `claims`; `citecheck` given both `text` and `pairs`, or `maxCitations` beside `pairs`; two spellings of a field that differ (a batch item's `sourceUrl` / `source_url`, a citation pair's)                                                                                                                                                                                                                           | `"claims"`; `"text"`, `"maxCitations"`; `"claims[0]"`, `"pairs[2]"`                                                  |
+| `invalid_argument`  | anything else: an input that is not an object (`verify(null)`, `select("t")`, a `verifyBatch` `claims` that is not a list of objects), webhook headers or an `unwrap` request that are not objects, an `assess` item that is not a string, `library.listAll` with `sort: "random"`, `verifySignature` without a secret, a webhook body that is not bytes                                                                                             | `"input"`, `"claims[1]"`, `"headers"`, `"sort"`, `"secret"`, `"body"`                                                |
+
+`USAGE_ERROR_CODES` lists the SDK's own codes (the `UsageErrorCode` type
+names one); the Python SDK has the same list. These are local codes: the same whatever `legacyAliases` says (which only
+picks the wording of a blank input's message, above), and never the API's
+422 codes, which come only from a response. `param` is `undefined` on an error from the API
+(read its `errors` instead). A runtime missing what the SDK needs (WebCrypto,
+Node's `crypto` for the synchronous webhook `parse`) and a webhook request
+whose body was already read still throw a plain `Error`.
+
+**`LenzInvalidKeyError`** (since 3.2, a subclass of `LenzAuthError`): the key
+has a character a key never has inside it, so it cannot be sent (see
+[Configuration](#configuration)); thrown when the client or the copy is made,
+`statusCode` 0. A missing key (`"API key required"`) and the API's 401 / 403
+stay a plain `LenzAuthError`, so a handler for that catches all three.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
@@ -1145,7 +1188,10 @@ the call a second time.
 `idempotency_conflict` that names the job (`review_id` / `citecheck_id`)
 means the first submit with that key created it, so the call returns it as a
 `ReviewStarted` / `CitecheckStarted` (`status` `"queued"`, `raw` the 409's
-body) instead of waiting or throwing. Read or wait for it by its id as usual.
+body, `httpStatus` 409 and `headers` the 409's) instead of waiting or
+throwing. Its `settledByConflict` is `true` (since 3.2; `false` on the 202
+that accepted a submit), so you can tell the two apart; like `raw` it is not
+an enumerable key. Read or wait for it by its id as usual.
 A submit sent without a key never gets such a 409.
 
 `cancel`, `cancelReview` and `cancelCitecheck` send none: cancelling again
@@ -1320,11 +1366,13 @@ cannot be timed out.
 
 A key is visible ASCII with nothing inside it: one with a space, a line break,
 another control character or a non-ASCII character inside it throws
-`LenzAuthError` when the client (or a `withOptions` copy) is made, before any
-request (since 3.2; before, every call failed on it). ASCII whitespace around
-a key (a trailing newline read from a file, say) is dropped; anything else
-outside visible ASCII is refused, at the ends too (a non-breaking space, a
-BOM). The message never contains the key.
+`LenzInvalidKeyError` (a `LenzAuthError`, `statusCode` 0) when the client (or a
+`withOptions` copy) is made, before any request (since 3.2; before, every call
+failed on it). ASCII whitespace around a key (space, tab, line feed, carriage
+return, form feed, vertical tab: a trailing newline read from a file, say) is
+trimmed silently, with no warning: `" lenz_...\n"` sends `lenz_...`. Anything
+else outside visible ASCII is refused, at the ends too (a non-breaking space,
+a BOM). The message never contains the key.
 
 A text containing a lone UTF-16 surrogate (half of an emoji cut by a
 `slice`) is sent with each one replaced by U+FFFD; valid pairs are unchanged.
@@ -1512,6 +1560,30 @@ job holds that 409's body. Not covered: a `verifyBatchAndWait` row itself (the
 SDK builds it), and an object the SDK added (a default, a 2.x block). An
 object that carries its own `raw` key keeps it.
 
+**The status and headers: `httpStatus` and `headers`** (since 3.2). Every
+result that is one answer's body (the list above) also carries the HTTP
+status it came with and its headers, names in lower case, the same record an
+error's `err.headers` is:
+
+```ts
+const started = await client.review({ text: draft });
+started.httpStatus; // 202
+started.headers?.["location"]; // the review's URL (review and citecheck receipts send it)
+started.headers?.["retry-after"]; // a wait, when the answer states one
+started.headers?.["x-request-id"]; // quote it on a support ticket
+```
+
+Like `raw`, they are not enumerable keys (not in `JSON.stringify`, a spread or
+a deep-equal), and each read of `headers` is a fresh copy. `reviewAndWait` /
+`citecheckAndWait` report their final poll's. Only the top-level result has
+them: an object nested in it (`out.claims[0]`, `status.result`), a wait's
+verification (read from inside the final poll's body) and a
+`verifyBatchAndWait` row (built by the SDK) do not. A `review` / `citecheck`
+receipt settled by a 409 that names the job carries that 409's (see
+[Idempotency](#idempotency)). An object that carries its own key of either
+name keeps it. The `ResponseMeta` type names them, and the response types
+extend it.
+
 ## Using lenz-io from a server that forwards per-user credentials
 
 A gateway, an MCP server or any backend that calls Lenz on behalf of its own
@@ -1529,7 +1601,7 @@ const lenz = new Lenz({
 
 export async function check(userToken: string, text: string, signal: AbortSignal) {
   try {
-    // Inside the try: a malformed key throws LenzAuthError here.
+    // Inside the try: a malformed key throws LenzInvalidKeyError (a LenzAuthError) here.
     const client = lenz.withOptions({ apiKey: userToken, signal });
     // No timeoutMs: assess keeps its 100 s minimum (see Timeouts below).
     const out = await client.assess({ claim: text });
@@ -1546,8 +1618,9 @@ export async function check(userToken: string, text: string, signal: AbortSignal
 - **Per-user keys**: `withOptions({ apiKey })` per request, on the same
   client. A copy never reads `LENZ_API_KEY`; an empty or whitespace-only key,
   `undefined` or `null` gives a copy with no key, and a call that needs one
-  throws `LenzAuthError` before sending. A key with a space, a control
-  character or a non-ASCII character inside it throws `LenzAuthError` when
+  throws `LenzAuthError` before sending. ASCII whitespace around a key is
+  trimmed silently. A key with a space, a control character or a non-ASCII
+  character inside it throws `LenzInvalidKeyError` (a `LenzAuthError`) when
   the copy is made. Copies are cheap and independent: make one per request.
 - **`legacyAliases: false`** is a constructor option only (`withOptions`
   throws if given it): every copy reads like its client. Results are what the
@@ -1569,7 +1642,8 @@ export async function check(userToken: string, text: string, signal: AbortSignal
 - **Retries**: `maxRetries: 0` when your caller has its own deadline or retry
   budget; the SDK then sends each request once. A resend should reuse
   `err.idempotencyKey`.
-- **Raw bodies**: `result.raw` is the JSON object a result was read from (see
+- **Raw bodies**: `result.raw` is the JSON object a result was read from, and
+  `result.httpStatus` / `result.headers` its status and headers (see
   [Results as the API sends them](#results-as-the-api-sends-them-legacyaliases));
   `err.body` is an error's, `err.headers` its response headers, and
   `err.retryAfter` the parsed wait (see [Errors](#errors) for which wins).

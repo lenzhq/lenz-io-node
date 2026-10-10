@@ -19,8 +19,14 @@
 import { LenzValidationError, LenzWebhookSignatureError } from "./errors.js";
 
 /** A bad argument, refused before anything is read: as the client's. */
-function argumentError(message: string): LenzValidationError {
-  return new LenzValidationError({ message, code: "invalid_argument" });
+function argumentError(
+  message: string,
+  param: string,
+  code: "invalid_argument" | "invalid_option" = "invalid_argument",
+): LenzValidationError {
+  const err = new LenzValidationError({ message, code });
+  err.param = param;
+  return err;
 }
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 import {
@@ -77,13 +83,14 @@ function snapshot(body: unknown): Uint8Array {
   if (Object.prototype.toString.call(body) === "[object ArrayBuffer]") {
     return new Uint8Array(body as ArrayBuffer).slice();
   }
-  throw argumentError(NOT_BYTES);
+  throw argumentError(NOT_BYTES, "body");
 }
 
 function requireSecret(secret: string): void {
   if (!secret) {
     throw argumentError(
       "Webhook verification requires a non-empty secret. Get it from /api-credentials.",
+      "secret",
     );
   }
 }
@@ -412,9 +419,18 @@ export class LenzWebhooks {
   private replayWindow: number;
 
   constructor(opts: LenzWebhooksOptions) {
+    if (opts === null || typeof opts !== "object" || Array.isArray(opts)) {
+      throw argumentError(
+        "LenzWebhooks takes an options object: { secret }.",
+        "options",
+        "invalid_option",
+      );
+    }
     if (!opts.secret) {
       throw argumentError(
         "LenzWebhooks requires a non-empty secret. Get it from /api-credentials.",
+        "secret",
+        "invalid_option",
       );
     }
     this.secret = opts.secret;
@@ -459,6 +475,9 @@ export class LenzWebhooks {
    * before anything else reads the body.
    */
   async unwrap(request: Request): Promise<WebhookEvent> {
+    if (request === null || typeof request !== "object") {
+      throw argumentError("unwrap() takes the incoming Request.", "request");
+    }
     if (request.bodyUsed) {
       throw new Error(
         "LenzWebhooks.unwrap(request) found the body already read. Call unwrap before reading " +
@@ -501,6 +520,9 @@ export class LenzWebhooks {
   }
 
   private lookupHeader(headers: HeaderBag, name: string): string {
+    if (headers === null || typeof headers !== "object") {
+      throw argumentError("Webhook headers must be an object or a Headers.", "headers");
+    }
     if (typeof (headers as Headers).get === "function") {
       const v = (headers as Headers).get(name);
       return v ? String(v) : "";

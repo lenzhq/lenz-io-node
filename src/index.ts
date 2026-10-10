@@ -55,6 +55,7 @@ export {
   LenzConnectionError,
   LenzError,
   LenzGoneError,
+  LenzInvalidKeyError,
   LenzInvalidResponseError,
   LenzNeedsInputError,
   LenzNotFoundError,
@@ -72,8 +73,10 @@ export {
   CitecheckTimeoutError,
   ReviewFailedError,
   ReviewTimeoutError,
+  USAGE_ERROR_CODES,
   mapResponseToError,
 } from "./errors.js";
+export type { UsageErrorCode } from "./errors.js";
 
 export {
   LenzWebhooks,
@@ -165,6 +168,7 @@ export type {
   AssessInput,
   AssessResponse,
   RawBody,
+  ResponseMeta,
   Assessment,
   Audit,
   BatchAccepted,

@@ -223,7 +223,7 @@ describe("legacyAliases: false keeps the wire code on errors", () => {
     expect(b).toBeInstanceOf(LenzNotFoundError);
   });
 
-  it("a blank input refused before sending says blank_input, as the API would", async () => {
+  it("a blank input refused before sending: the local codes, in both modes", async () => {
     const raw = new Lenz({ apiKey: "lenz_t", legacyAliases: false });
     const def = new Lenz({ apiKey: "lenz_t" });
     const codes = async (c: Lenz) => [
@@ -231,8 +231,8 @@ describe("legacyAliases: false keeps the wire code on errors", () => {
       ((await thrown(() => c.assess({ claim: " " }))) as LenzError).code,
       ((await thrown(() => c.assess({ claims: ["a", " "] }))) as LenzError).code,
     ];
-    expect(await codes(raw)).toEqual(["blank_input", "blank_input", "blank_input"]);
-    expect(await codes(def)).toEqual(["", "", "blank_item"]);
+    expect(await codes(raw)).toEqual(["blank_input", "blank_input", "blank_item"]);
+    expect(await codes(def)).toEqual(["blank_input", "blank_input", "blank_item"]);
   });
 });
 
@@ -685,21 +685,52 @@ describe("every local bad argument is a LenzValidationError", () => {
     }) as unknown as typeof globalThis.fetch,
   });
 
-  const cases: Array<[string, () => unknown]> = [
-    ["new Lenz() legacyAliases", () => new Lenz({ legacyAliases: "no" as unknown as boolean })],
-    ["new Lenz() timeoutMs", () => new Lenz({ timeoutMs: -1 })],
-    ["new Lenz() maxRetries", () => new Lenz({ maxRetries: 1.5 })],
-    ["withOptions() unknown option", () => client.withOptions({ apikey: "x" } as never)],
-    ["withOptions() legacyAliases", () => client.withOptions({ legacyAliases: false } as never)],
-    ["withOptions() apiKey type", () => client.withOptions({ apiKey: 5 as unknown as string })],
-    ["pageSize", () => client.verifications.list({ pageSize: 0 })],
-    ["an empty id", () => client.getStatus("")],
-    ["a header value", () => client.usage({ headers: { "X-A": "a\nb" } })],
-    ["citecheck with neither", () => client.citecheck({})],
-    ["select with no claims", () => client.select("t1", { claims: [] })],
-    ["webhooks without a secret", () => new LenzWebhooks({ secret: "" })],
+  // [name, call, code, param]: the shared local codes (since 3.2, as on the Python SDK).
+  const cases: Array<[string, () => unknown, string, string]> = [
+    [
+      "new Lenz() legacyAliases",
+      () => new Lenz({ legacyAliases: "no" as unknown as boolean }),
+      "invalid_option",
+      "legacyAliases",
+    ],
+    ["new Lenz() timeoutMs", () => new Lenz({ timeoutMs: -1 }), "invalid_option", "timeoutMs"],
+    ["new Lenz() maxRetries", () => new Lenz({ maxRetries: 1.5 }), "invalid_option", "maxRetries"],
+    [
+      "withOptions() unknown option",
+      () => client.withOptions({ apikey: "x" } as never),
+      "invalid_option",
+      "apikey",
+    ],
+    [
+      "withOptions() legacyAliases",
+      () => client.withOptions({ legacyAliases: false } as never),
+      "invalid_option",
+      "legacyAliases",
+    ],
+    [
+      "withOptions() apiKey type",
+      () => client.withOptions({ apiKey: 5 as unknown as string }),
+      "invalid_option",
+      "apiKey",
+    ],
+    ["pageSize", () => client.verifications.list({ pageSize: 0 }), "invalid_page_size", "pageSize"],
+    ["an empty id", () => client.getStatus(""), "invalid_id", "taskId"],
+    [
+      "a header value",
+      () => client.usage({ headers: { "X-A": "a\nb" } }),
+      "invalid_header",
+      "headers",
+    ],
+    ["citecheck with neither", () => client.citecheck({}), "blank_input", "text"],
+    ["select with no claims", () => client.select("t1", { claims: [] }), "empty_list", "claims"],
+    [
+      "webhooks without a secret",
+      () => new LenzWebhooks({ secret: "" }),
+      "invalid_option",
+      "secret",
+    ],
   ];
-  for (const [name, run] of cases) {
+  for (const [name, run, code, param] of cases) {
     it(name, async () => {
       let err: unknown;
       try {
@@ -711,7 +742,8 @@ describe("every local bad argument is a LenzValidationError", () => {
       expect(err).toBeInstanceOf(Error);
       expect((err as LenzValidationError).statusCode).toBe(0);
       expect((err as LenzValidationError).body).toBeNull();
-      expect((err as LenzValidationError).code).toBe("invalid_argument");
+      expect((err as LenzValidationError).code).toBe(code);
+      expect((err as LenzValidationError).param).toBe(param);
     });
   }
 
@@ -748,21 +780,21 @@ describe("blank input: the API's sentences, and the API's whitespace rule", () =
       }),
     );
 
-  it("with legacyAliases: false, the API's own sentence and code", async () => {
+  it("with legacyAliases: false, the API's own sentence; the local code", async () => {
     expect(await sentences(new Lenz({ apiKey: "lenz_t", legacyAliases: false }))).toEqual([
       ["claim is required.", "blank_input"],
       ["claim is required.", "blank_input"],
-      ["claims[1] is blank.", "blank_input"],
-      ["claims.1: Input should be a valid string", "validation_error"],
+      ["claims[1] is blank.", "blank_item"],
+      ["claims.1: Input should be a valid string", "invalid_argument"],
     ]);
   });
 
-  it("by default, the 2.x reading of the same answers", async () => {
+  it("by default, the 2.x reading of the same sentences; the same local codes", async () => {
     expect(await sentences(new Lenz({ apiKey: "lenz_t" }))).toEqual([
-      ["Text is required.", ""],
-      ["Text is required.", ""],
+      ["Text is required.", "blank_input"],
+      ["Text is required.", "blank_input"],
       ["claims[1] is blank.", "blank_item"],
-      ["Validation failed", ""],
+      ["Validation failed", "invalid_argument"],
     ]);
   });
 
@@ -892,7 +924,8 @@ describe("batch 2: redirects, empty answers, foreign errors, Content-Type", () =
       ]) {
         const err = (await thrown(run)) as LenzValidationError;
         expect(err).toBeInstanceOf(LenzValidationError);
-        expect(err.code).toBe("invalid_argument");
+        expect(err.code).toBe("invalid_header");
+        expect(err.param).toBe("idempotencyKey");
       }
       expect(sent).toHaveLength(0);
     },

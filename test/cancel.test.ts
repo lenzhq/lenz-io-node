@@ -252,6 +252,8 @@ describe("cancel(taskId)", () => {
       cancelled: boolean;
       status: TaskStatus["status"];
       readonly raw?: Record<string, unknown>;
+      readonly httpStatus?: number;
+      readonly headers?: Record<string, string>;
     }>();
   });
 });
@@ -413,7 +415,7 @@ describe("ids that cannot name one run", () => {
         // Since 3.2 the local argument error: a LenzValidationError, no status.
         expect(err).toBeInstanceOf(LenzValidationError);
         expect((err as LenzError).statusCode).toBe(0);
-        expect((err as LenzError).code).toBe("invalid_argument");
+        expect((err as LenzError).code).toBe("invalid_id");
         expect(err.message).toBe(`${name}() was given an invalid ${field}.`);
       }
       expect(calls).toHaveLength(0);
