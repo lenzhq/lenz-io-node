@@ -918,7 +918,7 @@ function startPage(page: number | undefined): number {
   return first;
 }
 
-function isPlainObject(v: unknown): boolean {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
@@ -1031,55 +1031,90 @@ function headersOf(response: Response): Record<string, string> {
   return out;
 }
 
-/**
- * The body text of each parsed 2xx answer, keyed on the object it parsed to,
- * so a result can say what the API sent before any 2.x name was added.
- */
-const RAW_TEXT = new WeakMap<object, string>();
+/** Where in an answer's body an object was read from: keys and indexes. */
+type RawPath = ReadonlyArray<string | number>;
 
-function setRaw(value: object, text: string): void {
-  RAW_TEXT.set(value, text);
-  defineRaw(value, text);
+/**
+ * For each object a result was read from (the parsed answer and every object
+ * nested in it), the answer's body text and where in it the object sits, so a
+ * result built from it can say what the API sent before any 2.x name was
+ * added.
+ */
+const RAW_SOURCE = new WeakMap<object, { text: string; path: RawPath }>();
+
+/** The part of `body` at `path`. */
+function partAt(body: unknown, path: RawPath): unknown {
+  let node: unknown = body;
+  for (const step of path) {
+    if (node === null || typeof node !== "object") return undefined;
+    node = (node as Record<string | number, unknown>)[step];
+  }
+  return node;
 }
 
 /**
  * Gives `target` a non-enumerable `raw` getter: a fresh parse of `text` on
- * every read (a deep copy, never shared with the result). A body that carries
- * its own `raw` key keeps it.
+ * every read, narrowed to `path` (a deep copy, never shared with the result).
+ * An object that carries its own `raw` key keeps it.
  */
-function defineRaw(
-  target: object,
-  text: string,
-  pick?: (body: Record<string, unknown>) => unknown,
-): void {
+function defineRaw(target: object, text: string, path: RawPath): void {
   if (Object.prototype.hasOwnProperty.call(target, "raw") || !Object.isExtensible(target)) return;
+  RAW_SOURCE.set(target, { text, path });
   Object.defineProperty(target, "raw", {
-    get: () => {
-      const body = JSON.parse(text) as Record<string, unknown>;
-      return pick ? pick(body) : body;
-    },
+    get: () => partAt(JSON.parse(text), path),
     enumerable: false,
     configurable: true,
   });
 }
 
 /**
- * `to`, carrying the `raw` of `from` (a parsed 2xx answer): for a result
- * built from the answer (a copy with the 2.x names, or with defaults filled).
- * `pick` narrows it to a part of the body.
+ * Gives `node` (the result, or an object nested in it) its `raw`, and every
+ * object nested in it that the body holds at the same place (same key, same
+ * index) theirs. `part` is what the body holds at `path`. Lists carry no
+ * `raw`; their objects do. An object the SDK added (a default, a 2.x block)
+ * has no counterpart in the body and gets none.
  */
-function keepRaw<T>(from: unknown, to: T, pick?: (body: Record<string, unknown>) => unknown): T {
+function attachRaw(node: unknown, part: unknown, text: string, path: RawPath): void {
+  if (Array.isArray(node)) {
+    if (!Array.isArray(part)) return;
+    node.forEach((item, i) => attachRaw(item, part[i], text, [...path, i]));
+    return;
+  }
+  if (!isPlainObject(node) || !isPlainObject(part)) return;
+  defineRaw(node, text, path);
+  for (const [key, value] of Object.entries(part)) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      Object.prototype.hasOwnProperty.call(node, key)
+    ) {
+      attachRaw(node[key], value, text, [...path, key]);
+    }
+  }
+}
+
+/** A parsed 2xx answer: it and every object in it carry `raw`. */
+function setRaw(value: object, text: string): void {
+  attachRaw(value, value, text, []);
+}
+
+/**
+ * `to`, a result built from `from` (a parsed answer, or an object in one: a
+ * copy with the 2.x names, or with defaults filled), carrying `raw` the way
+ * `from` does, down to its nested objects. `key` narrows it to `from[key]`.
+ */
+function keepRaw<T>(from: unknown, to: T, key?: string): T {
   if (!from || typeof from !== "object" || !to || typeof to !== "object") return to;
-  const text = RAW_TEXT.get(from);
-  if (text === undefined || (to === from && !pick)) return to;
-  if (!pick) RAW_TEXT.set(to, text);
-  defineRaw(to, text, pick);
+  const source = RAW_SOURCE.get(from);
+  if (source === undefined || (to === from && key === undefined)) return to;
+  const path = key === undefined ? source.path : [...source.path, key];
+  attachRaw(to, partAt(JSON.parse(source.text), path), source.text, path);
   return to;
 }
 
 /** A receipt read from a 409 that names the job, its `raw` that 409's body. */
 function conflictReceipt<T extends object>(receipt: T, body: Record<string, unknown> | null): T {
-  if (body) defineRaw(receipt, JSON.stringify(body));
+  if (body) defineRaw(receipt, JSON.stringify(body), []);
   return receipt;
 }
 
@@ -3060,7 +3095,7 @@ export class Lenz {
           task_id: it.task_id,
           ...names(it),
           status: "completed",
-          verification: keepRaw(status, status.result, (body) => body["result"]),
+          verification: keepRaw(status, status.result, "result"),
           status_detail: status,
         };
       }
@@ -3342,7 +3377,7 @@ export class Lenz {
         throw emptyErr;
       }
       // `raw` is the verification as the final poll sent it.
-      return keepRaw(polled, polled.result!, (body) => body["result"]);
+      return keepRaw(polled, polled.result!, "result");
     }
     if (status.status === "needs_input") {
       const err = new LenzNeedsInputError({

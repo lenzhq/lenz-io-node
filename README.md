@@ -1416,19 +1416,31 @@ const out = await client.assess({ claims: ["A.", "B."] });
 out.raw; // { claims: [...], more_claims: [...], ... } as sent
 ```
 
+Nested objects hold their own part of the body (since 3.2, as on the Python
+SDK):
+
+```ts
+out.claims[0].raw; // that row's object
+const status = await client.getStatus(taskId);
+status.result?.raw; // the verification's object
+```
+
 Covered: every result that is one answer's body (`verify`, `verifyBatch`,
 `select`, `getStatus`, `cancel`, `extract`, `assess`, `usage`,
 `verifications.get` / `list` / `getCertificate` / `related`, `ask.history` /
 `ask.send`, `library.list`, `review`, `citecheck`, `getReview`,
 `getCitecheck`, `cancelReview`, `cancelCitecheck`, and what `reviewAndWait` /
-`citecheckAndWait` return: the final poll's body). A wait's verification
-(`wait`, `verifyAndWait`, and each `verification` of a `verifyBatchAndWait`
-row) holds the verification as the final poll sent it; a row's
-`status_detail` holds that poll's body. A `review` / `citecheck` receipt
-settled by a 409 that names the job holds that 409's body. Not covered: a
-`verifyBatchAndWait` row itself (the SDK builds it), the items `listAll`
-yields, and objects nested in a result (read them from the parent's `raw`).
-A body that carries its own `raw` key keeps it.
+`citecheckAndWait` return: the final poll's body), and every object nested in
+one that the body holds at the same place (assess rows and their `failure`,
+a status's `result`, review rows, their `assessment` / `verification` and the
+`summary`, citation rows, the items of a list page and of `listAll`, ...;
+lists themselves carry none). A wait's verification (`wait`,
+`verifyAndWait`, and each `verification` of a `verifyBatchAndWait` row) holds
+the verification as the final poll sent it; a row's `status_detail` holds that
+poll's body. A `review` / `citecheck` receipt settled by a 409 that names the
+job holds that 409's body. Not covered: a `verifyBatchAndWait` row itself (the
+SDK builds it), and an object the SDK added (a default, a 2.x block). An
+object that carries its own `raw` key keeps it.
 
 ## Using lenz-io from a server that forwards per-user credentials
 

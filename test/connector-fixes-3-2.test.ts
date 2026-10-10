@@ -610,3 +610,65 @@ describe("raw is the body as the API sent it", () => {
     expect(out["raw"]).toBe("server's");
   });
 });
+
+describe("raw on nested objects: each holds its own part of the body", () => {
+  const row = (claim: string) => ({
+    claim,
+    status: "failed",
+    verdict: null,
+    confidence: null,
+    failure: { code: "no_checkable_claim", hint: "h" },
+  });
+  const assessBody = { claims: [row("a"), row("b")], more_claims: [], language: "en" };
+
+  it("assess rows and their failure blocks, in both modes", async () => {
+    const { fetch } = server(() => ({ body: assessBody }));
+    for (const legacyAliases of [true, false]) {
+      const out = await new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).assess({
+        claims: ["a", "b"],
+      });
+      expect(out.claims[0]!.raw).toEqual(row("a"));
+      expect(out.claims[1]!.raw).toEqual(row("b"));
+      const failure = out.claims[1]!.failure as unknown as { raw?: unknown };
+      expect(failure.raw).toEqual(row("b").failure);
+      // Not an enumerable key at any depth.
+      expect(JSON.parse(JSON.stringify(out.claims[0]))).not.toHaveProperty("raw");
+    }
+  });
+
+  it("a status's result, and a block the SDK added has none", async () => {
+    const verification = { verification_id: "abcd1234", claim: "a", created_at: "x" };
+    const status = { task_id: "t1", status: "completed", result: verification };
+    const { fetch } = server(() => ({ body: status }));
+    const out = await new Lenz({ apiKey: "lenz_t", fetch }).getStatus("t1");
+    expect(out.result!.raw).toEqual(verification);
+    expect(out.raw).toEqual(status);
+  });
+
+  it("review rows, and a list item of verifications.list", async () => {
+    const reviewBody = {
+      review_id: "r1",
+      status: "completed",
+      claims: [{ index: 0, statement: "s", assessment: { verdict: "True" } }],
+      summary: { claims_found: 1 },
+    };
+    const list = {
+      items: [{ verification_id: "abcd1234", claim: "a" }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    };
+    const { fetch } = server((s) => ({ body: s.url.includes("/reviews/") ? reviewBody : list }));
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const review = await client.getReview("r1");
+    expect(review.claims[0]!.raw).toEqual(reviewBody.claims[0]);
+    const assessment = review.claims[0]!.assessment as unknown as { raw?: unknown };
+    expect(assessment.raw).toEqual({ verdict: "True" });
+    expect((review.summary as unknown as { raw?: unknown }).raw).toEqual({ claims_found: 1 });
+    const page = await client.verifications.list();
+    expect(page.items[0]!.raw).toEqual(list.items[0]);
+    const items = [];
+    for await (const v of client.verifications.listAll()) items.push(v);
+    expect(items[0]!.raw).toEqual(list.items[0]);
+  });
+});
