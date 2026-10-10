@@ -6,6 +6,8 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-10
+
 ### Added
 
 - `cancelOnAbort: true` on the waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`): when the `signal` fires after the run was accepted, the wait cancels the run on the server (best effort: one attempt per job, 5 s in all), reports a cancel that failed or found the run already ended to `logger.warn` with the job id, and throws the same `LenzAbortError` as before. Off by default; the wait's own `timeoutMs` never cancels. A cancelled verification is not charged; a cancelled review or citation check is still charged for what it had delivered. Matches `cancel_on_abort` on the Python SDK's `AsyncLenz`.
