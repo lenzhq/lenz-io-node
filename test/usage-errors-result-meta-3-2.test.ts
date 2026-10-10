@@ -159,6 +159,28 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
     expect(sent[0]!.body).toBe('{"texts":["a","b"]}');
   });
 
+  it.each([
+    [5, "number"],
+    [true, "boolean"],
+    [null, "null"],
+    [{ claim: "a" }, "object"],
+    [["a"], "object"],
+  ])("an assess item %j says Python's sentence, in both modes", async (item, type) => {
+    for (const legacyAliases of [true, false]) {
+      const { fetch, sent } = server(() => ({ body: {} }));
+      const err = await thrown(() =>
+        new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).assess({
+          claims: ["a", item as unknown as string],
+        }),
+      );
+      expect(err).toBeInstanceOf(LenzValidationError);
+      expect(err.message).toBe(`claims[1] must be a string (got ${type}).`);
+      expect(err.code).toBe("invalid_argument");
+      expect((err as LenzValidationError).param).toBe("claims[1]");
+      expect(sent).toEqual([]);
+    }
+  });
+
   it("a select claims that is not a list (from JavaScript) still reaches the API", async () => {
     const { fetch, sent } = server(() => ({ status: 202, body: { batch_id: "b", items: [] } }));
     await new Lenz({ apiKey: "lenz_t", fetch }).select("t1", {

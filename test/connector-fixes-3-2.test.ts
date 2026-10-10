@@ -785,7 +785,7 @@ describe("blank input: the API's sentences, and the API's whitespace rule", () =
       ["claim is required.", "blank_input"],
       ["claim is required.", "blank_input"],
       ["claims[1] is blank.", "blank_item"],
-      ["claims.1: Input should be a valid string", "invalid_argument"],
+      ["claims[1] must be a string (got number).", "invalid_argument"],
     ]);
   });
 
@@ -794,7 +794,7 @@ describe("blank input: the API's sentences, and the API's whitespace rule", () =
       ["claim is required.", "blank_input"],
       ["claim is required.", "blank_input"],
       ["claims[1] is blank.", "blank_item"],
-      ["Validation failed", "invalid_argument"],
+      ["claims[1] must be a string (got number).", "invalid_argument"],
     ]);
   });
 

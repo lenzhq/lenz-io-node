@@ -1065,7 +1065,7 @@ as the Python SDK):
 
 A 422 the API sends itself is still read by `legacyAliases` (the default
 client reads its blank-claim 422 as the 2.x `"Text is required."`).
-An `assess` item that is not a string is `invalid_argument`. As on the API,
+An `assess` item that is not a string is `invalid_argument` (`param` `"claims[1]"`), with the message `claims[1] must be a string (got number).` in both modes (the JavaScript type name, `null` for null; the same sentence as the Python SDK, with its type names). As on the API,
 the one of `claim` / `text` that has content is used, and blank means empty or
 whitespace by the API's rule (a BOM is content). A blank `select` item is
 refused although the API would skip it, so a list never shrinks silently.

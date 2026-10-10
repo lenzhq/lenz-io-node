@@ -2770,15 +2770,15 @@ export class Lenz {
       list.forEach((item: unknown, i) => {
         const fix = "Leave out the blank items: every item of `claims` is one claim to check.";
         if (typeof item !== "string") {
-          // The sentence of the API's schema error, as this client reads it.
-          throw aliasesOn(this)
-            ? blankInput("Validation failed", "invalid_argument", fix, `claims[${i}]`)
-            : blankInput(
-                `claims.${i}: Input should be a valid string`,
-                "invalid_argument",
-                fix,
-                `claims[${i}]`,
-              );
+          // The same sentence in both modes and on the Python SDK, with the
+          // JavaScript type name (`null` for null).
+          const type = item === null ? "null" : typeof item;
+          throw blankInput(
+            `claims[${i}] must be a string (got ${type}).`,
+            "invalid_argument",
+            "Every item of `claims` is one claim to check, as a string.",
+            `claims[${i}]`,
+          );
         }
         if (!hasText(item)) {
           throw blankInput(BLANK_SENTENCES.item(i), "blank_item", fix, `claims[${i}]`);
