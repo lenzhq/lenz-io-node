@@ -107,7 +107,8 @@ describe("errors keep their 2.x fields", () => {
         expect(err).toBeInstanceOf(LenzValidationError);
         expect(err.message).toBe(sentence);
         expect(err.cause_).toBe(sentence);
-        expect(err.code).toBe("");
+        // The local code, the same in both modes (since 3.2).
+        expect(err.code).toBe("blank_input");
         // No request was made: no status, no body.
         expect(err.statusCode).toBe(0);
         expect(err.body).toBeNull();

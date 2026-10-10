@@ -1009,12 +1009,20 @@ throws `LenzInvalidResponseError` too (since 3.2), with that answer's
 `statusCode`, `headers`, `requestId`, `body` and `bodyText`, instead of a
 `TypeError` deeper in or a result of the wrong type: `verifyBatchAndWait` on a
 receipt whose `items` is not a list of objects, and a cancel answered with
-another job's body (a `LenzAPIError` before, without the answer). Inside a
-wait (`wait`, `verifyAndWait`, `verifyBatchAndWait`) a poll that cannot be
-read, a `completed` status whose `result` is not an object, is polled again
-like a 5xx, until it reads or the wait reaches its `timeoutMs`
-(`LenzTimeoutError`; a batch row reads `"timeout"`); `reviewAndWait` and
-`citecheckAndWait` already poll an answer of the wrong shape again. The SDK does
+another job's body (a `LenzAPIError` before, without the answer).
+
+Inside a wait (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`,
+`citecheckAndWait`), a poll that cannot be read is handled by what it says
+about the run. One that says the run ended (a `completed` status whose
+`result` is not an object; a body naming the review or check with status
+`completed`, `failed` or `cancelled` but missing what the SDK reads) throws
+that `LenzInvalidResponseError` at once: polling again would only run to a
+timeout that hides why. Any other unreadable poll (no readable status, a 2xx
+that is not JSON, another job's body) is polled again like a 5xx; if the wait
+then reaches its `timeoutMs`, and its last poll was such an answer, the
+timeout error (`LenzTimeoutError`, `ReviewTimeoutError`,
+`CitecheckTimeoutError`) carries that `LenzInvalidResponseError` as its
+`cause`, and its message ends "the last polls could not be read". The SDK does
 not validate fields it does not read: those are returned as sent.
 
 `statusCode` 0 otherwise means the request got no HTTP answer at all
@@ -1037,16 +1045,17 @@ body (a `cancel`, a `DELETE` or a `GET` sends none).
 A blank input is refused before anything is sent (since 3.2): `verify` /
 `verifyAndWait` with no `claim` (or one of only whitespace), and `assess` with
 no `claim`, an empty `claims` list or a blank item in it, throw
-`LenzValidationError` with the sentence and `code` the API's 422 would have
-given, read as the client reads it: with `legacyAliases: false` the API's
-own sentence and code (`"claim is required."` / `blank_input`,
-`"claims[1] is blank."` / `blank_input`, a non-string item
-`"claims.1: Input should be a valid string"` / `validation_error`), by default
-the 2.x reading of them (`"Text is required."` / `""`, `"claims[1] is
-blank."` / `blank_item`, `"Validation failed"` / `""`); `statusCode` 0, no
-`body`, and `param` `"claim"` or `"claims[1]"`. As on the API, the one of `claim` / `text` that has content is used,
-and blank means empty or whitespace by the API's rule (a BOM is content).
-`verifyBatch` items are not checked locally: the API answers a blank item.
+`LenzValidationError` with `statusCode` 0, no `body`, a local `code`
+(`blank_input`, `empty_list`, `blank_item`; an item that is not a string
+`invalid_argument`) and `param` (`"claim"`, `"claims"`, `"claims[1]"`). The
+code is the same whatever `legacyAliases` says; the message is the sentence
+the API's 422 would have given, read as the client reads it: with
+`legacyAliases: false` the API's own (`"claim is required."`, `"claims[1] is
+blank."`, `"claims.1: Input should be a valid string"`), by default the 2.x
+reading (`"Text is required."`, `"claims[1] is blank."`, `"Validation
+failed"`). As on the API, the one of `claim` / `text` that has content is
+used, and blank means empty or whitespace by the API's rule (a BOM is
+content). `verifyBatch` items are not checked locally: the API answers a blank item.
 
 **A bad argument** is refused before anything is sent, with
 `LenzValidationError` (since 3.2; before, a plain `Error`, and a `TypeError`
@@ -1057,24 +1066,21 @@ camelCase). It is still an `Error`, and a wait stops on it at once.
 
 | `code`              | When                                                                                                                                                                                                                                                                                             | `param`                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace), or an empty `claims` list (with `legacyAliases: false`; the API's code, see below); `citecheck` with neither `text` nor `pairs`                                                                                                        | `"claim"`; `"text"`                                                               |
-| `blank_item`        | a blank `assess` item, by default (the 2.x reading of the API's `blank_input`, see below)                                                                                                                                                                                                        | `"claims[1]"`                                                                     |
-| `empty_list`        | `select` without claims                                                                                                                                                                                                                                                                          | `"claims"`                                                                        |
+| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                            | `"claim"`; `"text"`                                                               |
+| `blank_item`        | a blank `assess` item                                                                                                                                                                                                                                                                            | `"claims[1]"`                                                                     |
+| `empty_list`        | `select` without claims; `assess` with an empty `claims` list (and no `claim`)                                                                                                                                                                                                                   | `"claims"`                                                                        |
 | `invalid_page_size` | `pageSize` on `verifications.list` / `listAll` that is not a whole number from 1 to 100                                                                                                                                                                                                          | `"pageSize"`                                                                      |
 | `invalid_page`      | a `listAll` start page below 1                                                                                                                                                                                                                                                                   | `"page"`                                                                          |
 | `invalid_id`        | an id that cannot name one thing (empty, `.`, `..`, a lone surrogate), on every method that puts one in a path, and `wait`                                                                                                                                                                       | `"taskId"`, `"reviewId"`, `"citecheckId"`, `"verificationId"`                     |
 | `invalid_header`    | an `idempotencyKey` a header cannot carry; request-option `headers` that are not an object, or with a bad name, a reserved name, or a value a header cannot carry                                                                                                                                | `"idempotencyKey"`; `"headers"`                                                   |
 | `invalid_option`    | request options (`timeoutMs`, `maxRetries`, `signal`, `cancelOnAbort`, options that are not an object), `new Lenz()` (`timeoutMs`, `maxRetries`, `legacyAliases`), `withOptions()` (an unknown option, `legacyAliases`, an `apiKey` that is not a string), `new LenzWebhooks()` without a secret | the option: `"timeoutMs"`, `"options"`, `"apikey"` (as misspelt), `"secret"`, ... |
 | `conflicting_input` | `assess` given both `claim` and `claims`; `citecheck` given both `text` and `pairs`, or `maxCitations` beside `pairs`; two spellings of a field that differ (a batch item's `sourceUrl` / `source_url`, a citation pair's)                                                                       | `"claims"`; `"text"`, `"maxCitations"`; `"claims[0]"`, `"pairs[2]"`               |
-| `invalid_argument`  | anything else: `library.listAll` with `sort: "random"`, `verifySignature` without a secret, a webhook body that is not bytes                                                                                                                                                                     | `"sort"`, `"secret"`, `"body"`                                                    |
+| `invalid_argument`  | anything else: an `assess` item that is not a string, `library.listAll` with `sort: "random"`, `verifySignature` without a secret, a webhook body that is not bytes                                                                                                                              | `"sort"`, `"secret"`, `"body"`                                                    |
 
 `USAGE_ERROR_CODES` lists the SDK's own codes (the `UsageErrorCode` type
-names one); the Python SDK has the same list. Which codes come from the API: for a blank `verify` / `assess` input the
-client gives the `code` the API's 422 would have given, read as the client
-reads it (with `legacyAliases: false` `blank_input`, and `validation_error`
-for an `assess` item that is not a string; by default the 2.x reading: `""`,
-`blank_item`, `""`). Every other code in the table is the SDK's own, the same
-whatever `legacyAliases` says. `param` is `undefined` on an error from the API
+names one); the Python SDK has the same list. These are local codes: the same whatever `legacyAliases` says (which only
+picks the wording of a blank input's message, above), and never the API's
+422 codes, which come only from a response. `param` is `undefined` on an error from the API
 (read its `errors` instead). A runtime missing what the SDK needs (WebCrypto,
 Node's `crypto` for the synchronous webhook `parse`) and a webhook request
 whose body was already read still throw a plain `Error`.

@@ -268,20 +268,26 @@ describe("local argument errors carry a specific code and param", () => {
 
   const cases: Array<[string, () => unknown, string, string | undefined, string?]> = [
     // The blank inputs keep the code the API's 422 would have given.
-    ["verify blank claim (2.x reading)", () => client.verify({ claim: " " }), "", "claim"],
+    [
+      "verify blank claim (2.x reading)",
+      () => client.verify({ claim: " " }),
+      "blank_input",
+      "claim",
+    ],
     ["verify blank claim", () => raw.verify({ claim: " " }), "blank_input", "claim"],
-    ["assess empty claims list", () => raw.assess({ claims: [] }), "blank_input", "claim"],
+    ["assess empty claims list", () => raw.assess({ claims: [] }), "empty_list", "claims"],
+    ["assess empty claims list (2.x)", () => client.assess({ claims: [] }), "empty_list", "claims"],
     [
       "assess blank item (2.x)",
       () => client.assess({ claims: ["a", " "] }),
       "blank_item",
       "claims[1]",
     ],
-    ["assess blank item", () => raw.assess({ claims: ["a", " "] }), "blank_input", "claims[1]"],
+    ["assess blank item", () => raw.assess({ claims: ["a", " "] }), "blank_item", "claims[1]"],
     [
       "assess non-string item",
       () => raw.assess({ claims: ["a", 5 as unknown as string] }),
-      "validation_error",
+      "invalid_argument",
       "claims[1]",
     ],
     [
@@ -396,9 +402,9 @@ describe("local argument errors carry a specific code and param", () => {
       "invalid_argument",
     ]);
     expect(browser.USAGE_ERROR_CODES).toBe(USAGE_ERROR_CODES);
-    // The API's own 422 codes the blank inputs mirror are the only others.
+    // Every local code is one of them, whatever legacyAliases says.
     for (const [, , code] of cases) {
-      expect([...USAGE_ERROR_CODES, "", "validation_error"]).toContain(code);
+      expect(USAGE_ERROR_CODES).toContain(code);
     }
   });
 
@@ -495,68 +501,95 @@ describe("a field of the wrong type where the SDK reads it", () => {
   );
 
   it.each(["x", 42, [], true])(
-    "a completed poll whose result is %j is polled again, like a 5xx",
+    "a completed poll whose result is %j ends the wait at once: LenzInvalidResponseError",
     async (result) => {
+      const body = { task_id: "t1", status: "completed", result };
       for (const legacyAliases of [true, false]) {
-        let polls = 0;
-        const verification = { verification_id: "abcd1234", claim: "a" };
-        const { fetch } = server(() => {
-          polls += 1;
-          return {
-            body: {
-              task_id: "t1",
-              status: "completed",
-              result: polls === 1 ? result : verification,
-            },
-          };
-        });
-        const v = await new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).wait("t1");
-        expect(polls).toBe(2);
-        expect(v.raw).toEqual(verification);
+        const { fetch, sent } = server(() => ({ body }));
+        const err = (await thrown(() =>
+          new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).wait("t1"),
+        )) as LenzInvalidResponseError;
+        expect(err).toBeInstanceOf(LenzInvalidResponseError);
+        expect(err.statusCode).toBe(200);
+        expect(err.body).toEqual(body);
+        expect(err.bodyText).toBe(JSON.stringify(body));
+        expect(err.headers?.["content-type"]).toBe("application/json");
+        expect(sent).toHaveLength(1);
       }
     },
   );
 
-  it("one that never reads ends the wait at its deadline", async () => {
-    const { fetch } = server(() => ({ body: { task_id: "t1", status: "completed", result: "x" } }));
-    const err = await thrown(() =>
-      new Lenz({ apiKey: "lenz_t", fetch }).wait("t1", { timeoutMs: 50 }),
-    );
-    expect(err).toBeInstanceOf(LenzTimeoutError);
-  });
-
-  it("in a batch wait, that row is polled again; the others stand", async () => {
-    let t1Polls = 0;
+  it("in a batch wait too", async () => {
     const { fetch } = server((s) => {
       if (s.url.endsWith("/verify/batch")) {
-        return {
-          status: 202,
-          body: {
-            batch_id: "b",
-            items: [
-              { task_id: "t1", claim: "a" },
-              { task_id: "t2", claim: "b" },
-            ],
-          },
-        };
+        return { status: 202, body: { batch_id: "b", items: [{ task_id: "t1", claim: "a" }] } };
       }
-      if (s.url.endsWith("/t1")) {
-        t1Polls += 1;
-        return {
-          body: {
-            task_id: "t1",
-            status: "completed",
-            result: t1Polls === 1 ? "x" : { verification_id: "v1" },
-          },
-        };
+      return { body: { task_id: "t1", status: "completed", result: "x" } };
+    });
+    const err = await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).verifyBatchAndWait({ claims: [{ claim: "a" }] }),
+    );
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+  });
+
+  it("a poll that cannot be read and is not ended is polled again", async () => {
+    let polls = 0;
+    const verification = { verification_id: "abcd1234", claim: "a" };
+    const { fetch } = server(() => {
+      polls += 1;
+      return polls === 1
+        ? { body: { task_id: "t1", status: 42 } }
+        : { body: { task_id: "t1", status: "completed", result: verification } };
+    });
+    const v = await new Lenz({ apiKey: "lenz_t", fetch }).wait("t1");
+    expect(polls).toBe(2);
+    expect(v.raw).toEqual(verification);
+  });
+
+  it("at the deadline, the timeout carries the last unreadable poll as its cause", async () => {
+    const body = { task_id: "t1", status: 42 };
+    const { fetch } = server(() => ({ body, headers: { "X-Request-ID": "req9" } }));
+    const err = (await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).wait("t1", { timeoutMs: 50 }),
+    )) as LenzTimeoutError;
+    expect(err).toBeInstanceOf(LenzTimeoutError);
+    expect(err.message).toBe("wait timed out after 50ms; the last polls could not be read");
+    const cause = err.cause as LenzInvalidResponseError;
+    expect(cause).toBeInstanceOf(LenzInvalidResponseError);
+    expect(cause.body).toEqual(body);
+    expect(cause.requestId).toBe("req9");
+  });
+
+  it("a review wait's timeout carries it too; a readable last poll leaves none", async () => {
+    const running = {
+      review_id: "r1",
+      status: "verifying",
+      claims: [],
+      issues: [],
+      failures: [],
+      summary: {},
+    };
+    for (const [poll, unreadable] of [
+      [{ review_id: "r1", status: "verifying" }, true],
+      [running, false],
+    ] as const) {
+      const { fetch } = server((s) =>
+        s.method === "POST"
+          ? { status: 202, body: { review_id: "r1", status: "queued" } }
+          : { body: poll },
+      );
+      const err = (await thrown(() =>
+        new Lenz({ apiKey: "lenz_t", fetch }).reviewAndWait({ text: "Draft." }, { timeoutMs: 50 }),
+      )) as LenzTimeoutError;
+      expect(err).toBeInstanceOf(LenzTimeoutError);
+      if (unreadable) {
+        expect(err.message).toContain("the last polls could not be read");
+        expect(err.cause).toBeInstanceOf(LenzInvalidResponseError);
+      } else {
+        expect(err.message).not.toContain("could not be read");
+        expect(err.cause).toBeUndefined();
       }
-      return { body: { task_id: "t2", status: "completed", result: { verification_id: "v2" } } };
-    });
-    const rows = await new Lenz({ apiKey: "lenz_t", fetch }).verifyBatchAndWait({
-      claims: [{ claim: "a" }, { claim: "b" }],
-    });
-    expect(rows.map((r) => r.status)).toEqual(["completed", "completed"]);
-    expect(t1Polls).toBe(2);
+    }
   });
 
   it("a cancel answering another job's body: LenzInvalidResponseError with the answer", async () => {

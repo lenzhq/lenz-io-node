@@ -1015,6 +1015,12 @@ function isReviewBody(body: unknown, reviewId: string): body is ReviewFull {
 }
 
 const REVIEW_LISTS = ["issues", "failures", "claims"] as const;
+
+/** The statuses that end a review or a citation check. */
+const JOB_ENDED_STATUSES: readonly string[] = ["completed", "failed", "cancelled"];
+
+/** A poll that got no answer to read (it threw). */
+const NOT_READ: unique symbol = Symbol("not read");
 const CITECHECK_LISTS = ["citations", "citation_issues", "citation_failures"] as const;
 
 /**
@@ -1062,6 +1068,27 @@ function wrongType(
     "Check that baseUrl points at the Lenz API and nothing between you rewrites the answer; " +
       "if it persists, contact support (https://lenz.io/contact) with the request id.",
   );
+}
+
+/**
+ * A wait's timeout whose last polls could not be read: their last error
+ * becomes the timeout's `cause` (the native `Error.cause`), and the message
+ * and cause line say so. Without one, `err` is returned unchanged.
+ */
+function withUnreadableCause<E extends LenzError>(
+  err: E,
+  last: LenzInvalidResponseError | undefined,
+): E {
+  if (last === undefined) return err;
+  Object.defineProperty(err, "cause", {
+    value: last,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  err.message = `${err.message}; the last polls could not be read`;
+  err.cause_ = `The last polls could not be read: ${last.message}`;
+  return err;
 }
 
 /** A `LenzInvalidResponseError` for the answer `from` (a result read from one) came from. */
@@ -1480,7 +1507,7 @@ type ArgumentCode = UsageErrorCode;
  */
 function argumentError(
   message: string,
-  code: ArgumentCode | "" | "validation_error" = "invalid_argument",
+  code: ArgumentCode = "invalid_argument",
   param?: string,
 ): LenzValidationError {
   const err = new LenzValidationError({ message, code });
@@ -1645,14 +1672,14 @@ function claimText(input: { claim?: string; text?: string }): string | undefined
 
 /**
  * Refuses a blank input before anything is sent: the API would only answer
- * 422. Thrown as that 422 would have been read: a `LenzValidationError` with
- * the same sentence and `code` (`blank_input` with `legacyAliases: false`,
- * else the 2.x reading of it), but `statusCode` 0 and no `body`, since no
- * request was made.
+ * 422. A `LenzValidationError` with the sentence that 422 would have given,
+ * as this client reads it (by `legacyAliases`), but the local `code` (the
+ * same in both modes, and on the Python SDK), `statusCode` 0 and no `body`,
+ * since no request was made.
  */
 function blankInput(
   sentence: string,
-  code: "" | "blank_input" | "blank_item" | "validation_error",
+  code: UsageErrorCode,
   fix: string,
   param: string,
 ): LenzValidationError {
@@ -1671,13 +1698,19 @@ function verifyText(client: object, input: VerifyInput): string {
 }
 
 /**
- * A blank `claim`: the API's 422 as this client reads it (its sentence and
- * code with `legacyAliases: false`, the 2.x reading by default).
+ * A blank `claim`: `blank_input`, with the sentence of the API's 422 as this
+ * client reads it (its own with `legacyAliases: false`, the 2.x reading by
+ * default). An empty `claims` list (`code` `empty_list`) says the same.
  */
-function blankClaim(client: object, fix: string): LenzValidationError {
+function blankClaim(
+  client: object,
+  fix: string,
+  code: "blank_input" | "empty_list" = "blank_input",
+): LenzValidationError {
+  const param = code === "empty_list" ? "claims" : "claim";
   return aliasesOn(client)
-    ? blankInput("Text is required.", "", fix, "claim")
-    : blankInput("claim is required.", "blank_input", fix, "claim");
+    ? blankInput("Text is required.", code, fix, param)
+    : blankInput("claim is required.", code, fix, param);
 }
 
 /** The camelCase names a batch item takes beside its 2.x snake_case ones. */
@@ -2547,27 +2580,26 @@ export class Lenz {
       list.forEach((item: unknown, i) => {
         const fix = "Leave out the blank items: every item of `claims` is one claim to check.";
         if (typeof item !== "string") {
-          // The API's schema error, as this client reads it.
+          // The sentence of the API's schema error, as this client reads it.
           throw aliasesOn(this)
-            ? blankInput("Validation failed", "", fix, `claims[${i}]`)
+            ? blankInput("Validation failed", "invalid_argument", fix, `claims[${i}]`)
             : blankInput(
                 `claims.${i}: Input should be a valid string`,
-                "validation_error",
+                "invalid_argument",
                 fix,
                 `claims[${i}]`,
               );
         }
         if (!hasText(item)) {
-          throw blankInput(
-            `claims[${i}] is blank.`,
-            aliasesOn(this) ? "blank_item" : "blank_input",
-            fix,
-            `claims[${i}]`,
-          );
+          throw blankInput(`claims[${i}] is blank.`, "blank_item", fix, `claims[${i}]`);
         }
       });
     } else if (!hasText(single)) {
-      throw blankClaim(this, "Pass the claim to check as `claim`, or a list as `claims`.");
+      throw blankClaim(
+        this,
+        "Pass the claim to check as `claim`, or a list as `claims`.",
+        Array.isArray(list) ? "empty_list" : "blank_input",
+      );
     }
     const call = resolveCall(this, options, "assess()");
     // A random key per invocation, reused across this client's own retries so
@@ -3014,6 +3046,8 @@ export class Lenz {
   ): Promise<Citecheck> {
     return this._waitJob<Citecheck>({
       deadline,
+      path: `/citechecks/${citecheckId}`,
+      id: ["citecheck_id", citecheckId],
       call,
       ...(ended ? { ended } : {}),
       // The raw body, so the guard judges what the server sent: a default
@@ -3121,6 +3155,8 @@ export class Lenz {
           withAbortContext({ reviewId }, () =>
             this._waitJob<ReviewFull>({
               deadline,
+              path: `/reviews/${reviewId}`,
+              id: ["review_id", reviewId],
               call,
               read: (transport) => this._getReview(reviewId, {}, transport),
               isBody: (body) => isReviewBody(body, reviewId),
@@ -3141,6 +3177,10 @@ export class Lenz {
    */
   private async _waitJob<T extends { status: string; poll_after_seconds: number | null }>(job: {
     deadline: number;
+    /** The path a poll reads, named in the error of an answer that cannot be read. */
+    path: string;
+    /** The job's id field and value: an unreadable answer naming it with an ended status ends the wait. */
+    id: readonly [field: string, value: string];
     /** The call's signals and headers, sent with every poll. */
     call?: Call;
     read: (transport: Partial<SendOptions>) => Promise<unknown>;
@@ -3156,18 +3196,26 @@ export class Lenz {
     const optionHeaders = job.call?.headers ?? NO_HEADERS;
     let last: T | null = null;
     let lastJson = "";
+    // The error of the last poll, when it could not be read; cleared by any
+    // other answer. A timeout carries it as its cause.
+    let unreadable: LenzInvalidResponseError | undefined;
+    const timedOut = (): Error => {
+      const err = job.timedOut(last);
+      return err instanceof LenzError ? withUnreadableCause(err, unreadable) : err;
+    };
     for (let poll = 0; ; poll++) {
       const budget = deadline - Date.now();
       // The first poll always runs, even when the submit used up the budget,
       // so a timeout can still hand back what the job looks like.
-      if (budget <= 0 && poll > 0) throw job.timedOut(last);
+      if (budget <= 0 && poll > 0) throw timedOut();
       let current: T | null = null;
       let statedWaitMs = 0;
+      let body: unknown = NOT_READ;
       try {
         // One attempt per poll, bounded by what is left: this loop owns the
         // waits, so a retry ladder inside the request cannot outlive the
         // deadline.
-        const body = await job.read({
+        body = await job.read({
           signals,
           optionHeaders,
           maxRetries: 0,
@@ -3176,10 +3224,6 @@ export class Lenz {
           // one read can fill `partial`.
           timeoutMs: poll === 0 && budget <= 0 ? this.timeoutMs : Math.min(this.timeoutMs, budget),
         });
-        // A 2xx that is not this job (an empty body, a proxy's error object,
-        // another id, a body missing its lists) is a failed poll, never an
-        // update and never `partial`.
-        if (job.isBody(body)) current = body;
       } catch (exc) {
         // The caller's abort ends the wait; it is never a transient failure.
         rethrowIfCallerAbort(signals, exc);
@@ -3194,12 +3238,32 @@ export class Lenz {
         // programming error (the call's refusal of an id included): waiting
         // does not change it.
         if (!isPollableError(exc)) throw exc;
+        unreadable = exc instanceof LenzInvalidResponseError ? exc : undefined;
         // A wait the server stated outranks the poll hint, capped like every
         // other stated wait in this client: a maintenance 503 can state an
         // hour.
         const retryAfter = (exc as { retryAfter?: unknown } | null | undefined)?.retryAfter;
         if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
           statedWaitMs = Math.min(retryAfter, MAX_RETRY_AFTER_SLEEP) * 1000;
+        }
+      }
+      if (body !== NOT_READ) {
+        // A 2xx that is not this job (an empty body, a proxy's error object,
+        // another id, a body missing its lists) is a failed poll, never an
+        // update and never `partial`. One that names this job with a status
+        // saying it ended is thrown at once: polling again would only spin
+        // to a timeout that hides why.
+        if (job.isBody(body)) {
+          current = body;
+          unreadable = undefined;
+        } else {
+          const named = isPlainObject(body) && body[job.id[0]] === job.id[1];
+          const status = isPlainObject(body) ? body["status"] : undefined;
+          const err = unexpectedAnswer("GET", job.path, body);
+          if (named && typeof status === "string" && JOB_ENDED_STATUSES.includes(status)) {
+            throw err;
+          }
+          unreadable = err;
         }
       }
       if (current) {
@@ -3236,7 +3300,7 @@ export class Lenz {
       // An abort that comes with the deadline is an abort, not a timeout.
       throwIfAborted(signals);
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw job.timedOut(last);
+      if (remaining <= 0) throw timedOut();
       await sleep(
         Math.min(Math.max(reviewPollMs(current ?? last), statedWaitMs), remaining),
         signals,
@@ -3321,7 +3385,7 @@ export class Lenz {
     const cancelOnAbort = opts.cancelOnAbort === true;
     if (!cancelOnAbort) throwIfAborted(call.signals);
     const ended = (opts && NESTED_WAIT_ENDED.get(opts)) ?? new Set<string>();
-    const { terminal, timedOut, gone, permanent } = await this._cancellingOnAbort(
+    const { terminal, timedOut, gone, permanent, unreadable } = await this._cancellingOnAbort(
       cancelOnAbort,
       call,
       "task",
@@ -3344,7 +3408,7 @@ export class Lenz {
         docUrl: "https://lenz.io/docs/verify#timeout",
       });
       err.taskId = taskId;
-      throw err;
+      throw withUnreadableCause(err, unreadable.get(taskId));
     }
     return this._verificationFromTerminal(terminal.get(taskId)!, taskId);
   }
@@ -3509,8 +3573,11 @@ export class Lenz {
     timedOut: Set<string>;
     gone: Map<string, LenzGoneError>;
     permanent: Map<string, LenzError>;
+    /** Per task still pending at the deadline, the error of its last poll when that poll could not be read. */
+    unreadable: Map<string, LenzInvalidResponseError>;
   }> {
     let pending = [...taskIds];
+    const unreadable = new Map<string, LenzInvalidResponseError>();
     const terminal = new Map<string, TaskStatus>();
     const timedOut = new Set<string>();
     // A 410 is final: the run finished and its account's retention period has
@@ -3604,10 +3671,19 @@ export class Lenz {
         if (res.status === "fulfilled") {
           const s = res.value;
           if (s.status === "completed" && s.result != null && !isPlainObject(s.result)) {
-            // A completed answer whose `result` is not an object cannot be
-            // read: polled again, like a 5xx, until it reads or the wait ends.
+            // The run finished, but its answer cannot be read: polling again
+            // would only spin to a timeout that hides why.
+            throw wrongType(s, "GET", `/verify/status/${id}`, "result");
+          }
+          if (typeof s.status !== "string") {
+            // No status to read: polled again, like a 5xx; the deadline's
+            // error says so if it was the last poll.
+            unreadable.set(id, wrongType(s, "GET", `/verify/status/${id}`, "status"));
             stillPending.push(id);
-          } else if (
+            return;
+          }
+          unreadable.delete(id);
+          if (
             s.status === "completed" ||
             s.status === "needs_input" ||
             s.status === "failed" ||
@@ -3656,6 +3732,8 @@ export class Lenz {
         } else {
           // Poll errored this round (after _request exhausted its retries) —
           // keep pending and retry next round rather than aborting the batch.
+          if (res.reason instanceof LenzInvalidResponseError) unreadable.set(id, res.reason);
+          else unreadable.delete(id);
           stillPending.push(id);
         }
       });
@@ -3677,7 +3755,8 @@ export class Lenz {
       );
       backoffIdx += 1;
     }
-    return { terminal, timedOut, gone, permanent };
+    for (const id of [...unreadable.keys()]) if (!timedOut.has(id)) unreadable.delete(id);
+    return { terminal, timedOut, gone, permanent, unreadable };
   }
 
   /**

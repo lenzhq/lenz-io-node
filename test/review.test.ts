@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  LenzInvalidResponseError,
   Lenz,
   LenzAPIError,
   LenzError,
@@ -585,7 +586,6 @@ describe("reviewAndWait()", () => {
     ["a proxy's error object", { status: "error" }],
     ["a bare completed status", { status: "completed" }],
     ["another review's body", { ...COMPLETED, review_id: "deadbeef" }],
-    ["a review without its arrays", { ...COMPLETED, issues: undefined, claims: undefined }],
     ["an unknown status", { ...COMPLETED, status: "exploded" }],
   ] as const) {
     it(`a 2xx poll with ${label} is a transient failure, not a review`, async () => {
@@ -605,6 +605,21 @@ describe("reviewAndWait()", () => {
       expect(seen).toEqual(["verifying", "completed"]);
     });
   }
+
+  it("a poll naming this review as ended, without its arrays, ends the wait at once", async () => {
+    const body = { ...COMPLETED, issues: undefined, claims: undefined };
+    const { fetch } = makeFetch([{ status: 202, body: ACCEPTED }, { body }, { body: COMPLETED }]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const err = (await drain(
+      client.reviewAndWait({ text: DRAFT }).catch((e: unknown) => e),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.statusCode).toBe(200);
+    expect(err.body).toEqual(JSON.parse(JSON.stringify(body)));
+    expect(err.message).toBe(
+      `GET /reviews/${COMPLETED.review_id} returned an unexpected response body.`,
+    );
+  });
 
   for (const [label, raw] of [
     ["an HTML proxy page", "<html>502 Bad Gateway</html>"],

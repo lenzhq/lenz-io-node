@@ -223,7 +223,7 @@ describe("legacyAliases: false keeps the wire code on errors", () => {
     expect(b).toBeInstanceOf(LenzNotFoundError);
   });
 
-  it("a blank input refused before sending says blank_input, as the API would", async () => {
+  it("a blank input refused before sending: the local codes, in both modes", async () => {
     const raw = new Lenz({ apiKey: "lenz_t", legacyAliases: false });
     const def = new Lenz({ apiKey: "lenz_t" });
     const codes = async (c: Lenz) => [
@@ -231,8 +231,8 @@ describe("legacyAliases: false keeps the wire code on errors", () => {
       ((await thrown(() => c.assess({ claim: " " }))) as LenzError).code,
       ((await thrown(() => c.assess({ claims: ["a", " "] }))) as LenzError).code,
     ];
-    expect(await codes(raw)).toEqual(["blank_input", "blank_input", "blank_input"]);
-    expect(await codes(def)).toEqual(["", "", "blank_item"]);
+    expect(await codes(raw)).toEqual(["blank_input", "blank_input", "blank_item"]);
+    expect(await codes(def)).toEqual(["blank_input", "blank_input", "blank_item"]);
   });
 });
 
@@ -780,21 +780,21 @@ describe("blank input: the API's sentences, and the API's whitespace rule", () =
       }),
     );
 
-  it("with legacyAliases: false, the API's own sentence and code", async () => {
+  it("with legacyAliases: false, the API's own sentence; the local code", async () => {
     expect(await sentences(new Lenz({ apiKey: "lenz_t", legacyAliases: false }))).toEqual([
       ["claim is required.", "blank_input"],
       ["claim is required.", "blank_input"],
-      ["claims[1] is blank.", "blank_input"],
-      ["claims.1: Input should be a valid string", "validation_error"],
+      ["claims[1] is blank.", "blank_item"],
+      ["claims.1: Input should be a valid string", "invalid_argument"],
     ]);
   });
 
-  it("by default, the 2.x reading of the same answers", async () => {
+  it("by default, the 2.x reading of the same sentences; the same local codes", async () => {
     expect(await sentences(new Lenz({ apiKey: "lenz_t" }))).toEqual([
-      ["Text is required.", ""],
-      ["Text is required.", ""],
+      ["Text is required.", "blank_input"],
+      ["Text is required.", "blank_input"],
       ["claims[1] is blank.", "blank_item"],
-      ["Validation failed", ""],
+      ["Validation failed", "invalid_argument"],
     ]);
   });
 
