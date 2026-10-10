@@ -8,8 +8,24 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
+- `review` / `reviewAndWait` accept `language: "auto"`: the review comes back in the language of the draft (one language for the whole review). Needs the API release that accepts it on `/review`; before that the API answers 422.
+- `pageSize` on `verifications.list({ page, pageSize })` and `verifications.listAll({ pageSize })`: how many verifications a page holds, a whole number from 1 to 100, sent as `page_size` only when given (a call without it sends the same request as before; the server's default is 20). Any other value throws an `Error` before a request is made. `listAll` asks every page for the same size. Matches `page_size` on the Python SDK. (`library.list` has no page size: `GET /library` does not take one.)
+- `withOptions({ apiKey })`: a copy of the client that sends another key (or OAuth access token) on the same transport, for a server that calls Lenz for several accounts. Only when `apiKey` is absent does the copy keep the client's key; given as `undefined`, `null`, empty or whitespace-only, the copy has no key (a call that needs one throws `LenzAuthError` before sending); a copy never reads `LENZ_API_KEY`. The new `ClientCopyOptions` type names its options. Matches `with_options(api_key=...)` on the Python SDK.
+- `legacyAliases` (default `true`) on `new Lenz()`: with `false`, every result is exactly the body the `2026-10-11` API sent, without the 2.x names and values 3.x adds (pause options carry `claim` only; a failed `assess` row keeps `verdict` / `confidence` `null`, not `"Error"` / `"low"`; `/me/usage` has no derived blocks; the README lists every field). Errors, webhooks and requests are unchanged (except a review or citation-check timeout error's `partial`, which is the body as sent); a `withOptions` copy keeps the client's setting. Matches `legacy_aliases` on the Python SDK.
+- `LenzInvalidResponseError` (a `LenzAPIError`): thrown for a 2xx whose body is not JSON, with the real `statusCode`, `requestId` and `bodyText` (the first 1000 characters). Status 0 stays for a request with no HTTP answer.
 - `extract` accepts `language: "auto"`: the claims are written in the language of the text (of the fetched page when `text` is a single URL); a short or undetectable text gives English. Omitting `language` is still English, and a concrete code always wins.
 - `ExtractedClaims.language`: the ISO 639-1 code the claims are written in (never `"auto"`). Pass it on to `assess` or `verify` as `language` to keep a chain in one language. It reads `undefined` on a response from an API that predates it.
+
+### Changed
+
+- An `apiKey` of only whitespace (passed, or in `LENZ_API_KEY`) now counts as no key: a call that needs one throws `LenzAuthError` ("API key required") before any request, and keyless calls send no `Authorization` header. Before, it was sent as an empty bearer and the server answered 401, which read as a bad key rather than a missing one. An explicit `apiKey: ""` already meant no key and never read `LENZ_API_KEY`; that is now documented and tested.
+- A 2xx whose body is not JSON throws `LenzInvalidResponseError` instead of the runtime's `SyntaxError`, so the error says what the server answered (its status and the start of its body) rather than looking like a bug in the caller's code. A 204 or a `Content-Length: 0` answer still reads as `{}`, and so does a 205 now; an empty or blank body on any other 2xx counts as not JSON (in 3.1 it threw `SyntaxError`).
+- `withOptions` throws on an option name it does not take (`apikey`, `api_key`, a misspelling), which it used to ignore silently: a misspelt `apiKey` would have sent the client's own key.
+- `LenzApiVersionError`'s message names the version the API answered: "The API answered <version>; this SDK reads 2026-10-11 only." The class, its fields and when it is thrown are unchanged.
+
+### Fixed
+
+- A lone UTF-16 surrogate in a request body (half of an emoji cut by a `slice`) is now sent as U+FFFD; valid pairs are unchanged. `JSON.stringify` sent it as a `\ud800` escape, which the server cannot handle as text; the Python SDK sends the same U+FFFD, so both SDKs send the server the same text. Bodies without one are sent byte for byte as before.
 
 ## [3.1.0] - 2026-10-10
 

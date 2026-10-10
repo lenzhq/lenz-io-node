@@ -9,7 +9,13 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Lenz, LenzAPIError, type GetStatusOptions, type TaskStatus } from "../src/index.js";
+import {
+  Lenz,
+  LenzAPIError,
+  LenzInvalidResponseError,
+  type GetStatusOptions,
+  type TaskStatus,
+} from "../src/index.js";
 import { countedController, header, recorder, settle } from "./support/recorder.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -334,7 +340,9 @@ describe("a wait's poll context reaches getStatus through overrides that copy op
     expect(c.seen).toEqual([[]]);
   });
 
-  it("a plain getStatus during a wait still throws the runtime's own error", async () => {
+  // 3.2: a 2xx that is not JSON is a LenzInvalidResponseError (with the real
+  // status), no longer the runtime's SyntaxError; the wait still polls on.
+  it("a plain getStatus during a wait throws LenzInvalidResponseError", async () => {
     let n = 0;
     const fetch = vi.fn(async (u: string | URL | Request) => {
       if (String(u).endsWith("/plain")) return html();
@@ -343,7 +351,7 @@ describe("a wait's poll context reaches getStatus through overrides that copy op
     const c = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     const waiting = settle(c.wait("t1"));
     const plain = await settle(c.getStatus("plain"));
-    expect(plain).toBeInstanceOf(SyntaxError);
+    expect(plain).toBeInstanceOf(LenzInvalidResponseError);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await waiting).toMatchObject({ verification_id: "v1" });
   });
