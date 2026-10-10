@@ -505,10 +505,10 @@ describe("what the per-call timeoutMs bounds, and precedence", () => {
       expected: 1_000,
     },
     {
-      name: "extract: the floor lifts an inherited copy value",
+      name: "extract: a copy's value is used as given, below the floor (3.2)",
       run: (c) => c.extract({ text: "a" }),
       copy: { timeoutMs: 9_000 },
-      expected: 150_000,
+      expected: 9_000,
     },
     {
       name: "extract: a copy value above the floor is kept",
@@ -528,10 +528,10 @@ describe("what the per-call timeoutMs bounds, and precedence", () => {
       expected: 100_000,
     },
     {
-      name: "assess: the floor lifts an inherited copy value",
+      name: "assess: a copy's value is used as given, below the floor (3.2)",
       run: (c) => c.assess({ claims: ["a"] }),
       copy: { timeoutMs: 5_000 },
-      expected: 100_000,
+      expected: 5_000,
     },
     {
       name: "a wait's poll: the copy's attempt timeout, cut at the budget",

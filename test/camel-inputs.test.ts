@@ -78,12 +78,12 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
     {
       name: "sourceUrl only, then a bare item",
       items: [{ sourceUrl: "https://s.example/p", text: "a" }, { claim: "b" }],
-      wire: '{"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b","source_url":""}]}',
+      wire: '{"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b"}]}',
     },
     {
       name: "an empty webhookUrl is omitted",
       items: [{ claim: "a", webhookUrl: "", depth: "low", visibility: "unlisted" }],
-      wire: '{"claims":[{"text":"a","source_url":"","visibility":"unlisted","depth":"low"}]}',
+      wire: '{"claims":[{"text":"a","visibility":"unlisted","depth":"low"}]}',
     },
     {
       name: "one camel, one snake",
@@ -113,7 +113,7 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
     ]);
     expect(raw(call)).toBe(
       '{"claims":[{"text":"a","source_url":"https://s.example/p"},' +
-        '{"text":"b","source_url":"","webhook_url":"https://h.example/w"}]}',
+        '{"text":"b","webhook_url":"https://h.example/w"}]}',
     );
   });
 
@@ -124,15 +124,15 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
       { claim: "c", webhook_url: "", webhookUrl: "https://h.example/w" },
       { claim: "d", webhookUrl: "  ", webhook_url: "https://h.example/v" },
       { claim: "e", webhookUrl: null as unknown as string, webhook_url: "https://h.example/u" },
-      { claim: "f", source_url: "", sourceUrl: null as unknown as string, webhook_url: "" },
+      { claim: "f", sourceUrl: null as unknown as string, webhook_url: "" },
     ]);
     expect(raw(call)).toBe(
       '{"claims":[{"text":"a","source_url":"https://s.example/p"},' +
         '{"text":"b","source_url":"https://s.example/q"},' +
-        '{"text":"c","source_url":"","webhook_url":"https://h.example/w"},' +
-        '{"text":"d","source_url":"","webhook_url":"https://h.example/v"},' +
-        '{"text":"e","source_url":"","webhook_url":"https://h.example/u"},' +
-        '{"text":"f","source_url":""}]}',
+        '{"text":"c","webhook_url":"https://h.example/w"},' +
+        '{"text":"d","webhook_url":"https://h.example/v"},' +
+        '{"text":"e","webhook_url":"https://h.example/u"},' +
+        '{"text":"f"}]}',
     );
   });
 

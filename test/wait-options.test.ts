@@ -92,7 +92,7 @@ describe("verifyAndWait(input, opts)", () => {
     expect((now.result as Verification).verification_id).toBe("v1");
     expect(now.result).toEqual(old.result);
     expect(now.calls).toEqual(old.calls);
-    expect(now.calls[0]![2]).toBe('{"text":"a","source_url":""}');
+    expect(now.calls[0]![2]).toBe('{"text":"a"}');
     expect(now.seen).toEqual([["t1", { step: "research" }]]);
     expect(now.seen).toEqual(old.seen);
   });
@@ -142,7 +142,7 @@ describe("verifyAndWait(input, opts)", () => {
     const r = await run(responses(), (client) =>
       client.verifyAndWait({ claim: "a", idempotencyKey: "k" }, { timeoutMs: 5, onProgress() {} }),
     );
-    expect(r.calls[0]![2]).toBe('{"text":"a","source_url":""}');
+    expect(r.calls[0]![2]).toBe('{"text":"a"}');
   });
 });
 
@@ -171,7 +171,7 @@ describe("verifyBatchAndWait(input, opts)", () => {
     expect((now.result as BatchItemResult[]).map((r) => r.status)).toEqual(["completed"]);
     expect(now.result).toEqual(old.result);
     expect(now.calls).toEqual(old.calls);
-    expect(now.calls[0]![2]).toBe('{"claims":[{"text":"a","source_url":""}]}');
+    expect(now.calls[0]![2]).toBe('{"claims":[{"text":"a"}]}');
     expect(now.seen).toEqual([["t1", { step: "research" }]]);
     expect(now.seen).toEqual(old.seen);
   });

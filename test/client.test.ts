@@ -517,7 +517,7 @@ describe("Assess", () => {
       },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const out = await client.assess({ text: "" });
+    const out = await client.assess({ text: "Nothing to check here." });
     expect(out.claims).toEqual([]);
     expect(out.error).toBe("no_atomic_claim_identified");
   });

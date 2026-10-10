@@ -745,9 +745,11 @@ describe("frozen: retry and sleep traces", () => {
     expect(t.at).toEqual([0]);
   });
 
-  it("an answer in another API version is thrown at once, unread as this one's", async () => {
+  it("a success answer in another API version is thrown at once, unread as this one's", async () => {
+    // Since 3.2 only a success answer: an error answer in another version is
+    // that error, retried as this version's would be.
     const t = await trace(
-      [{ status: 503, body: { detail: "x" }, headers: { "X-Lenz-API-Version": "2026-05-13" } }],
+      [{ status: 200, body: { detail: "x" }, headers: { "X-Lenz-API-Version": "2026-05-13" } }],
       (c) => c.usage(),
     );
     expect(t.out).toBeInstanceOf(LenzApiVersionError);

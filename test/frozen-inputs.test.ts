@@ -71,12 +71,12 @@ const BATCH_CASES: Array<{ name: string; items: VerifyBatchItem[]; wire: string 
   {
     name: "source_url only, then a bare item",
     items: [{ source_url: "https://s.example/p", text: "a" }, { claim: "b" }],
-    wire: '{"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b","source_url":""}]}',
+    wire: '{"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b"}]}',
   },
   {
     name: "an empty webhook_url is omitted",
     items: [{ claim: "a", webhook_url: "", depth: "low", visibility: "unlisted" }],
-    wire: '{"claims":[{"text":"a","source_url":"","visibility":"unlisted","depth":"low"}]}',
+    wire: '{"claims":[{"text":"a","visibility":"unlisted","depth":"low"}]}',
   },
 ];
 
@@ -194,7 +194,7 @@ describe("frozen: the in-input wait options", () => {
       "https://lenz.io/api/v1/verify/status/t1",
     ]);
     expect(key(calls[0]!)).toBe("frozen-verify");
-    expect(raw(calls[0]!)).toBe('{"text":"a","source_url":""}');
+    expect(raw(calls[0]!)).toBe('{"text":"a"}');
     expect(seen).toEqual([["t1", { step: "research" }]]);
   });
 

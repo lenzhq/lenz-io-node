@@ -263,11 +263,11 @@ describe("webhook_url in request bodies", () => {
     await client.verifyBatch({ claims: [{ claim: "b", webhook_url: " " }], webhookUrl: "\t" });
     await client.verify({ claim: "a", webhookUrl: "https://example.com/h" });
     expect(bodies).toEqual([
-      { text: "a", source_url: "" },
-      { text: "a", source_url: "" },
-      { text: "a", source_url: "" },
-      { claims: [{ text: "b", source_url: "" }] },
-      { text: "a", source_url: "", webhook_url: "https://example.com/h" },
+      { text: "a" },
+      { text: "a" },
+      { text: "a" },
+      { claims: [{ text: "b" }] },
+      { text: "a", webhook_url: "https://example.com/h" },
     ]);
   });
 
@@ -284,11 +284,7 @@ describe("webhook_url in request bodies", () => {
     });
     expect(bodies).toEqual([
       {
-        claims: [
-          { text: "a", source_url: "" },
-          { text: "b", source_url: "" },
-          { text: "c", source_url: "", webhook_url: "https://x.example/h" },
-        ],
+        claims: [{ text: "a" }, { text: "b" }, { text: "c", webhook_url: "https://x.example/h" }],
       },
     ]);
   });

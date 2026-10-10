@@ -468,6 +468,11 @@ export function normalizeUsage(body: unknown): unknown {
 export interface RequestContext {
   method: string;
   path: string;
+  /**
+   * `false` when the client was made with `legacyAliases: false`: the error's
+   * `code` is then the body's own, never the 2.x reading of it.
+   */
+  legacyAliases?: boolean;
 }
 
 /** `/review`, `/citecheck` and their reads keep their own error envelope. */

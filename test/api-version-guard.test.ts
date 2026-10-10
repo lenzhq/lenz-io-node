@@ -10,6 +10,7 @@ import {
   Lenz,
   LenzApiVersionError,
   LenzError,
+  LenzNotFoundError,
   LenzValidationError,
 } from "../src/index.js";
 import * as browser from "../src/index.browser.js";
@@ -77,44 +78,45 @@ describe("a response from another API version is refused", () => {
     expect(err).toBeInstanceOf(LenzError);
     expect(err.message).toBe("The API answered 2026-05-13; this SDK reads 2026-10-11 only.");
     expect((err as LenzApiVersionError).apiVersion).toBe("2026-05-13");
+    expect((err as LenzApiVersionError).servedVersion).toBe("2026-05-13");
+    expect((err as LenzApiVersionError).expectedVersion).toBe(API_VERSION);
     expect(err.statusCode).toBe(200);
     expect(err.body).toEqual(legacy);
   });
 
-  it("throws on an error response too, with the status and the body as sent", async () => {
+  it("an error response is the error itself, with the version in servedVersion (3.2)", async () => {
     const legacy = { detail: [{ loc: ["body", "text"], msg: "Field required", type: "missing" }] };
     const { fetch } = recorder(() => json(legacy, 422, { [SERVED]: "2026-05-13" }));
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     const err = await thrown(() => client.verify({ claim: "x" }));
-    expect(err).toBeInstanceOf(LenzApiVersionError);
-    expect(err).not.toBeInstanceOf(LenzValidationError);
+    expect(err).not.toBeInstanceOf(LenzApiVersionError);
+    expect(err).toBeInstanceOf(LenzValidationError);
     expect(err.statusCode).toBe(422);
+    expect(err.servedVersion).toBe("2026-05-13");
     expect(err.body).toEqual(legacy);
   });
 
-  it("is not retried: a 503 from another version throws at once", async () => {
+  it("an error response is retried as this version's would be", async () => {
     let calls = 0;
     const { fetch } = recorder(() => {
       calls += 1;
-      return json({ detail: "x", code: "capacity" }, 503, {
-        [SERVED]: "2026-05-13",
-        "Retry-After": "1",
-      });
+      return json({ detail: "x" }, 502, { [SERVED]: "2026-05-13", "Retry-After": "0" });
     });
-    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 3 });
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 2 });
     const err = await thrown(() => client.usage());
-    expect(err).toBeInstanceOf(LenzApiVersionError);
-    expect(calls).toBe(1);
+    expect(err).not.toBeInstanceOf(LenzApiVersionError);
+    expect(err.statusCode).toBe(502);
+    expect(calls).toBe(3);
   });
 
-  it("keeps a body that is not JSON as null", async () => {
+  it("an error body that is not JSON keeps body null", async () => {
     const { fetch } = recorder(
       () => new Response("<html>", { status: 502, headers: { [SERVED]: "2026-05-13" } }),
     );
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     const err = await thrown(() => client.usage());
-    expect(err).toBeInstanceOf(LenzApiVersionError);
-    expect(err.body).toBeNull();
+    expect(err.statusCode).toBe(502);
+    expect(err.servedVersion).toBe("2026-05-13");
   });
 
   it("throws the version error even when the body cannot be read", async () => {
@@ -132,13 +134,14 @@ describe("a response from another API version is refused", () => {
     expect(err.body).toBeNull();
   });
 
-  it("is not read as 'already deleted' on a 404 delete", async () => {
+  it("is not read as 'already deleted' on a 404 delete: the 404 is thrown", async () => {
     const { fetch } = recorder(() =>
       json({ detail: "Not found." }, 404, { [SERVED]: "2026-05-13" }),
     );
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
     const err = await thrown(() => client.verifications.delete("v1"));
-    expect(err).toBeInstanceOf(LenzApiVersionError);
+    expect(err).toBeInstanceOf(LenzNotFoundError);
+    expect(err.servedVersion).toBe("2026-05-13");
   });
 
   it("ends a wait at once instead of polling to the deadline", async () => {

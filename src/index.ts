@@ -164,6 +164,7 @@ export type {
   AssessClaim,
   AssessInput,
   AssessResponse,
+  RawBody,
   Assessment,
   Audit,
   BatchAccepted,

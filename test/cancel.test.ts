@@ -19,6 +19,7 @@ import {
   LenzAPIError,
   LenzAuthError,
   LenzError,
+  LenzInvalidResponseError,
   LenzNotFoundError,
   type CancelResult,
   type Citecheck,
@@ -249,6 +250,7 @@ describe("cancel(taskId)", () => {
       task_id: string;
       cancelled: boolean;
       status: TaskStatus["status"];
+      readonly raw?: Record<string, unknown>;
     }>();
   });
 });
@@ -315,14 +317,25 @@ describe("cancelReview(reviewId)", () => {
     },
   );
 
-  it("answers in another API version: LenzApiVersionError", async () => {
+  it("answers in another API version: LenzApiVersionError on a 200", async () => {
     const { fetch } = serving(
-      new Response("{}", { status: 404, headers: { "X-Lenz-API-Version": "2026-05-13" } }),
+      new Response("{}", { status: 200, headers: { "X-Lenz-API-Version": "2026-05-13" } }),
     );
     const err = await make(fetch)
       .cancelReview("r1")
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LenzApiVersionError);
+  });
+
+  it("a 404 in another API version is the 404, with servedVersion (3.2)", async () => {
+    const { fetch } = serving(
+      new Response("{}", { status: 404, headers: { "X-Lenz-API-Version": "2026-05-13" } }),
+    );
+    const err = (await make(fetch)
+      .cancelReview("r1")
+      .catch((e: unknown) => e)) as LenzNotFoundError;
+    expect(err).toBeInstanceOf(LenzNotFoundError);
+    expect(err.servedVersion).toBe("2026-05-13");
   });
 });
 
@@ -419,11 +432,20 @@ describe("a 200 that is not a cancel result", () => {
     new Response(JSON.stringify({ cancelled: true, status: "cancelled" }), { status: 200 });
   const notAnObject = () => new Response("[]", { status: 200 });
 
+  it("cancel throws LenzInvalidResponseError for a list (3.2: no 2xx answer is a list)", async () => {
+    const { fetch, calls } = serving(notAnObject);
+    const err = (await make(fetch)
+      .cancel("t1")
+      .catch((e: unknown) => e)) as LenzAPIError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err).toBeInstanceOf(LenzAPIError);
+    expect(calls).toHaveLength(1);
+  });
+
   it.each([
     ["an empty body", empty],
     ["a 204", noContent],
     ["a body without task_id", noTaskId],
-    ["a list", notAnObject],
   ])("cancel throws LenzAPIError for %s", async (_label, answer) => {
     const { fetch, calls } = serving(answer);
     const err = (await make(fetch)

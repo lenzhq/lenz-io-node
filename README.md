@@ -933,25 +933,78 @@ A read of a verification removed under its account's retention period throws
 `verifyAndWait` stop on it instead of polling to the deadline. See
 [Retention](#retention).
 
-A response that names an API version other than `2026-10-11` in its
-`X-Lenz-API-Version` header (for example `2026-05-13`, as an older stored
-replay of an idempotent call can) is not parsed: the call throws
-`LenzApiVersionError` with `apiVersion` (the version named), `statusCode` and
-`body` (as sent); its message names the version the API answered. If it persists, contact support with the request id;
-lenz-io 2.x reads both versions. An idempotent request first sent with 2.x
-(before lenz.io served `2026-10-11`) and replayed with the same key is
-answered this way: finish such work with 2.x, and never change the key to
-get past it, which would run the call again. A response with no such header is not
-checked, and neither are webhook events.
+A successful response (status below 400) that names an API version other
+than `2026-10-11` in its `X-Lenz-API-Version` header (for example
+`2026-05-13`, as an older stored replay of an idempotent call can) is not
+parsed: the call throws `LenzApiVersionError` with `servedVersion` (the
+version named), `expectedVersion` (`"2026-10-11"`, both since 3.2),
+`apiVersion` (the same as `servedVersion`), `statusCode` and `body` (as sent);
+its message names the version the API answered. If it persists, contact
+support with the request id; lenz-io 2.x reads both versions. An idempotent
+request first sent with 2.x (before lenz.io served `2026-10-11`) and replayed
+with the same key is answered this way: finish such work with 2.x, and never
+change the key to get past it, which would run the call again. A response with
+no such header is not checked, and neither are webhook events.
+
+An **error** response (400 or above) in another version throws its own error,
+the one its status and body call for (a `LenzQuotaExceededError` with its
+balance, a `LenzRateLimitError` with its `retryAfter`, ...), retried like any
+other, with the version it named in `servedVersion` (since 3.2; 3.0 and 3.1
+threw `LenzApiVersionError` for it, hiding the balance or the wait).
+`verifications.delete` still throws a 404 in another version rather than
+reading it as already deleted.
+
+**`body` and `code`.** `err.body` is the parsed JSON body of the error
+response exactly as sent (`null` or `{}` when there was none): the source of
+truth, every other field is read from it. `err.code` is the server's
+machine-readable code, `""` when there is none. By default it is the code
+lenz-io 2.x reported for that call, which left some codes out (`not_found`,
+`not_authenticated` on the review calls, ...) and renamed a few (a blank
+`assess` item reads `blank_item`). On a client made with
+`legacyAliases: false` it is exactly the body's `code` (since 3.2):
+`not_found`, `idempotency_conflict`, `validation_error`, `blank_input`,
+`not_authenticated`, ... The error's class and its other fields are the same
+either way.
+
+**`retryAfter`** is the wait the response stated, in whole seconds. Where it
+comes from depends on the error:
+
+| Error                                                                                                       | `retryAfter` read from, first match                                                                | Unstated |
+| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------- |
+| `LenzRateLimitError` (429)                                                                                  | the `Retry-After` header, then the body's `reset_in_seconds`, `retry_after_seconds`, `retry_after` | `0`      |
+| `LenzAPIError` (any 5xx), `LenzUpstreamUnavailableError` (503 `upstream_unavailable` / `capacity`) included | the body's `retry_after`, then `retry_after_seconds`, then the `Retry-After` header                | `null`   |
+
+The client's own retries (429, 5xx and a 409 still in flight) sleep the
+`Retry-After` header first, then the body's `reset_in_seconds`,
+`retry_after`, `retry_after_seconds`, whatever the status, up to 60 s. A
+longer stated wait on a 429 or a typed 503 throws at once with it on
+`retryAfter`; on any other 5xx the client keeps to its own backoff.
+
+**`headers`** (since 3.2): the error response's headers as a plain object,
+names in lower case (`err.headers?.["retry-after"]`); `undefined` when there
+was no HTTP answer or the SDK raised the error itself. **`servedVersion`**
+(since 3.2): the `X-Lenz-API-Version` the error response named, `""` when it
+named none.
 
 A 2xx answer whose body is not JSON (a proxy's or captive portal's page, a
 body cut short) throws `LenzInvalidResponseError`, a `LenzAPIError` with the
 real `statusCode`, the `requestId` and `bodyText` (the first 1000 characters
 as received); `retryable` is `null`, so resend a paid call only with its
 `idempotencyKey`. An empty or blank body counts as not JSON; only a 204, a
-205 or a `Content-Length: 0` answer reads as `{}`. `statusCode` 0 means the
-request got no HTTP answer at all (`LenzConnectionError`). Before 3.2 such a
-body threw the runtime's `SyntaxError`.
+205 or a `Content-Length: 0` answer reads as `{}`. So does (since 3.2) a body
+that is JSON but not an object (`null`, a list, a number, a string), where
+every Lenz endpoint answers with an object: `bodyText` holds it, and its
+message says "not a JSON object". `statusCode` 0 means the request got no HTTP
+answer at all (`LenzConnectionError`). Before 3.2 a body that is not JSON threw
+the runtime's `SyntaxError`, and one that is JSON but not an object failed
+later with a `TypeError`.
+
+A blank input is refused before anything is sent (since 3.2): `verify` /
+`verifyAndWait` with no `claim` (or one of only whitespace), and `assess` with
+no `claim`, an empty `claims` list or a blank item in it, throw
+`LenzValidationError` with the sentence and `code` the API's 422 would have
+given (`"Text is required."`, `claims[1] is required.`), `statusCode` 0 and
+no `body`.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
@@ -1019,8 +1072,10 @@ drop or a client timeout doesn't start a duplicate verification or charge a
 second credit. It is never derived from the request: the same text sent again
 in a new call is a new request. Pin a key with `idempotencyKey: "..."` (so a
 retry from another process replays too), or opt out with
-`idempotency: false` (not available on `review` and `citecheck`, which always
-send one).
+`idempotency: false` (on `review`, `citecheck` and their `*AndWait` helpers
+since 3.2; they always sent one before). A non-empty `idempotencyKey` wins over
+`idempotency: false`. Without a key, a retried submit can run (and charge)
+twice: opt out only when your caller already dedupes, or with `maxRetries: 0`.
 
 ```ts
 const reply = await client.ask.send(verificationId, {
@@ -1038,6 +1093,13 @@ running after that, it throws that `LenzError` (`statusCode` 409,
 `retryable: true`): send it again later with the same key
 (`idempotencyKey: err.idempotencyKey`), never with a new one, which would run
 the call a second time.
+
+`review` and `citecheck` (and their waits) differ here: a 409
+`idempotency_conflict` that names the job (`review_id` / `citecheck_id`)
+means the first submit with that key created it, so the call returns it as a
+`ReviewStarted` / `CitecheckStarted` (`status` `"queued"`, `raw` the 409's
+body) instead of waiting or throwing. Read or wait for it by its id as usual.
+A submit sent without a key never gets such a 409.
 
 `cancel`, `cancelReview` and `cancelCitecheck` send none: cancelling again
 returns the run as it stands, so a repeat is harmless.
@@ -1199,12 +1261,23 @@ new Lenz({
 `maxRetries` (a whole number, 0 or more) is how many times a failed request is
 retried. Any other value throws an `Error` when the client is made.
 
+A custom `fetch` is called with the attempt's `signal` in its `init`. The
+timeout and a caller's `signal` work by aborting it, so a `fetch` you pass must
+honour `init.signal` (every runtime's own `fetch` does); one that drops it
+cannot be timed out.
+
+A key is visible ASCII with nothing inside it: one with a space, a line break,
+another control character or a non-ASCII character inside it throws
+`LenzAuthError` when the client (or a `withOptions` copy) is made, before any
+request (since 3.2; before, every call failed on it). Whitespace around a key
+is dropped. The message never contains the key.
+
 A text containing a lone UTF-16 surrogate (half of an emoji cut by a
 `slice`) is sent with each one replaced by U+FFFD; valid pairs are unchanged.
 
 Environment variables:
 
-- `LENZ_API_KEY` — read if `apiKey` is not passed An explicit `apiKey: ""` (or one of only whitespace) means no key and never reads the environment: a call that needs a key throws `LenzAuthError`.
+- `LENZ_API_KEY` — read if `apiKey` is not passed (or is `undefined`). An explicit `apiKey: ""` (or one of only whitespace) means no key and never reads the environment: a call that needs a key throws `LenzAuthError`. A server holding several users' keys makes its client with `apiKey: ""` and gives each request its user's key with `withOptions({ apiKey })` (see [Using lenz-io from a server that forwards per-user credentials](#using-lenz-io-from-a-server-that-forwards-per-user-credentials)).
 - `LENZ_BASE_URL` — read if `baseUrl` is not passed.
 
 ### Per-call options
@@ -1230,13 +1303,13 @@ await client.getReview(reviewId, { view: "issues", signal });
 
 What the options bound, per method:
 
-| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                  | `maxRetries`                                                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                   | each request's retries                                                                                                                          |
-| `extract`, `assess`                                                                                                                                                              | each attempt; used as given, even below the 150 s / 100 s these wait at least when the timeout is inherited  | each request's retries                                                                                                                          |
-| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
-| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                 | each page request's retries                                                                                                                     |
-| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                             | every call made through the copy                                                                                                                |
+| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                                         | `maxRetries`                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                                          | each request's retries                                                                                                                          |
+| `extract`, `assess`                                                                                                                                                              | each attempt; used as given (so is a copy's), even below the 150 s / 100 s these wait at least when the timeout is the client's own | each request's retries                                                                                                                          |
+| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left                        | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
+| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                                        | each page request's retries                                                                                                                     |
+| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                                                    | every call made through the copy                                                                                                                |
 
 The waits also take `cancelOnAbort: true`: when the `signal` fires after the
 run was accepted, the run is cancelled on the server too (see
@@ -1245,9 +1318,12 @@ run was accepted, the run is cancelled on the server too (see
 For one call, the call's value wins, then the deprecated `timeoutMs` inside an
 `extract` / `assess` input, then a `withOptions` copy's, then the client's.
 Headers merge (case does not matter; the call's value wins), the others
-replace. A per-call `timeoutMs` below the `extract` / `assess` floor can end a
-call the server is still running; a retry with the same idempotency key then
-replays it rather than running it twice. Invalid values (a `timeoutMs` that is
+replace. `extract` and `assess` wait at least 150 s and 100 s when the
+timeout is the client's own (`new Lenz({ timeoutMs })` or the default); a
+`timeoutMs` given for the call or on a `withOptions` copy is used as given
+(3.1 and earlier raised a copy's to the minimum too). Below the minimum it can
+end a call the server is still running; a retry with the same idempotency key
+then replays it rather than running it twice. Invalid values (a `timeoutMs` that is
 not a finite number above 0, a `maxRetries` that is not a whole number from 0,
 a timeout above 2,147,483,647 ms (the longest a timer can hold), a header name
 that is not a valid token, a header value that is not a string or `null`, or
@@ -1288,8 +1364,9 @@ access token) on the same transport, for a server that calls Lenz for several
 accounts. Only when `apiKey` is absent does the copy keep the client's key;
 given as `undefined`, `null`, an empty or a whitespace-only string (a tenant
 with no key), the copy has no key, and a call that needs one throws
-`LenzAuthError` before sending. A copy never reads `LENZ_API_KEY`. Any key
-string is accepted as given. An option name `withOptions` does not take
+`LenzAuthError` before sending. A copy never reads `LENZ_API_KEY`. A key with
+a space, a control character or a non-ASCII character inside it throws
+`LenzAuthError` when the copy is made. An option name `withOptions` does not take
 (`apikey`, `api_key`, ...) throws.
 
 ```ts
@@ -1322,8 +1399,97 @@ it). The result types are unchanged; with `false`, these are not added:
 
 Errors (their classes and fields, `ReviewFailedError` / `CitecheckFailedError`
 included), webhook events and the requests sent are the same either way, with
-one exception: the `partial` of a `ReviewTimeoutError` / `CitecheckTimeoutError`
-(the last body the wait saw) is that body as the API sent it.
+two exceptions: the `partial` of a `ReviewTimeoutError` /
+`CitecheckTimeoutError` (the last body the wait saw) is that body as the API
+sent it, and `err.code` is exactly the `code` of the response body (since 3.2;
+see [Errors](#errors)).
+
+**The body as received: `raw`** (since 3.2). Whatever `legacyAliases` says,
+each result carries `raw`: the JSON object it was read from, exactly as
+received, with none of the names or defaults the SDK adds. It is a getter, not
+an own enumerable key, so it does not show in `JSON.stringify`, `Object.keys`,
+a spread or a deep-equal, and each read is a fresh deep copy (change it
+freely).
+
+```ts
+const out = await client.assess({ claims: ["A.", "B."] });
+out.raw; // { claims: [...], more_claims: [...], ... } as sent
+```
+
+Covered: every result that is one answer's body (`verify`, `verifyBatch`,
+`select`, `getStatus`, `cancel`, `extract`, `assess`, `usage`,
+`verifications.get` / `list` / `getCertificate` / `related`, `ask.history` /
+`ask.send`, `library.list`, `review`, `citecheck`, `getReview`,
+`getCitecheck`, `cancelReview`, `cancelCitecheck`, and what `reviewAndWait` /
+`citecheckAndWait` return: the final poll's body). A wait's verification
+(`wait`, `verifyAndWait`, and each `verification` of a `verifyBatchAndWait`
+row) holds the verification as the final poll sent it; a row's
+`status_detail` holds that poll's body. A `review` / `citecheck` receipt
+settled by a 409 that names the job holds that 409's body. Not covered: a
+`verifyBatchAndWait` row itself (the SDK builds it), the items `listAll`
+yields, and objects nested in a result (read them from the parent's `raw`).
+A body that carries its own `raw` key keeps it.
+
+## Using lenz-io from a server that forwards per-user credentials
+
+A gateway, an MCP server or any backend that calls Lenz on behalf of its own
+users, each with their own Lenz API key or OAuth access token:
+
+```ts
+import { Lenz, LenzError } from "lenz-io";
+
+// One client for the process. No key of its own, and LENZ_API_KEY is never read.
+const lenz = new Lenz({
+  apiKey: "",
+  legacyAliases: false, // results and error codes exactly as sent
+  maxRetries: 0, // you own the retry budget
+});
+
+export async function check(userToken: string, text: string, signal: AbortSignal) {
+  const client = lenz.withOptions({ apiKey: userToken, timeoutMs: 20_000, signal });
+  try {
+    const out = await client.assess({ claim: text });
+    return out.raw; // the API's JSON object, as received
+  } catch (err) {
+    if (err instanceof LenzError) {
+      return { error: err.code, status: err.statusCode, body: err.body };
+    }
+    throw err;
+  }
+}
+```
+
+- **Per-user keys**: `withOptions({ apiKey })` per request, on the same
+  client. A copy never reads `LENZ_API_KEY`; an empty or whitespace-only key,
+  `undefined` or `null` gives a copy with no key, and a call that needs one
+  throws `LenzAuthError` before sending. A key with a space, a control
+  character or a non-ASCII character inside it throws `LenzAuthError` when
+  the copy is made. Copies are cheap and independent: make one per request.
+- **`legacyAliases: false`** is a constructor option only (`withOptions`
+  throws if given it): every copy reads like its client. Results are what the
+  API sent, and `err.code` is the body's `code`.
+- **Headers**, highest first: the call's `headers`, then the copy's (a copy
+  of a copy merges over the first), then the client's defaults
+  (`User-Agent: lenz-io-node/<version>`, `Accept: application/json`), which a
+  `User-Agent` or `Accept` in `headers` replaces. Names match in any casing.
+- **Reserved headers**: `Authorization` (from the key), `Idempotency-Key`
+  (`idempotencyKey` / `idempotency`), `Content-Type` and `X-Lenz-API-Version`
+  are set by the SDK, and `headers` refuses them (with `Content-Length`,
+  `Host` and `Transfer-Encoding`), in any casing.
+- **Timeouts**: a `timeoutMs` on the copy or the call is used as given, also
+  on `assess` and `extract` (only the client's own timeout is raised to their
+  100 s / 150 s minimum). A custom `fetch` must honour `init.signal`.
+- **Retries**: `maxRetries: 0` when your caller has its own deadline or retry
+  budget; the SDK then sends each request once. A resend should reuse
+  `err.idempotencyKey`.
+- **Raw bodies**: `result.raw` is the JSON object a result was read from (see
+  [Results as the API sends them](#results-as-the-api-sends-them-legacyaliases));
+  `err.body` is an error's, `err.headers` its response headers, and
+  `err.retryAfter` the parsed wait (see [Errors](#errors) for which wins).
+- **Errors as text**: `String(err)` is the message plus `Cause:`, `Fix:`,
+  `Docs:` and `Request ID:` lines; the SDK never puts the key in it, but a
+  422's text can quote the input. For a structured answer, forward `code`,
+  `statusCode`, `retryable`, `retryAfter` and `requestId` instead.
 
 ## Compatibility
 
