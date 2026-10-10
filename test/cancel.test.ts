@@ -25,6 +25,7 @@ import {
   type Citecheck,
   type ReviewFull,
   type TaskStatus,
+  LenzValidationError,
 } from "../src/index.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "shapes", "canonical");
@@ -409,7 +410,10 @@ describe("ids that cannot name one run", () => {
         const err = (await call(client, id).catch((e: unknown) => e)) as Error;
         expect(err).toBeInstanceOf(Error);
         expect(err).not.toBeInstanceOf(URIError);
-        expect(err).not.toBeInstanceOf(LenzError);
+        // Since 3.2 the local argument error: a LenzValidationError, no status.
+        expect(err).toBeInstanceOf(LenzValidationError);
+        expect((err as LenzError).statusCode).toBe(0);
+        expect((err as LenzError).code).toBe("invalid_argument");
         expect(err.message).toBe(`${name}() was given an invalid ${field}.`);
       }
       expect(calls).toHaveLength(0);
@@ -519,7 +523,7 @@ describe("every id that goes into a path", () => {
     for (const id of [".", "..", ""]) {
       const err = (await call(make(fetch), id).catch((e: unknown) => e)) as Error;
       expect(err).toBeInstanceOf(Error);
-      expect(err).not.toBeInstanceOf(LenzError);
+      expect(err).toBeInstanceOf(LenzValidationError);
       expect(err.message).toMatch(new RegExp(`^${name.replace(".", "\\.")}\\(\\) `));
     }
     expect(calls).toHaveLength(0);

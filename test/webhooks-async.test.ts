@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  LenzValidationError,
   LenzWebhooks,
   LenzWebhookSignatureError,
   verifySignature,
@@ -271,12 +272,12 @@ describe("a body that is not bytes", () => {
   ];
 
   it.each(hostile)(
-    "%s is a TypeError that names the body parser, on every path",
+    "%s is the local argument error, naming the body parser, on every path",
     async (_n, body) => {
       const message = /body parser ran before LenzWebhooks/;
-      expect(() => strict.parse(body as never, headers)).toThrow(TypeError);
+      expect(() => strict.parse(body as never, headers)).toThrow(LenzValidationError);
       expect(() => strict.parse(body as never, headers)).toThrow(message);
-      await expect(strict.parseAsync(body as never, headers)).rejects.toThrow(TypeError);
+      await expect(strict.parseAsync(body as never, headers)).rejects.toThrow(LenzValidationError);
       await expect(strict.parseAsync(body as never, headers)).rejects.toThrow(message);
     },
   );

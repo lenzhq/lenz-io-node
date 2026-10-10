@@ -511,12 +511,12 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 function checkTimeoutMs(value: unknown, where: string, legacy = false): void {
   if (value === undefined || (legacy && value === null)) return;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(
+    throw argumentError(
       `${where}: timeoutMs must be a finite number of milliseconds above 0 (got ${String(value)}).`,
     );
   }
   if (value > MAX_TIMEOUT_MS) {
-    throw new Error(
+    throw argumentError(
       `${where}: timeoutMs must be at most ${MAX_TIMEOUT_MS} ms, the longest a timer can wait ` +
         `(got ${String(value)}).`,
     );
@@ -530,7 +530,7 @@ function checkTimeoutMs(value: unknown, where: string, legacy = false): void {
 function checkMaxRetries(value: unknown, where: string, legacy = false): void {
   if (value === undefined || (legacy && value === null)) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(
+    throw argumentError(
       `${where}: maxRetries must be a whole number, 0 or more (got ${String(value)}).`,
     );
   }
@@ -549,25 +549,25 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 function checkHeaders(headers: unknown, where: string): void {
   if (headers === undefined) return;
   if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-    throw new Error(`${where}: headers must be an object of header names and values.`);
+    throw argumentError(`${where}: headers must be an object of header names and values.`);
   }
   for (const [name, value] of Object.entries(headers)) {
     if (!HEADER_NAME.test(name)) {
-      throw new Error(`${where}: ${JSON.stringify(name)} is not a valid header name.`);
+      throw argumentError(`${where}: ${JSON.stringify(name)} is not a valid header name.`);
     }
     if (RESERVED_HEADERS.has(name.toLowerCase())) {
-      throw new Error(
+      throw argumentError(
         `${where}: the ${name} header is set by the client and cannot be sent as an option ` +
           "(use idempotencyKey for Idempotency-Key and apiKey for Authorization).",
       );
     }
     if (value !== undefined && value !== null && typeof value !== "string") {
-      throw new Error(
+      throw argumentError(
         `${where}: the value of header ${name} must be a string, or null to remove it.`,
       );
     }
     if (typeof value === "string" && !isHeaderValue(value)) {
-      throw new Error(
+      throw argumentError(
         `${where}: the value of header ${name} must be a string of visible ASCII characters, ` +
           "with spaces and tabs only between them (not at either end), or null.",
       );
@@ -592,15 +592,15 @@ function isHeaderValue(value: string): boolean {
 function checkOptions(options: unknown, where: string, kind: CallKind): RequestOptions {
   if (options === undefined || options === null) return {};
   if (typeof options !== "object" || Array.isArray(options)) {
-    throw new Error(`${where}: options must be an object.`);
+    throw argumentError(`${where}: options must be an object.`);
   }
   const o = options as RequestOptions;
   if (o.signal !== undefined && !isAbortSignal(o.signal)) {
-    throw new Error(`${where}: signal must be an AbortSignal.`);
+    throw argumentError(`${where}: signal must be an AbortSignal.`);
   }
   if (kind === "request") checkTimeoutMs(o.timeoutMs, where);
   if (kind === "wait" && o.maxRetries !== undefined) {
-    throw new Error(
+    throw argumentError(
       `${where}: a wait takes no maxRetries (each poll uses the client's); ` +
         "set it on a copy with withOptions({ maxRetries }).",
     );
@@ -611,13 +611,13 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
   // `false` is harmless where the option is not taken; only `true` is refused.
   if (cancelOnAbort !== undefined && !(kind === "request" && cancelOnAbort === false)) {
     if (kind === "request") {
-      throw new Error(
+      throw argumentError(
         `${where}: cancelOnAbort is an option of one wait (wait, verifyAndWait, ` +
           "verifyBatchAndWait, reviewAndWait, citecheckAndWait); pass it to the call.",
       );
     }
     if (typeof cancelOnAbort !== "boolean") {
-      throw new Error(
+      throw argumentError(
         `${where}: cancelOnAbort must be true or false (got ${String(cancelOnAbort)}).`,
       );
     }
@@ -893,7 +893,7 @@ const MAX_PAGE_SIZE = 100;
 function checkPageSize(value: unknown, where: string): void {
   if (value === undefined) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_PAGE_SIZE) {
-    throw new Error(
+    throw argumentError(
       `${where}: pageSize must be a whole number from 1 to ${MAX_PAGE_SIZE} (got ${shown(value)}).`,
     );
   }
@@ -913,7 +913,7 @@ function shown(value: unknown): string {
 function startPage(page: number | undefined): number {
   const first = page ?? 1;
   if (!Number.isInteger(first) || first < 1) {
-    throw new Error(`listAll needs a whole start page of 1 or more (got ${String(page)}).`);
+    throw argumentError(`listAll needs a whole start page of 1 or more (got ${String(page)}).`);
   }
   return first;
 }
@@ -1182,11 +1182,17 @@ function recordTransportFailure(exc: unknown): void {
  * a `LenzError` is a programming error (an override's bug), and ends a wait.
  */
 function isPollableError(exc: unknown): boolean {
-  if (exc instanceof LenzError) return true;
+  // A call's own refusal of an argument is not an answer: waiting does not change it.
+  if (exc instanceof LenzError) return !ARGUMENT_ERRORS.has(exc);
   if ((typeof exc === "object" && exc !== null) || typeof exc === "function") {
     return TRANSPORT_FAILURES.has(exc as object);
   }
   return true;
+}
+
+/** Whether `exc` is a call's own refusal of an argument (see `argumentError`). */
+function isArgumentError(exc: unknown): boolean {
+  return typeof exc === "object" && exc !== null && ARGUMENT_ERRORS.has(exc);
 }
 
 /**
@@ -1196,7 +1202,7 @@ function isPollableError(exc: unknown): boolean {
  */
 function isFatalPollError(exc: unknown): boolean {
   if (exc instanceof LenzAbortError) return false;
-  return exc instanceof InvalidIdError || exc instanceof LenzAuthError || !isPollableError(exc);
+  return isArgumentError(exc) || exc instanceof LenzAuthError || !isPollableError(exc);
 }
 
 function isRateLimit(exc: unknown): boolean {
@@ -1219,17 +1225,28 @@ function pathId(id: string): string | null {
 }
 
 /**
- * The local error of a call given an id that cannot name one thing. A class of
- * its own so the poll loops can tell it from a failed poll: waiting does not
- * change it.
+ * The errors a call raised itself, before sending, for an argument it cannot
+ * use. Kept apart so the poll loops can tell them from a failed poll: waiting
+ * does not change them.
  */
-class InvalidIdError extends Error {}
+const ARGUMENT_ERRORS = new WeakSet<object>();
+
+/**
+ * The error of a bad argument, raised before any request: a
+ * `LenzValidationError` (so still an `Error`) with `statusCode` 0, no `body`
+ * and `code` `invalid_argument` unless a closer code is given.
+ */
+function argumentError(message: string, code = "invalid_argument"): LenzValidationError {
+  const err = new LenzValidationError({ message, code });
+  ARGUMENT_ERRORS.add(err);
+  return err;
+}
 
 /** `pathId`, or the local error a call throws instead of sending a request. */
 function requirePathId(method: string, field: string, id: string): string {
   const encoded = pathId(id);
   if (encoded !== null) return encoded;
-  throw new InvalidIdError(
+  throw argumentError(
     id
       ? `${method}() was given an invalid ${field}.`
       : `${method}() requires a non-empty ${field}.`,
@@ -1362,13 +1379,11 @@ function hasText(value: unknown): value is string {
  * request was made.
  */
 function blankInput(sentence: string, code: string, fix: string): LenzValidationError {
-  return new LenzValidationError({
-    message: sentence,
-    cause: sentence,
-    fix,
-    docUrl: "https://lenz.io/docs/errors",
-    code,
-  });
+  const err = argumentError(sentence, code);
+  err.cause_ = sentence;
+  err.fix = fix;
+  err.docUrl = "https://lenz.io/docs/errors";
+  return err;
 }
 
 /** The text `verify` sends: `claim`, else `text`; refused when blank. */
@@ -1441,7 +1456,7 @@ function checkAliases(
     const a = input[camel];
     const b = input[snake];
     if (!isAbsent(snake, a) && !isAbsent(snake, b) && !sameAliasValue(a, b)) {
-      throw new Error(`${where}: ${camel} and ${snake} differ; send one of them.`);
+      throw argumentError(`${where}: ${camel} and ${snake} differ; send one of them.`);
     }
   }
 }
@@ -1829,7 +1844,7 @@ class LibraryNamespace {
   listAll(input: LibraryListInput = {}, options?: RequestOptions): AsyncIterable<LibraryItem> {
     const call = resolveCall(this.client, options, "library.listAll", "request", false);
     if (input.sort === "random") {
-      throw new Error(
+      throw argumentError(
         'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
       );
     }
@@ -1850,10 +1865,10 @@ class LibraryNamespace {
 function citecheckBody(input: CitecheckInput): Record<string, unknown> {
   const hasText = typeof input.text === "string" && input.text.trim() !== "";
   if (hasText === (input.pairs !== undefined)) {
-    throw new Error("citecheck() needs exactly one of text and pairs.");
+    throw argumentError("citecheck() needs exactly one of text and pairs.");
   }
   if (input.pairs !== undefined && input.maxCitations !== undefined) {
-    throw new Error("maxCitations goes with text: every pair is checked.");
+    throw argumentError("maxCitations goes with text: every pair is checked.");
   }
   const body: Record<string, unknown> = hasText
     ? { text: input.text }
@@ -1936,7 +1951,7 @@ export class Lenz {
     const key = opts.apiKey ?? envVar("LENZ_API_KEY");
     this.apiKey = usableKey(key, "new Lenz()");
     if (opts.legacyAliases !== undefined && typeof opts.legacyAliases !== "boolean") {
-      throw new Error(
+      throw argumentError(
         `new Lenz(): legacyAliases must be true or false (got ${shown(opts.legacyAliases)}).`,
       );
     }
@@ -1978,14 +1993,14 @@ export class Lenz {
     const o = checkOptions(opts, "withOptions()", "request");
     const given = (opts ?? {}) as Record<string, unknown>;
     if ("legacyAliases" in given) {
-      throw new Error(
+      throw argumentError(
         "withOptions(): legacyAliases is set when the client is made " +
           "(new Lenz({ legacyAliases })); a copy keeps the client's.",
       );
     }
     for (const name of Object.keys(given)) {
       if (!COPY_OPTION_NAMES.has(name)) {
-        throw new Error(
+        throw argumentError(
           `withOptions(): unknown option ${JSON.stringify(name)} ` +
             `(it takes ${[...COPY_OPTION_NAMES].join(", ")}).`,
         );
@@ -1996,7 +2011,7 @@ export class Lenz {
     const hasKey = "apiKey" in given;
     const apiKey = given["apiKey"];
     if (apiKey !== undefined && apiKey !== null && typeof apiKey !== "string") {
-      throw new Error(`withOptions(): apiKey must be a string (got ${typeof apiKey}).`);
+      throw argumentError(`withOptions(): apiKey must be a string (got ${typeof apiKey}).`);
     }
     const copyKey = hasKey ? usableKey(apiKey, "withOptions()") : undefined;
     const base = COPY_OPTIONS.get(this);
@@ -2197,12 +2212,11 @@ export class Lenz {
     const single = input.claim || input.text;
     const list = input.claims;
     if (list && list.length > 0 && single) {
-      throw new LenzValidationError({
-        message: "assess takes one claim (`claim`) or a list (`claims`), not both.",
-        cause: "`claims` was given together with a non-empty `claim` / `text`.",
-        fix: "Send a single claim as `claim`, or up to 20 claims as `claims`.",
-        docUrl: "https://lenz.io/docs/errors",
-      });
+      const err = argumentError("assess takes one claim (`claim`) or a list (`claims`), not both.");
+      err.cause_ = "`claims` was given together with a non-empty `claim` / `text`.";
+      err.fix = "Send a single claim as `claim`, or up to 20 claims as `claims`.";
+      err.docUrl = "https://lenz.io/docs/errors";
+      throw err;
     }
     if (list && list.length > 0) {
       list.forEach((item, i) => {
@@ -2292,7 +2306,7 @@ export class Lenz {
     const id = requirePathId("select", "task_id", taskId);
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
     if (!chosen || chosen.length === 0) {
-      throw new Error("select requires a non-empty claims array");
+      throw argumentError("select requires a non-empty claims array");
     }
     const call = resolveCall(this, options, "select()");
     // One key per call, reused across its own retries, so a retried select
@@ -2951,7 +2965,9 @@ export class Lenz {
   async wait(task: string | TaskAccepted, opts: WaitOptions = {}): Promise<Verification> {
     const taskId = typeof task === "string" ? task : task.task_id;
     if (!taskId) {
-      throw new Error("wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).");
+      throw argumentError(
+        "wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).",
+      );
     }
     requirePathId("wait", "task_id", taskId);
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
@@ -3268,7 +3284,7 @@ export class Lenz {
               }
             }
           }
-        } else if (res.reason instanceof InvalidIdError) {
+        } else if (isArgumentError(res.reason)) {
           // The call's own refusal of an id: waiting does not change it.
           throw res.reason;
         } else if (res.reason instanceof LenzGoneError) {

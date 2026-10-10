@@ -349,7 +349,7 @@ inputs, `source_url` / `webhook_url` on a batch item and `cited_title` /
 `cited_authors` / `cited_year` / `cited_journal` on a citation pair, still
 work and are deprecated. A citation pair's own enumerable keys are read, as
 when it is serialized. Giving both spellings of a field with different values
-throws an `Error` naming both before anything is sent.)
+throws the local argument error (`LenzValidationError`) naming both before anything is sent.)
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
@@ -1006,6 +1006,24 @@ no `claim`, an empty `claims` list or a blank item in it, throw
 given (`"Text is required."`, `claims[1] is required.`), `statusCode` 0 and
 no `body`.
 
+**A bad argument** is refused before anything is sent, with
+`LenzValidationError` (since 3.2; before, a plain `Error`, and a `TypeError`
+for a webhook body that is not bytes): `statusCode` 0, no `body`, `code`
+`invalid_argument` (a blank input: the API's code, above), and the same
+message as before. It is still an `Error`, and a wait stops on it at once.
+This covers request options (`timeoutMs`, `maxRetries`, `headers`, `signal`,
+`cancelOnAbort`), `new Lenz()` options (`timeoutMs`, `maxRetries`,
+`legacyAliases`), `withOptions()` (an unknown option, `legacyAliases`, an
+`apiKey` that is not a string), `pageSize`, a `listAll` start page or
+`sort: "random"`, an id that cannot name one thing (empty, `.`, `..`, a lone
+surrogate), two spellings of a field that differ, `citecheck` without exactly
+one of `text` / `pairs` or with `maxCitations` beside `pairs`, `select`
+without claims, `wait` on an empty task id, `assess` given both forms, and
+`LenzWebhooks` without a secret or given a body that is not bytes. A runtime
+missing what the SDK needs (WebCrypto, Node's `crypto` for the synchronous
+webhook `parse`) and a webhook request whose body was already read still throw
+a plain `Error`.
+
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
 checking `LenzAuthError` to handle an empty balance, that branch stops firing;
@@ -1259,7 +1277,7 @@ new Lenz({
 
 `timeoutMs` (a finite number of ms above 0) is the timeout of one HTTP attempt;
 `maxRetries` (a whole number, 0 or more) is how many times a failed request is
-retried. Any other value throws an `Error` when the client is made.
+retried. Any other value throws `LenzValidationError` (see below) when the client is made.
 
 A custom `fetch` is called with the attempt's `signal` in its `init`. The
 timeout and a caller's `signal` work by aborting it, so a `fetch` you pass must
@@ -1328,7 +1346,7 @@ not a finite number above 0, a `maxRetries` that is not a whole number from 0,
 a timeout above 2,147,483,647 ms (the longest a timer can hold), a header name
 that is not a valid token, a header value that is not a string or `null`, or
 one that is not visible ASCII with spaces and tabs only between visible
-characters) throw an `Error` before any request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
+characters) throw `LenzValidationError` before any request. `X-Lenz-API-Version`, `Idempotency-Key` (use `idempotencyKey`),
 `Authorization` (use `apiKey`), `Content-Type`, `Content-Length`, `Host` and
 `Transfer-Encoding` cannot be set as options.
 

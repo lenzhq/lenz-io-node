@@ -16,7 +16,12 @@
  * Lenz repo; both sides MUST produce byte-identical signatures.
  */
 
-import { LenzWebhookSignatureError } from "./errors.js";
+import { LenzValidationError, LenzWebhookSignatureError } from "./errors.js";
+
+/** A bad argument, refused before anything is read: as the client's. */
+function argumentError(message: string): LenzValidationError {
+  return new LenzValidationError({ message, code: "invalid_argument" });
+}
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 import {
   normalizeOptions,
@@ -72,12 +77,12 @@ function snapshot(body: unknown): Uint8Array {
   if (Object.prototype.toString.call(body) === "[object ArrayBuffer]") {
     return new Uint8Array(body as ArrayBuffer).slice();
   }
-  throw new TypeError(NOT_BYTES);
+  throw argumentError(NOT_BYTES);
 }
 
 function requireSecret(secret: string): void {
   if (!secret) {
-    throw new Error(
+    throw argumentError(
       "Webhook verification requires a non-empty secret. Get it from /api-credentials.",
     );
   }
@@ -408,7 +413,9 @@ export class LenzWebhooks {
 
   constructor(opts: LenzWebhooksOptions) {
     if (!opts.secret) {
-      throw new Error("LenzWebhooks requires a non-empty secret. Get it from /api-credentials.");
+      throw argumentError(
+        "LenzWebhooks requires a non-empty secret. Get it from /api-credentials.",
+      );
     }
     this.secret = opts.secret;
     this.replayWindow = opts.replayWindowSeconds ?? DEFAULT_REPLAY_WINDOW_SECONDS;

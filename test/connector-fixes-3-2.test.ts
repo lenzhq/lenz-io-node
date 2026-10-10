@@ -21,6 +21,7 @@ import {
   LenzRequestTimeoutError,
   LenzUpstreamUnavailableError,
   LenzValidationError,
+  LenzWebhooks,
 } from "../src/index.js";
 
 interface Sent {
@@ -670,5 +671,62 @@ describe("raw on nested objects: each holds its own part of the body", () => {
     const items = [];
     for await (const v of client.verifications.listAll()) items.push(v);
     expect(items[0]!.raw).toEqual(list.items[0]);
+  });
+});
+
+describe("every local bad argument is a LenzValidationError", () => {
+  const client = new Lenz({
+    apiKey: "lenz_t",
+    fetch: (() => {
+      throw new Error("no request expected");
+    }) as unknown as typeof globalThis.fetch,
+  });
+
+  const cases: Array<[string, () => unknown]> = [
+    ["new Lenz() legacyAliases", () => new Lenz({ legacyAliases: "no" as unknown as boolean })],
+    ["new Lenz() timeoutMs", () => new Lenz({ timeoutMs: -1 })],
+    ["new Lenz() maxRetries", () => new Lenz({ maxRetries: 1.5 })],
+    ["withOptions() unknown option", () => client.withOptions({ apikey: "x" } as never)],
+    ["withOptions() legacyAliases", () => client.withOptions({ legacyAliases: false } as never)],
+    ["withOptions() apiKey type", () => client.withOptions({ apiKey: 5 as unknown as string })],
+    ["pageSize", () => client.verifications.list({ pageSize: 0 })],
+    ["an empty id", () => client.getStatus("")],
+    ["a header value", () => client.usage({ headers: { "X-A": "a\nb" } })],
+    ["citecheck with neither", () => client.citecheck({})],
+    ["select with no claims", () => client.select("t1", { claims: [] })],
+    ["webhooks without a secret", () => new LenzWebhooks({ secret: "" })],
+  ];
+  for (const [name, run] of cases) {
+    it(name, async () => {
+      let err: unknown;
+      try {
+        await run();
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(LenzValidationError);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as LenzValidationError).statusCode).toBe(0);
+      expect((err as LenzValidationError).body).toBeNull();
+      expect((err as LenzValidationError).code).toBe("invalid_argument");
+    });
+  }
+
+  it("a wait stops at once on one (it is not a failed poll)", async () => {
+    const c = new Lenz({
+      apiKey: "lenz_t",
+      fetch: (async () =>
+        new Response(JSON.stringify({ status: "processing" }), {
+          status: 200,
+        })) as unknown as typeof globalThis.fetch,
+    });
+    const copy = c.withOptions({});
+    // An override of getStatus that refuses its argument on every poll.
+    copy.getStatus = () => {
+      throw c.withOptions({ legacyAliases: true } as never);
+    };
+    const started = Date.now();
+    await expect(copy.wait("t1", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(LenzValidationError);
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

@@ -20,6 +20,7 @@ import {
   LenzRequestTimeoutError,
   type RequestOptions,
   type TaskStatus,
+  LenzValidationError,
 } from "../src/index.js";
 import { header, recorder, settle, wire, type Reply, type Sent } from "./support/recorder.js";
 
@@ -687,7 +688,9 @@ describe("validation: one rule for every per-request setting", () => {
     }
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(LenzAbortError);
-    expect(err?.constructor).toBe(Error);
+    // Since 3.2 the local argument error (still an Error).
+    expect(err?.constructor).toBe(LenzValidationError);
+    expect((err as LenzValidationError).statusCode).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
     expect(uuid).not.toHaveBeenCalled();
     return err as Error;

@@ -10,7 +10,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Lenz } from "../src/index.js";
+import { Lenz, LenzValidationError } from "../src/index.js";
 import type { CitationPair, VerifyBatchItem } from "../src/index.js";
 
 interface FetchCall {
@@ -158,7 +158,7 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
       })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).constructor).toBe(Error);
+    expect((err as Error).constructor).toBe(LenzValidationError);
     expect((err as Error).message).toBe(
       "verifyBatch() claims[1]: webhookUrl and webhook_url differ; send one of them.",
     );
@@ -343,13 +343,13 @@ describe("citecheck: camelCase pairs send the 2.x bytes", () => {
       "citedYear and cited_year",
     ],
   ] as Array<[CitationPair, string]>)(
-    "both spellings, different: a plain Error naming both (%#)",
+    "both spellings, different: the local argument error naming both (%#)",
     async (pair, names) => {
       const { fetch, calls } = makeFetch([{ status: 202, body: CITECHECK_ACCEPTED }]);
       const err = await new Lenz({ apiKey: "lenz_t", fetch })
         .citecheck({ pairs: [{ statement: "ok", url: "https://x.org" }, pair] })
         .catch((e: unknown) => e);
-      expect((err as Error).constructor).toBe(Error);
+      expect((err as Error).constructor).toBe(LenzValidationError);
       expect((err as Error).message).toBe(
         `citecheck() pairs[1]: ${names} differ; send one of them.`,
       );
