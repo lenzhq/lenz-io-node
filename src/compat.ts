@@ -414,8 +414,9 @@ export function normalizeTaskStatus(body: unknown, unsent = true): unknown {
     fill(out, "retryable", false);
     fill(out, "docs_url", CANCELLED_DOCS_URL);
     // And the failure block 2.x code reads (`status_detail.failure.code`),
-    // as 2.21 built it for a run cancelled while it was running.
-    if (!isObj(out["failure"])) {
+    // as 2.21 built it for a run cancelled while it was running. A block of
+    // the wrong type is kept as sent (a wait throws for it), never replaced.
+    if (out["failure"] === undefined || out["failure"] === null) {
       out["failure"] = {
         code: "cancelled",
         detail: CANCELLED_SENTENCE,

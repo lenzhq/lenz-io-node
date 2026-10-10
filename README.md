@@ -1047,20 +1047,29 @@ line break or a non-ASCII character) is refused before sending with
 runtime's own errors. `Content-Type: application/json` is sent only with a
 body (a `cancel`, a `DELETE` or a `GET` sends none).
 
-A blank input is refused before anything is sent (since 3.2): `verify` /
-`verifyAndWait` with no `claim` (or one of only whitespace), and `assess` with
-no `claim`, an empty `claims` list or a blank item in it, throw
-`LenzValidationError` with `statusCode` 0, no `body`, a local `code`
-(`blank_input`, `empty_list`, `blank_item`; an item that is not a string
-`invalid_argument`) and `param` (`"claim"`, `"claims"`, `"claims[1]"`). The
-code is the same whatever `legacyAliases` says; the message is the sentence
-the API's 422 would have given, read as the client reads it: with
-`legacyAliases: false` the API's own (`"claim is required."`, `"claims[1] is
-blank."`, `"claims.1: Input should be a valid string"`), by default the 2.x
-reading (`"Text is required."`, `"claims[1] is blank."`, `"Validation
-failed"`). As on the API, the one of `claim` / `text` that has content is
-used, and blank means empty or whitespace by the API's rule (a BOM is
-content). `verifyBatch` items are not checked locally: the API answers a blank item.
+A blank input is refused before anything is sent (since 3.2), with
+`LenzValidationError`: `statusCode` 0, no `body`, a local `code` (`blank_input`,
+`empty_list`, `blank_item`), `param`, and as its message the API's own 422
+sentence for that operation, whatever `legacyAliases` says (the same strings
+as the Python SDK):
+
+| Call                                | Blank input                          | `code`        | `param`       | Message                                                    |
+| ----------------------------------- | ------------------------------------ | ------------- | ------------- | ---------------------------------------------------------- |
+| `verify`, `verifyAndWait`, `assess` | no `claim` (or only whitespace)      | `blank_input` | `"claim"`     | `claim is required.`                                       |
+| `assess`                            | `claims: []` (and no `claim`)        | `empty_list`  | `"claims"`    | `claims is required.`                                      |
+| `assess`, `select`                  | a blank item                         | `blank_item`  | `"claims[1]"` | `claims[1] is blank.`                                      |
+| `select`                            | no claims (`claims` / `texts` empty) | `empty_list`  | `"claims"`    | `claims is required.`                                      |
+| `ask.send`                          | no `message` (or only whitespace)    | `blank_input` | `"message"`   | `Message cannot be empty.`                                 |
+| `review`, `reviewAndWait`           | no `text` (or only whitespace)       | `blank_input` | `"text"`      | `text: send the draft, or one public http(s) URL.`         |
+| `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`           | `blank_input` | `"text"`      | `payload: Value error, send exactly one of text and pairs` |
+
+A 422 the API sends itself is still read by `legacyAliases` (the default
+client reads its blank-claim 422 as the 2.x `"Text is required."`).
+An `assess` item that is not a string is `invalid_argument`. As on the API,
+the one of `claim` / `text` that has content is used, and blank means empty or
+whitespace by the API's rule (a BOM is content). A blank `select` item is
+refused although the API would skip it, so a list never shrinks silently.
+`verifyBatch` items are not checked locally: the API answers a blank item.
 
 **A bad argument** is refused before anything is sent, with
 `LenzValidationError` (since 3.2; before, a plain `Error`, and a `TypeError`
@@ -1071,8 +1080,8 @@ camelCase). It is still an `Error`, and a wait stops on it at once.
 
 | `code`              | When                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `param`                                                                                                              |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                                                | `"claim"`; `"text"`                                                                                                  |
-| `blank_item`        | a blank `assess` item                                                                                                                                                                                                                                                                                                                                                                                                                                | `"claims[1]"`                                                                                                        |
+| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `ask.send` with no `message`; `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                  | `"claim"`; `"message"`; `"text"`                                                                                     |
+| `blank_item`        | a blank `assess` or `select` item                                                                                                                                                                                                                                                                                                                                                                                                                    | `"claims[1]"`                                                                                                        |
 | `empty_list`        | `select` without claims; `assess` with an empty `claims` list (and no `claim`)                                                                                                                                                                                                                                                                                                                                                                       | `"claims"`                                                                                                           |
 | `invalid_page_size` | `pageSize` on `verifications.list` / `listAll` that is not a whole number from 1 to 100                                                                                                                                                                                                                                                                                                                                                              | `"pageSize"`                                                                                                         |
 | `invalid_page`      | a `listAll` start page below 1                                                                                                                                                                                                                                                                                                                                                                                                                       | `"page"`                                                                                                             |
@@ -1083,8 +1092,7 @@ camelCase). It is still an `Error`, and a wait stops on it at once.
 | `invalid_argument`  | anything else: an input that is not an object (`verify(null)`, `select("t")`, a `verifyBatch` `claims` that is not a list of objects), webhook headers or an `unwrap` request that are not objects, an `assess` item that is not a string, `library.listAll` with `sort: "random"`, `verifySignature` without a secret, a webhook body that is not bytes                                                                                             | `"input"`, `"claims[1]"`, `"headers"`, `"sort"`, `"secret"`, `"body"`                                                |
 
 `USAGE_ERROR_CODES` lists the SDK's own codes (the `UsageErrorCode` type
-names one); the Python SDK has the same list. These are local codes: the same whatever `legacyAliases` says (which only
-picks the wording of a blank input's message, above), and never the API's
+names one); the Python SDK has the same list. These are local codes: the same whatever `legacyAliases` says, and never the API's
 422 codes, which come only from a response. `param` is `undefined` on an error from the API
 (read its `errors` instead). A runtime missing what the SDK needs (WebCrypto,
 Node's `crypto` for the synchronous webhook `parse`) and a webhook request
@@ -1093,8 +1101,14 @@ whose body was already read still throw a plain `Error`.
 **`LenzInvalidKeyError`** (since 3.2, a subclass of `LenzAuthError`): the key
 has a character a key never has inside it, so it cannot be sent (see
 [Configuration](#configuration)); thrown when the client or the copy is made,
-`statusCode` 0. A missing key (`"API key required"`) and the API's 401 / 403
-stay a plain `LenzAuthError`, so a handler for that catches all three.
+`statusCode` 0.
+
+**`LenzMissingKeyError`** (since 3.2, a subclass of `LenzAuthError`): a call
+that needs a key was made with none configured (no `apiKey`, an empty or
+whitespace-only one, no `LENZ_API_KEY`, or a `withOptions` copy made without
+one); thrown before sending, `statusCode` 0, message `"API key required"`.
+The API's 401 / 403 stay a plain `LenzAuthError`, so a handler for
+`LenzAuthError` catches all three; tell them apart with `instanceof`.
 
 `LenzQuotaExceededError` is a **sibling** of `LenzAuthError`, not a subclass —
 "fix your key" and "top up your account" are different actions. So if you were
@@ -1379,7 +1393,7 @@ A text containing a lone UTF-16 surrogate (half of an emoji cut by a
 
 Environment variables:
 
-- `LENZ_API_KEY` — read if `apiKey` is not passed (or is `undefined`). An explicit `apiKey: ""` (or one of only whitespace) means no key and never reads the environment: a call that needs a key throws `LenzAuthError`. A server holding several users' keys makes its client with `apiKey: ""` and gives each request its user's key with `withOptions({ apiKey })` (see [Using lenz-io from a server that forwards per-user credentials](#using-lenz-io-from-a-server-that-forwards-per-user-credentials)).
+- `LENZ_API_KEY` — read if `apiKey` is not passed (or is `undefined`). An explicit `apiKey: ""` (or one of only whitespace) means no key and never reads the environment: a call that needs a key throws `LenzMissingKeyError` (a `LenzAuthError`). A server holding several users' keys makes its client with `apiKey: ""` and gives each request its user's key with `withOptions({ apiKey })` (see [Using lenz-io from a server that forwards per-user credentials](#using-lenz-io-from-a-server-that-forwards-per-user-credentials)).
 - `LENZ_BASE_URL` — read if `baseUrl` is not passed.
 
 ### Per-call options
@@ -1469,7 +1483,7 @@ access token) on the same transport, for a server that calls Lenz for several
 accounts. Only when `apiKey` is absent does the copy keep the client's key;
 given as `undefined`, `null`, an empty or a whitespace-only string (a tenant
 with no key), the copy has no key, and a call that needs one throws
-`LenzAuthError` before sending. A copy never reads `LENZ_API_KEY`. A key with
+`LenzMissingKeyError` (a `LenzAuthError`) before sending. A copy never reads `LENZ_API_KEY`. A key with
 a space, a control character or a non-ASCII character inside it throws
 `LenzAuthError` when the copy is made. An option name `withOptions` does not take
 (`apikey`, `api_key`, ...) throws.
@@ -1581,8 +1595,18 @@ verification (read from inside the final poll's body) and a
 `verifyBatchAndWait` row (built by the SDK) do not. A `review` / `citecheck`
 receipt settled by a 409 that names the job carries that 409's (see
 [Idempotency](#idempotency)). An object that carries its own key of either
-name keeps it. The `ResponseMeta` type names them, and the response types
-extend it.
+name keeps it. The `ResponseMeta` type names them (both optional), and the
+response types extend it.
+
+On the result of a top-level call both are required in the types (since
+3.2): the methods return `Result<T>` (`T & ResultMeta`, where `ResultMeta` is
+`{ httpStatus: number; headers: Record<string, string> }`), so
+`out.httpStatus` is a `number` with no guard. Nested objects, a wait's
+verification and a `verifyBatchAndWait` row keep `ResponseMeta`. `getStatus`
+and `verifyBatch`, which the waits call through and 2.x code overrides, keep
+their plain types (their results carry both at runtime). A test double that
+replaces another method with one returning a plain object needs a cast
+(`as unknown as typeof client.verify`).
 
 ## Using lenz-io from a server that forwards per-user credentials
 
@@ -1618,7 +1642,7 @@ export async function check(userToken: string, text: string, signal: AbortSignal
 - **Per-user keys**: `withOptions({ apiKey })` per request, on the same
   client. A copy never reads `LENZ_API_KEY`; an empty or whitespace-only key,
   `undefined` or `null` gives a copy with no key, and a call that needs one
-  throws `LenzAuthError` before sending. ASCII whitespace around a key is
+  throws `LenzMissingKeyError` (a `LenzAuthError`) before sending. ASCII whitespace around a key is
   trimmed silently. A key with a space, a control character or a non-ASCII
   character inside it throws `LenzInvalidKeyError` (a `LenzAuthError`) when
   the copy is made. Copies are cheap and independent: make one per request.
