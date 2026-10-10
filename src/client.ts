@@ -8,11 +8,10 @@
  *   body, preserving byte-identical wire format for existing English
  *   callers. Set `language: "es"` (or any of the 12 supported codes)
  *   to receive prose fields in that language. `assess`, `verify`,
- *   `verifyAndWait`, `review`, `reviewAndWait` and `ask.send` also take
- *   `language: "auto"`: the answer comes back in the language of the submitted
- *   text (for `ask.send`, the language of the claim being discussed; for a
- *   review, one language for the whole draft). `extract`, `verifyBatch` and
- *   `citecheck` do not take `"auto"`.
+ *   `verifyAndWait` and `ask.send` also take `language: "auto"`: the answer
+ *   comes back in the language of the submitted text (for `ask.send`, the
+ *   language of the claim being discussed). `extract`, `verifyBatch`,
+ *   `citecheck` and `review` do not take `"auto"`.
  * - Response shapes (Verification, VerificationListItem, AssessClaim)
  *   expose `language?: string` populated by the server. Verdict /
  *   domain / status enums stay English regardless of language; only

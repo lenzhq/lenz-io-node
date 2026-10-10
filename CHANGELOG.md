@@ -10,7 +10,6 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
-- `review` / `reviewAndWait` accept `language: "auto"`: the review comes back in the language of the draft (one language for the whole review). Needs the API release that accepts it on `/review`; before that the API answers 422.
 - `cancelOnAbort: true` on the waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`): when the `signal` fires after the run was accepted, the wait cancels the run on the server (best effort: one attempt per job, 5 s in all), reports a cancel that failed or found the run already ended to `logger.warn` with the job id, and throws the same `LenzAbortError` as before. Off by default; the wait's own `timeoutMs` never cancels. A cancelled verification is not charged; a cancelled review or citation check is still charged for what it had delivered. Matches `cancel_on_abort` on the Python SDK's `AsyncLenz`.
 - `snippet_language` on a verification's sources: the language of the quote as an ISO 639-1 code (e.g. `uk`) when it is not English, `null` for English (needs the API change that adds it; older responses lack the field, so it reads `undefined`).
 

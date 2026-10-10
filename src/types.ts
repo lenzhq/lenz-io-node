@@ -2124,10 +2124,7 @@ export interface ReviewInput {
    * Sent as `escalate.suggest_edits` only when `true`.
    */
   suggestEdits?: boolean;
-  /**
-   * Output language of every claim and rewrite (ISO 639-1). Omit for English.
-   * `"auto"` answers in the language of the draft (one language for the whole review).
-   */
+  /** Output language of every claim and rewrite (ISO 639-1). Omit for English. `"auto"` is not accepted. */
   language?: string;
   /**
    * Where `review.completed` / `review.failed` go. Omitted or `null`: the
