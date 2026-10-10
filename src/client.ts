@@ -1090,12 +1090,28 @@ function asResult<T>(value: T): Result<T> {
 function noResult(from: unknown): LenzInvalidResponseError {
   const meta = from !== null && typeof from === "object" ? RESPONSE_META.get(from) : undefined;
   const answered = meta !== undefined ? `answered HTTP ${meta.status}` : "answered";
-  return invalidShape(
+  const err = invalidShape(
     from,
     `The API ${answered} with status completed and no result: the run ended, but its verification cannot be read.`,
     "The poll says the run completed but carries no result block.",
     "Retry the wait; contact support (https://lenz.io/contact) with the request id if this persists.",
   );
+  if (from !== null && typeof from === "object") ENDED_UNREADABLE.set(err, from);
+  return err;
+}
+
+/**
+ * A {@link noResult} error, with the poll it was read from: final for a wait
+ * (the run ended), never polled again; a batch row's `status_detail` is that
+ * poll, read as `getStatus` would have returned it.
+ */
+const ENDED_UNREADABLE = new WeakMap<object, object>();
+
+/** Whether a status body says `completed` but carries no `result` (absent or `null`). */
+function completedWithoutResult(body: unknown): boolean {
+  if (!isPlainObject(body)) return false;
+  const b = body as Record<string, unknown>;
+  return b["status"] === "completed" && (b["result"] === undefined || b["result"] === null);
 }
 
 /**
@@ -1830,10 +1846,13 @@ const BLANK_SENTENCES = {
   claim: "claim is required.",
   /** A field the body does not carry at all (`claim`, `claims`, `message`, `text`). */
   absent: (field: string) => `${field}: Field required`,
-  /** `POST /verify/{task_id}/select` with an empty `claims` (or `texts`) list. */
-  list: (field: string) => `${field} is required.`,
-  /** `POST /assess`, `POST /verify/{task_id}/select`: a blank item. */
-  item: (i: number, field = "claims") => `${field}[${i}] is blank.`,
+  /**
+   * `POST /verify/{task_id}/select` with an empty list: the API says
+   * `claims` whichever of `claims` / `texts` was sent (the `param` names it).
+   */
+  list: "claims is required.",
+  /** `POST /assess`: a blank item. */
+  item: (i: number) => `claims[${i}] is blank.`,
   /** `POST /ask/{verification_id}`: a blank `message`. */
   message: "Message cannot be empty.",
   /** `POST /review`: a blank `text`. */
@@ -2876,32 +2895,43 @@ export class Lenz {
   ): Promise<Result<BatchAccepted>> {
     const id = requirePathId("select", "task_id", taskId);
     requireObject(input, "select()", "input");
-    const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
-    // The field the list came in, named in the error: `texts` (the 2.x name)
-    // when that is the one sent, else `claims`.
-    const field = chosen !== undefined && chosen === input.texts ? "texts" : "claims";
-    if (!chosen || chosen.length === 0) {
+    // The list the API reads (`resolve_list_input`): `texts` when it holds
+    // an item with text, else `claims`; else, as before, `claims` when it has
+    // items and `texts` otherwise. It is sent as `texts`.
+    const withText = (v: unknown) =>
+      Array.isArray(v) &&
+      (v as unknown[]).some((item) => typeof item === "string" && hasText(item));
+    const chosen = withText(input.texts)
+      ? input.texts
+      : input.claims && input.claims.length > 0
+        ? input.claims
+        : input.texts;
+    // Refused locally only where the API would refuse, in its words: it strips
+    // every item, drops the blank ones and answers "claims is required." when
+    // nothing is left. Only a list (empty, or) of strings that are all blank
+    // counts: one with some blank items is sent unchanged (the API drops
+    // them), and an item that is not a string (`null`, a hole in a sparse
+    // list) or a `claims` that is not a list (from JavaScript) is the API's
+    // to judge.
+    let nothingLeft = chosen === undefined || chosen === null;
+    if (Array.isArray(chosen)) {
+      nothingLeft = true;
+      for (let i = 0; i < chosen.length; i++) {
+        const item: unknown = chosen[i];
+        if (typeof item !== "string" || hasText(item)) nothingLeft = false;
+      }
+    }
+    if (nothingLeft) {
       const absent = input.claims === undefined && input.texts === undefined;
+      // `param` names the field that list came in.
+      const field = chosen !== undefined && chosen === input.texts ? "texts" : "claims";
       throw blankInput(
-        absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list(field),
+        absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list,
         "empty_list",
         "Pass the claims to check, as offered, in `claims`.",
         absent ? "claims" : field,
       );
     }
-    // A blank item is refused before sending (since 3.2), as on `assess`;
-    // the API would skip it. Items that are not strings, and a `claims` that
-    // is not a list (from JavaScript), are the API's to judge, as before.
-    (Array.isArray(chosen) ? (chosen as unknown[]) : []).forEach((item, i) => {
-      if (typeof item === "string" && !hasText(item)) {
-        throw blankInput(
-          BLANK_SENTENCES.item(i, field),
-          "blank_item",
-          `Leave out the blank items: every item of \`${field}\` is one claim to check.`,
-          `${field}[${i}]`,
-        );
-      }
-    });
     const call = resolveCall(this, options, "select()");
     // One key per call, reused across its own retries, so a retried select
     // does not start (and charge for) the chosen claims twice.
@@ -2923,7 +2953,10 @@ export class Lenz {
    *
    * On a completed task, throws {@link LenzGoneError} (HTTP 410) when the
    * account's retention period has removed the verification. A running task
-   * never answers 410.
+   * never answers 410. A `completed` status that carries no `result` (absent
+   * or `null`; the API never sends one) throws {@link LenzInvalidResponseError}
+   * with the answer's status, headers and body, in both `legacyAliases` modes
+   * (since 3.2; it was returned as the status).
    */
   async getStatus(
     taskId: string,
@@ -2944,6 +2977,9 @@ export class Lenz {
       ...transportOf(call),
       ...(deadlineAt !== undefined ? { deadlineAt } : {}),
     });
+    // The API never ends a run as completed without its verification (an
+    // expired one answers 410): such an answer cannot be read, in either mode.
+    if (completedWithoutResult(body)) throw noResult(body);
     return aliased(this, normalizeTaskStatus, body);
   }
 
@@ -3775,11 +3811,16 @@ export class Lenz {
       // result.
       const ended = gone.get(it.task_id) ?? permanent.get(it.task_id);
       if (ended !== undefined) {
+        // A completed poll with no result keeps that poll as its status_detail.
+        const poll = ENDED_UNREADABLE.get(ended);
         return withRowError(
           {
             task_id: it.task_id,
             ...names(it),
             status: "failed",
+            ...(poll !== undefined
+              ? { status_detail: aliased(this, normalizeTaskStatus, poll as TaskStatus) }
+              : {}),
           },
           ended,
         );
@@ -3890,7 +3931,10 @@ export class Lenz {
             : // Removed after it finished, or not there. A poll answered in
               // another API version says nothing about the run: it stays
               // eligible.
-              res.reason instanceof LenzGoneError || res.reason instanceof LenzNotFoundError;
+              // A run that completed with no result has ended too.
+              res.reason instanceof LenzGoneError ||
+              res.reason instanceof LenzNotFoundError ||
+              ENDED_UNREADABLE.has(res.reason as object);
         if (done) ended.add(pending[i]!);
       });
     };
@@ -4011,10 +4055,12 @@ export class Lenz {
           throw res.reason;
         } else if (
           res.reason instanceof LenzApiVersionError ||
-          res.reason instanceof LenzNotFoundError
+          res.reason instanceof LenzNotFoundError ||
+          ENDED_UNREADABLE.has(res.reason as object)
         ) {
           // This task's answer, which polling again will not change: another
-          // API version, or no such task. Final for this task only.
+          // API version, no such task, or a run that completed with no result
+          // (getStatus throws for it). Final for this task only.
           permanent.set(id, res.reason);
         } else if (!isPollableError(res.reason)) {
           // Not a Lenz answer or a transport failure: a programming error (an
@@ -4109,8 +4155,8 @@ export class Lenz {
     // names; a needs-input error's payload is the poll as returned.
     const status = normalizeTaskStatus(polled) as TaskStatus;
     if (status.status === "completed") {
-      // No `result` at all: ended, but nothing to read (since 3.2, as on the
-      // Python SDK; was a LenzPipelineError).
+      // No `result` at all: getStatus throws for it itself, so this is reached
+      // only through a getStatus override; the same error either way.
       if (polled.result === undefined || polled.result === null) throw noResult(polled);
       // The wait reaches here only on a terminal status; a `completed` one
       // whose `result` is not an object ends here (a batch wait reads it as

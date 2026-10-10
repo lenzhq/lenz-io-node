@@ -446,7 +446,10 @@ wins field by field.
 Prefer **webhooks** for production async flows (no long-lived HTTP connection);
 prefer **polling** for scripts and request/response handlers where awaiting is
 fine. For full control over the loop, call `getStatus(taskId)` yourself — it's a
-single non-blocking poll.
+single non-blocking poll. A `completed` status always carries its `result`:
+one that does not (the API never sends it; an expired verification answers 410
+instead) throws `LenzInvalidResponseError` with the answer's status, headers
+and body (since 3.2), as the waits do.
 
 ## Stopping a run
 
@@ -1047,26 +1050,27 @@ line break or a non-ASCII character) is refused before sending with
 runtime's own errors. `Content-Type: application/json` is sent only with a
 body (a `cancel`, a `DELETE` or a `GET` sends none).
 
-A blank input is refused before anything is sent (since 3.2), with
+The rule: the SDK refuses locally only what the API would refuse, in the
+API's words. A blank input is refused before anything is sent (since 3.2), with
 `LenzValidationError`: `statusCode` 0, no `body`, a local `code` (`blank_input`,
 `empty_list`, `blank_item`), `param`, and as its message the API's own 422
 sentence for that operation, whatever `legacyAliases` says (the same strings
 as the Python SDK):
 
-| Call                                | Input                                              | `code`        | `param`                 | Message                                                    |
-| ----------------------------------- | -------------------------------------------------- | ------------- | ----------------------- | ---------------------------------------------------------- |
-| `verify`, `verifyAndWait`, `assess` | `claim` (or `text`) only whitespace                | `blank_input` | `"claim"`               | `claim is required.`                                       |
-| `verify`, `verifyAndWait`, `assess` | no `claim` or `text` at all                        | `blank_input` | `"claim"`               | `claim: Field required`                                    |
-| `assess`                            | `claims: []` and no `claim` (the API reads absent) | `empty_list`  | `"claims"`              | `claim: Field required`                                    |
-| `assess`, `select`                  | a blank item                                       | `blank_item`  | `"claims[1]"`           | `claims[1] is blank.`                                      |
-| `select`                            | `claims: []`                                       | `empty_list`  | `"claims"`              | `claims is required.`                                      |
-| `select`                            | neither `claims` nor `texts`                       | `empty_list`  | `"claims"`              | `claims: Field required`                                   |
-| `select` given `texts`              | `texts: []`; a blank item                          | as above      | `"texts"`, `"texts[0]"` | `texts is required.`; `texts[0] is blank.`                 |
-| `ask.send`                          | `message` only whitespace                          | `blank_input` | `"message"`             | `Message cannot be empty.`                                 |
-| `ask.send`                          | no `message`                                       | `blank_input` | `"message"`             | `message: Field required`                                  |
-| `review`, `reviewAndWait`           | `text` only whitespace                             | `blank_input` | `"text"`                | `text: send the draft, or one public http(s) URL.`         |
-| `review`, `reviewAndWait`           | no `text`                                          | `blank_input` | `"text"`                | `text: Field required`                                     |
-| `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`                         | `blank_input` | `"text"`                | `payload: Value error, send exactly one of text and pairs` |
+| Call                                | Input                                              | `code`        | `param`       | Message                                                    |
+| ----------------------------------- | -------------------------------------------------- | ------------- | ------------- | ---------------------------------------------------------- |
+| `verify`, `verifyAndWait`, `assess` | `claim` (or `text`) only whitespace                | `blank_input` | `"claim"`     | `claim is required.`                                       |
+| `verify`, `verifyAndWait`, `assess` | no `claim` or `text` at all                        | `blank_input` | `"claim"`     | `claim: Field required`                                    |
+| `assess`                            | `claims: []` and no `claim` (the API reads absent) | `empty_list`  | `"claims"`    | `claim: Field required`                                    |
+| `assess`                            | a blank item                                       | `blank_item`  | `"claims[1]"` | `claims[1] is blank.`                                      |
+| `select`                            | `claims` empty, or every item blank                | `empty_list`  | `"claims"`    | `claims is required.`                                      |
+| `select` given `texts`              | `texts` empty, or every item blank                 | `empty_list`  | `"texts"`     | `claims is required.`                                      |
+| `select`                            | neither `claims` nor `texts`                       | `empty_list`  | `"claims"`    | `claims: Field required`                                   |
+| `ask.send`                          | `message` only whitespace                          | `blank_input` | `"message"`   | `Message cannot be empty.`                                 |
+| `ask.send`                          | no `message`                                       | `blank_input` | `"message"`   | `message: Field required`                                  |
+| `review`, `reviewAndWait`           | `text` only whitespace                             | `blank_input` | `"text"`      | `text: send the draft, or one public http(s) URL.`         |
+| `review`, `reviewAndWait`           | no `text`                                          | `blank_input` | `"text"`      | `text: Field required`                                     |
+| `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`                         | `blank_input` | `"text"`      | `payload: Value error, send exactly one of text and pairs` |
 
 A field the call does not carry at all (`undefined`, which JSON leaves out)
 gets the API's sentence for a missing field. A 422 the API sends itself is
@@ -1075,8 +1079,9 @@ sentence above while the same input answered by the server (an older
 client, a request built by hand) reads the 2.x one (`"Text is required."`).
 An `assess` item that is not a string is `invalid_argument` (`param` `"claims[1]"`), with the message `claims[1] must be a string (got number).` in both modes (the JavaScript type name, `null` for null; the same sentence as the Python SDK, with its type names). As on the API,
 the one of `claim` / `text` that has content is used, and blank means empty or
-whitespace by the API's rule (a BOM is content). A blank `select` item is
-refused although the API would skip it, so a list never shrinks silently.
+whitespace by the API's rule (a BOM is content). A `select` list with some
+blank items is sent unchanged: the API drops the blank ones, and answers
+"claims is required." only when none is left, which is all the SDK refuses.
 `verifyBatch` items are not checked locally: the API answers a blank item.
 
 **A bad argument** is refused before anything is sent, with
@@ -1089,7 +1094,7 @@ camelCase). It is still an `Error`, and a wait stops on it at once.
 | `code`              | When                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `param`                                                                                                              |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `ask.send` with no `message`; `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                  | `"claim"`; `"message"`; `"text"`                                                                                     |
-| `blank_item`        | a blank `assess` or `select` item                                                                                                                                                                                                                                                                                                                                                                                                                    | `"claims[1]"`                                                                                                        |
+| `blank_item`        | a blank `assess` item                                                                                                                                                                                                                                                                                                                                                                                                                                | `"claims[1]"`                                                                                                        |
 | `empty_list`        | `select` without claims; `assess` with an empty `claims` list (and no `claim`)                                                                                                                                                                                                                                                                                                                                                                       | `"claims"`                                                                                                           |
 | `invalid_page_size` | `pageSize` on `verifications.list` / `listAll` that is not a whole number from 1 to 100                                                                                                                                                                                                                                                                                                                                                              | `"pageSize"`                                                                                                         |
 | `invalid_page`      | a `listAll` start page below 1                                                                                                                                                                                                                                                                                                                                                                                                                       | `"page"`                                                                                                             |
@@ -1144,7 +1149,8 @@ try {
 const verification = await client.wait("tsk_abc123");
 console.log(verification.verdict, verification.lenz_score);
 
-// ...or do a single non-blocking poll yourself:
+// ...or do a single non-blocking poll yourself (a `completed` status with no
+// `result` throws LenzInvalidResponseError; an expired one, LenzGoneError):
 const status = await client.getStatus("tsk_abc123");
 if (status.status === "completed") {
   console.log(status.result?.verdict, status.result?.lenz_score);

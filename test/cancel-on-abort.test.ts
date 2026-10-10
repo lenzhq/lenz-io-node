@@ -655,6 +655,45 @@ describe("a batch cancels each task still running, independently", () => {
     ]);
   });
 
+  it("a task that completed with no result is not cancelled", async () => {
+    const controller = new AbortController();
+    const seen: string[] = [];
+    const fetch = (async (url: string | URL) => {
+      const path = new URL(String(url)).pathname.replace(/^\/api\/v1/, "");
+      seen.push(path);
+      if (path === "/verify/batch") {
+        return Response.json(
+          {
+            batch_id: "b1",
+            items: [
+              { task_id: "t1", claim: "a" },
+              { task_id: "t2", claim: "b" },
+            ],
+          },
+          { status: 202 },
+        );
+      }
+      if (path === "/verify/status/t1")
+        return Response.json({ task_id: "t1", status: "completed" });
+      if (path === "/verify/status/t2") return Response.json(PROCESSING);
+      const id = path.split("/").at(-2)!;
+      return Response.json(taskCancelled(id));
+    }) as typeof globalThis.fetch;
+    const { c } = client(fetch);
+    const err = await settle(
+      c.verifyBatchAndWait(
+        { claims: [{ claim: "a" }, { claim: "b" }] },
+        {
+          signal: controller.signal,
+          cancelOnAbort: true,
+          onProgress: () => controller.abort(new Error("caller went away")),
+        },
+      ),
+    );
+    expectAbort(err);
+    expect(seen.filter((p) => p.endsWith("/cancel"))).toEqual(["/verify/t2/cancel"]);
+  });
+
   it("a task whose poll answered in another API version is still cancelled", async () => {
     const controller = new AbortController();
     const seen: string[] = [];
