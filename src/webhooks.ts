@@ -19,8 +19,12 @@
 import { LenzValidationError, LenzWebhookSignatureError } from "./errors.js";
 
 /** A bad argument, refused before anything is read: as the client's. */
-function argumentError(message: string, param: string): LenzValidationError {
-  const err = new LenzValidationError({ message, code: "invalid_argument" });
+function argumentError(
+  message: string,
+  param: string,
+  code: "invalid_argument" | "invalid_option" = "invalid_argument",
+): LenzValidationError {
+  const err = new LenzValidationError({ message, code });
   err.param = param;
   return err;
 }
@@ -419,6 +423,7 @@ export class LenzWebhooks {
       throw argumentError(
         "LenzWebhooks requires a non-empty secret. Get it from /api-credentials.",
         "secret",
+        "invalid_option",
       );
     }
     this.secret = opts.secret;

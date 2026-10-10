@@ -726,7 +726,7 @@ describe("every local bad argument is a LenzValidationError", () => {
     [
       "webhooks without a secret",
       () => new LenzWebhooks({ secret: "" }),
-      "invalid_argument",
+      "invalid_option",
       "secret",
     ],
   ];

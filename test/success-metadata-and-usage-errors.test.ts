@@ -9,10 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as browser from "../src/index.browser.js";
 import {
+  USAGE_ERROR_CODES,
+  verifySignature,
   Lenz,
   LenzAuthError,
   LenzInvalidKeyError,
   LenzInvalidResponseError,
+  LenzTimeoutError,
   LenzValidationError,
   LenzWebhooks,
 } from "../src/index.js";
@@ -291,7 +294,7 @@ describe("local argument errors carry a specific code and param", () => {
       "citecheck both",
       () => client.citecheck({ text: "a", pairs: [] }),
       "conflicting_input",
-      "pairs",
+      "text",
     ],
     [
       "citecheck maxCitations with pairs",
@@ -319,7 +322,7 @@ describe("local argument errors carry a specific code and param", () => {
     [
       "library listAll random",
       () => client.library.listAll({ sort: "random" }),
-      "invalid_option",
+      "invalid_argument",
       "sort",
     ],
     ["an empty task id", () => client.getStatus(""), "invalid_id", "taskId"],
@@ -365,7 +368,39 @@ describe("local argument errors carry a specific code and param", () => {
       "invalid_argument",
       "body",
     ],
+    [
+      "LenzWebhooks without a secret",
+      () => new LenzWebhooks({ secret: "" }),
+      "invalid_option",
+      "secret",
+    ],
+    [
+      "verifySignature with an empty secret",
+      () => verifySignature("{}", "sha256=00", ""),
+      "invalid_argument",
+      "secret",
+    ],
   ];
+
+  it("every local code is in USAGE_ERROR_CODES, exported from both entry points", () => {
+    expect([...USAGE_ERROR_CODES]).toEqual([
+      "blank_input",
+      "blank_item",
+      "empty_list",
+      "invalid_page_size",
+      "invalid_page",
+      "invalid_id",
+      "invalid_header",
+      "invalid_option",
+      "conflicting_input",
+      "invalid_argument",
+    ]);
+    expect(browser.USAGE_ERROR_CODES).toBe(USAGE_ERROR_CODES);
+    // The API's own 422 codes the blank inputs mirror are the only others.
+    for (const [, , code] of cases) {
+      expect([...USAGE_ERROR_CODES, "", "validation_error"]).toContain(code);
+    }
+  });
 
   it.each(cases)("%s", async (_name, run, code, param) => {
     const err = (await thrown(run)) as LenzValidationError;
@@ -460,24 +495,38 @@ describe("a field of the wrong type where the SDK reads it", () => {
   );
 
   it.each(["x", 42, [], true])(
-    "wait on a completed status whose result is %j: LenzInvalidResponseError",
+    "a completed poll whose result is %j is polled again, like a 5xx",
     async (result) => {
-      const body = { task_id: "t1", status: "completed", result };
-      const { fetch } = server(() => ({ body }));
       for (const legacyAliases of [true, false]) {
-        const err = (await thrown(() =>
-          new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).wait("t1"),
-        )) as LenzInvalidResponseError;
-        expect(err).toBeInstanceOf(LenzInvalidResponseError);
-        expect(err.statusCode).toBe(200);
-        expect(err.body).toEqual(body);
-        expect(err.bodyText).toBe(JSON.stringify(body));
-        expect(err.headers?.["content-type"]).toBe("application/json");
+        let polls = 0;
+        const verification = { verification_id: "abcd1234", claim: "a" };
+        const { fetch } = server(() => {
+          polls += 1;
+          return {
+            body: {
+              task_id: "t1",
+              status: "completed",
+              result: polls === 1 ? result : verification,
+            },
+          };
+        });
+        const v = await new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).wait("t1");
+        expect(polls).toBe(2);
+        expect(v.raw).toEqual(verification);
       }
     },
   );
 
-  it("a batch wait's row whose result is not an object fails, the others stand", async () => {
+  it("one that never reads ends the wait at its deadline", async () => {
+    const { fetch } = server(() => ({ body: { task_id: "t1", status: "completed", result: "x" } }));
+    const err = await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).wait("t1", { timeoutMs: 50 }),
+    );
+    expect(err).toBeInstanceOf(LenzTimeoutError);
+  });
+
+  it("in a batch wait, that row is polled again; the others stand", async () => {
+    let t1Polls = 0;
     const { fetch } = server((s) => {
       if (s.url.endsWith("/verify/batch")) {
         return {
@@ -491,14 +540,23 @@ describe("a field of the wrong type where the SDK reads it", () => {
           },
         };
       }
-      return s.url.endsWith("/t1")
-        ? { body: { task_id: "t1", status: "completed", result: "x" } }
-        : { body: { task_id: "t2", status: "completed", result: { verification_id: "v2" } } };
+      if (s.url.endsWith("/t1")) {
+        t1Polls += 1;
+        return {
+          body: {
+            task_id: "t1",
+            status: "completed",
+            result: t1Polls === 1 ? "x" : { verification_id: "v1" },
+          },
+        };
+      }
+      return { body: { task_id: "t2", status: "completed", result: { verification_id: "v2" } } };
     });
     const rows = await new Lenz({ apiKey: "lenz_t", fetch }).verifyBatchAndWait({
       claims: [{ claim: "a" }, { claim: "b" }],
     });
-    expect(rows.map((r) => r.status)).toEqual(["failed", "completed"]);
+    expect(rows.map((r) => r.status)).toEqual(["completed", "completed"]);
+    expect(t1Polls).toBe(2);
   });
 
   it("a cancel answering another job's body: LenzInvalidResponseError with the answer", async () => {

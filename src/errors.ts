@@ -288,6 +288,30 @@ export class LenzQuotaExceededError extends LenzError {
   }
 }
 
+/**
+ * The `code`s of a {@link LenzValidationError} the SDK raises itself, before
+ * any request, for an argument it cannot use (`statusCode` 0), shared with the
+ * Python SDK (`USAGE_ERROR_CODES` there too). `invalid_argument` is anything
+ * no other code names. A blank `verify` / `assess` input instead carries the
+ * code the API's 422 would have given (`blank_input`, `blank_item`,
+ * `validation_error` or `""`, by `legacyAliases`).
+ */
+export const USAGE_ERROR_CODES = [
+  "blank_input",
+  "blank_item",
+  "empty_list",
+  "invalid_page_size",
+  "invalid_page",
+  "invalid_id",
+  "invalid_header",
+  "invalid_option",
+  "conflicting_input",
+  "invalid_argument",
+] as const;
+
+/** One of {@link USAGE_ERROR_CODES}. */
+export type UsageErrorCode = (typeof USAGE_ERROR_CODES)[number];
+
 export class LenzValidationError extends LenzError {
   errors: Array<Record<string, unknown>> = [];
   /**

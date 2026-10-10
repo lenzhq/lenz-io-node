@@ -73,8 +73,10 @@ export {
   CitecheckTimeoutError,
   ReviewFailedError,
   ReviewTimeoutError,
+  USAGE_ERROR_CODES,
   mapResponseToError,
 } from "./errors.js";
+export type { UsageErrorCode } from "./errors.js";
 
 export {
   LenzWebhooks,

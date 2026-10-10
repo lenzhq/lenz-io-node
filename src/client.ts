@@ -88,6 +88,7 @@ import {
   ReviewTimeoutError,
   UPSTREAM_503_CODES,
   mapResponseToError,
+  type UsageErrorCode,
 } from "./errors.js";
 import type {
   AskHistory,
@@ -1469,22 +1470,7 @@ function pathId(id: string): string | null {
  */
 const ARGUMENT_ERRORS = new WeakSet<object>();
 
-/**
- * The codes of a bad argument refused before any request, shared with the
- * Python SDK. A blank `verify` / `assess` input keeps the code the API's 422
- * would have given instead (see `blankInput`).
- */
-type ArgumentCode =
-  | "blank_input"
-  | "blank_item"
-  | "empty_list"
-  | "invalid_page_size"
-  | "invalid_page"
-  | "invalid_id"
-  | "invalid_header"
-  | "invalid_option"
-  | "conflicting_input"
-  | "invalid_argument";
+type ArgumentCode = UsageErrorCode;
 
 /**
  * The error of a bad argument, raised before any request: a
@@ -2152,7 +2138,7 @@ class LibraryNamespace {
     if (input.sort === "random") {
       throw argumentError(
         'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
-        "invalid_option",
+        "invalid_argument",
         "sort",
       );
     }
@@ -2178,7 +2164,7 @@ function citecheckBody(input: CitecheckInput): Record<string, unknown> {
       ? argumentError(
           "citecheck() needs exactly one of text and pairs.",
           "conflicting_input",
-          "pairs",
+          "text",
         )
       : argumentError("citecheck() needs exactly one of text and pairs.", "blank_input", "text");
   }
@@ -3617,7 +3603,11 @@ export class Lenz {
         const id = pending[i]!;
         if (res.status === "fulfilled") {
           const s = res.value;
-          if (
+          if (s.status === "completed" && s.result != null && !isPlainObject(s.result)) {
+            // A completed answer whose `result` is not an object cannot be
+            // read: polled again, like a 5xx, until it reads or the wait ends.
+            stillPending.push(id);
+          } else if (
             s.status === "completed" ||
             s.status === "needs_input" ||
             s.status === "failed" ||

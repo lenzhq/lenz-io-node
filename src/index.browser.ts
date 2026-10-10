@@ -46,8 +46,10 @@ export {
   CitecheckTimeoutError,
   ReviewFailedError,
   ReviewTimeoutError,
+  USAGE_ERROR_CODES,
   mapResponseToError,
 } from "./errors.js";
+export type { UsageErrorCode } from "./errors.js";
 
 // `isEvent` and the event types live in `./events.ts`, which needs no crypto.
 export { isEvent } from "./events.js";
