@@ -24,6 +24,7 @@ import {
 interface Sent {
   url: string;
   method: string;
+  headers: Headers;
   body: string | undefined;
 }
 
@@ -35,6 +36,7 @@ function server(reply: (sent: Sent) => Reply) {
     const s: Sent = {
       url: String(url),
       method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
       body: typeof init?.body === "string" ? init.body : undefined,
     };
     sent.push(s);
@@ -121,19 +123,20 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       "empty_list",
       "texts",
     ],
+    // Only when nothing is left once blanks are dropped, as the API does.
     [
-      "select blank item",
-      (c) => c.select("t1", { claims: ["a", " "] }),
-      "claims[1] is blank.",
-      "blank_item",
-      "claims[1]",
+      "select every claim blank",
+      (c) => c.select("t1", { claims: [" ", "\n"] }),
+      "claims is required.",
+      "empty_list",
+      "claims",
     ],
     [
-      "select blank texts item",
+      "select every texts item blank",
       (c) => c.select("t1", { texts: ["\t"] }),
-      "texts[0] is blank.",
-      "blank_item",
-      "texts[0]",
+      "claims is required.",
+      "empty_list",
+      "texts",
     ],
     [
       "ask.send blank",
@@ -184,6 +187,12 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       },
     );
   }
+
+  it("a select with some blank items sends the list unchanged (the API drops them)", async () => {
+    const { fetch, sent } = server(() => ({ status: 202, body: { batch_id: "b", items: [] } }));
+    await new Lenz({ apiKey: "lenz_t", fetch }).select("t1", { claims: ["a", " ", ""] });
+    expect(sent[0]!.body).toBe('{"texts":["a"," ",""]}');
+  });
 
   it("a select with every item filled sends the same request as before", async () => {
     const { fetch, sent } = server(() => ({ status: 202, body: { batch_id: "b", items: [] } }));
@@ -386,6 +395,48 @@ describe("a completed poll that carries no result", () => {
     }
   });
 
+  for (const legacyAliases of [true, false]) {
+    it.each([
+      [{ task_id: "t1", status: "completed" }],
+      [{ task_id: "t1", status: "completed", result: null }],
+    ])(`getStatus throws it too (legacyAliases: ${legacyAliases}, %j)`, async (body) => {
+      const { fetch, sent } = server(() => ({ body }));
+      const err = await thrown(() =>
+        new Lenz({ apiKey: "lenz_t", fetch, legacyAliases }).getStatus("t1"),
+      );
+      expect(err).toBeInstanceOf(LenzInvalidResponseError);
+      expect(err.message).toBe(SENTENCE);
+      expect(err.statusCode).toBe(200);
+      expect(err.headers?.["x-request-id"]).toBe("req-1");
+      expect(err.body).toEqual(body);
+      // Read once: a wait does not poll it again either.
+      expect(sent).toHaveLength(1);
+    });
+  }
+
+  it("a wait reads it once and stops (no polling to the deadline)", async () => {
+    const { fetch, sent } = server(() => ({ body: { task_id: "t1", status: "completed" } }));
+    const err = await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).wait("t1", { timeoutMs: 60_000 }),
+    );
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("verifyAndWait's error carries the verify idempotency key", async () => {
+    const { fetch, sent } = server((s) =>
+      s.url.endsWith("/verify")
+        ? { status: 202, body: { task_id: "t1" } }
+        : { body: { task_id: "t1", status: "completed" } },
+    );
+    const err = await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).verifyAndWait({ claim: "a" }),
+    );
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.idempotencyKey).toBeTruthy();
+    expect(err.idempotencyKey).toBe(sent[0]!.headers.get("Idempotency-Key"));
+  });
+
   it("a batch wait's row carries the same error; the others stand", async () => {
     const { fetch } = server((s) => {
       if (s.url.endsWith("/verify/batch")) {
@@ -411,6 +462,8 @@ describe("a completed poll that carries no result", () => {
     expect(rows[0]!.status).toBe("failed");
     expect(rows[0]!.error).toBeInstanceOf(LenzInvalidResponseError);
     expect(rows[0]!.error!.message).toBe(SENTENCE);
+    // Its status_detail is the poll, as before.
+    expect(rows[0]!.status_detail).toEqual({ task_id: "t1", status: "completed" });
     expect(rows[1]!.status).toBe("completed");
   });
 });
