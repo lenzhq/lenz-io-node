@@ -291,30 +291,31 @@ describe("a body that breaks off after the headers keeps the key", () => {
     }) as unknown as typeof globalThis.fetch;
   }
 
-  it("a 2xx: the same error as 2.21 (not a LenzError), carrying the key", async () => {
+  it("a 2xx: LenzConnectionError since 3.2 (was the runtime's error), carrying the key", async () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(200) });
     const err = (await settle(
       client.ask.send("v", { message: "why?", idempotencyKey: "ask-1" }),
     )) as Error & { idempotencyKey?: string };
-    expect(err).toBeInstanceOf(TypeError);
-    expect(err).not.toBeInstanceOf(LenzError);
+    expect(err).toBeInstanceOf(LenzConnectionError);
+    expect(err.cause).toBeInstanceOf(TypeError);
     expect(err.idempotencyKey).toBe("ask-1");
   });
 
-  it("an error status: the same, carrying the key", async () => {
+  it("an error status: the status stands, the body is lost, carrying the key", async () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(422) });
     const err = (await settle(client.verify({ claim: "a", idempotencyKey: "v-1" }))) as Error & {
       idempotencyKey?: string;
     };
-    expect(err).toBeInstanceOf(TypeError);
+    expect(err).toBeInstanceOf(LenzError);
+    expect((err as LenzError).statusCode).toBe(422);
     expect(err.idempotencyKey).toBe("v-1");
   });
 
   it("a GET's broken body carries none", async () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(200) });
     const err = (await settle(client.getStatus("t"))) as Error & { idempotencyKey?: string };
-    expect(err).toBeInstanceOf(TypeError);
-    expect("idempotencyKey" in err).toBe(false);
+    expect(err).toBeInstanceOf(LenzConnectionError);
+    expect((err as LenzError).idempotencyKey).toBeUndefined();
   });
 });
 

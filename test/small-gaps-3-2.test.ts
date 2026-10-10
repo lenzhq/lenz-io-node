@@ -406,12 +406,17 @@ describe("a 2xx whose body is not JSON", () => {
     [204, {}],
     [205, {}],
     [200, { "content-length": "0" }],
-  ] as const)("a %s with headers %j reads as an empty object", async (status, headers) => {
+  ] as const)("a %s with headers %j is not a Lenz answer either (3.2)", async (status, headers) => {
     const fetch = vi.fn(
       async () => new Response(null, { status, headers }),
     ) as unknown as typeof globalThis.fetch;
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    expect(await client.request({ method: "GET", path: "/x" })).toEqual({});
+    const err = (await client
+      .request({ method: "GET", path: "/x" })
+      .catch((e: unknown) => e)) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.statusCode).toBe(status);
+    expect(err.message).toContain("empty body");
   });
 
   it.each(["", "   \n"])("a 200 whose body is %j (no Content-Length) throws", async (text) => {

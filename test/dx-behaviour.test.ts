@@ -84,7 +84,7 @@ describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () =
       body: BATCH_BODY,
       call: (client: Lenz, extra: Record<string, unknown> = {}) =>
         client.verifyBatch({ claims: [{ claim: "a" }], ...extra }),
-      wire: { claims: [{ text: "a", source_url: "" }] },
+      wire: { claims: [{ text: "a" }] },
     },
     {
       name: "ask.send",
@@ -175,7 +175,7 @@ describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () =
     const { fetch, calls } = makeFetch([{ body: BATCH_BODY }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.verifyBatch({ claims: [{ claim: "a", idempotency_key: "item" }] });
-    expect(sent(calls[0]!)).toEqual({ claims: [{ text: "a", source_url: "" }] });
+    expect(sent(calls[0]!)).toEqual({ claims: [{ text: "a" }] });
     expect(key(calls[0]!)).not.toBe("item");
   });
 });
@@ -326,14 +326,26 @@ describe("A2: error classes", () => {
     expect(new LenzApiVersionError({ statusCode: 503 }).retryable).toBe(false);
   });
 
-  it("an answer in another API version is not retryable", async () => {
+  it("a success answer in another API version is not retryable", async () => {
     const { fetch } = makeFetch([
-      { status: 500, body: { detail: "x" }, headers: { "X-Lenz-API-Version": "2026-05-13" } },
+      { status: 200, body: { status: "x" }, headers: { "X-Lenz-API-Version": "2026-05-13" } },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const err = await settle(client.getStatus("t"));
     expect(err).toBeInstanceOf(LenzApiVersionError);
     expect((err as LenzError).retryable).toBe(false);
+  });
+
+  it("an error answer in another API version is that error, retryable as such (3.2)", async () => {
+    const { fetch } = makeFetch([
+      { status: 500, body: { detail: "x" }, headers: { "X-Lenz-API-Version": "2026-05-13" } },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+    const err = await settle(client.getStatus("t"));
+    expect(err).not.toBeInstanceOf(LenzApiVersionError);
+    expect((err as LenzError).statusCode).toBe(500);
+    expect((err as LenzError).retryable).toBe(true);
+    expect((err as LenzError).servedVersion).toBe("2026-05-13");
   });
 });
 

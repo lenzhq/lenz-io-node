@@ -17,7 +17,7 @@
  *   - lenz_score  : number | null  — integer 1–10 (deep / list; /assess omits)
  */
 
-export interface Source {
+export interface Source extends RawBody {
   source_name?: string;
   title?: string;
   url?: string;
@@ -36,7 +36,7 @@ export interface Source {
   date?: string;
 }
 
-export interface DebateSide {
+export interface DebateSide extends RawBody {
   role?: string;
   argument?: string;
   rebuttal?: string;
@@ -55,7 +55,7 @@ export interface DebateSide {
  * (Precision Analyst), weakest sources (Source Auditor) and, before 2026-06,
  * missing context (Context Analyst).
  */
-export interface Assessment {
+export interface Assessment extends RawBody {
   /** A display value, not a stable key — don't branch on it. */
   panelist_name?: string;
   focus_area?: string;
@@ -70,7 +70,7 @@ export interface Assessment {
   warnings?: string[];
 }
 
-export interface Audit {
+export interface Audit extends RawBody {
   adjudication_summary?: string;
   assessments?: Assessment[];
   debate_pro?: DebateSide | null;
@@ -79,7 +79,7 @@ export interface Audit {
 }
 
 /** One claim a `multi_claim` pause offers. */
-export interface CandidateClaim {
+export interface CandidateClaim extends RawBody {
   /** The claim. */
   claim?: string;
   /** @deprecated Read `claim`; the same text. */
@@ -92,7 +92,7 @@ export interface CandidateClaim {
  * claim. `qid` is the Wikidata Q identifier (e.g. `Q42`) when the entity
  * was resolved against Lenz's internal catalog; `null` otherwise.
  */
-export interface EntityRef {
+export interface EntityRef extends RawBody {
   name: string;
   qid: string | null;
 }
@@ -102,7 +102,7 @@ export interface EntityRef {
  * as returned by `related`. Same vocabulary as `Verification` — flat
  * `verdict` / `confidence` / `lenz_score`, no nested object.
  */
-export interface SimilarVerification {
+export interface SimilarVerification extends RawBody {
   verification_id?: string;
   claim?: string;
   verdict?: Verdict | (string & NonNullable<unknown>);
@@ -110,6 +110,26 @@ export interface SimilarVerification {
   lenz_score?: number | null;
   url?: string;
   distance?: number;
+}
+
+/**
+ * The part of an answer's body a result (or an object nested in one) was read
+ * from, exactly as the API sent it.
+ *
+ * `raw` is a getter that is not an own enumerable key: it does not show in
+ * `JSON.stringify`, `Object.keys`, a spread or a deep-equal, and each read
+ * returns a fresh deep copy (change it freely). It is the same whatever
+ * `legacyAliases` says, so it never carries a 2.x name or default the SDK
+ * adds. A result holds the whole body; every object nested in it that the
+ * body also holds at the same place holds its own part (`out.claims[0].raw`,
+ * `status.result.raw`, a review row's `assessment.raw`, ...). A review or
+ * citation-check receipt read from a 409 that names the job holds that 409's
+ * body. It is `undefined` on what the SDK built itself (a batch wait's result
+ * rows, whose `verification` and `status_detail` carry their own; a default
+ * the SDK filled in). An object that carries its own `raw` key keeps it.
+ */
+export interface RawBody {
+  readonly raw?: Record<string, unknown>;
 }
 
 /**
@@ -130,7 +150,7 @@ export interface SimilarVerification {
  * echoes what you set on submit ("private"/"unlisted" are settable;
  * "public" can only be read, for listed claims). `url` stays dropped.
  */
-export interface Verification {
+export interface Verification extends RawBody {
   verification_id?: string;
   claim?: string;
   /** "private" | "unlisted" | "public". Read-back of the claim's visibility. */
@@ -247,7 +267,7 @@ export type CoverageReason =
  * hundred. They are contract figures, not amounts a payment processor
  * charges. Read `currency`; do not assume EUR.
  */
-export interface Coverage {
+export interface Coverage extends RawBody {
   status?: string;
   reasons?: string[];
   certificate_id?: string | null;
@@ -275,7 +295,7 @@ export interface Coverage {
  * A withdrawn certificate is still served — it is the record of what was
  * warranted, and `withdrawn_at` is on it.
  */
-export interface Certificate {
+export interface Certificate extends RawBody {
   /**
    * A NUMBER on the wire, unlike `record_version` which is a string. Not a
    * tidy asymmetry, but it is what the server sends: `record_version` is part
@@ -305,7 +325,7 @@ export interface Certificate {
  * library list. Slim shape — no `url` (reference by `verification_id`),
  * no `visibility` (1.1.0).
  */
-export interface VerificationListItem {
+export interface VerificationListItem extends RawBody {
   verification_id?: string;
   claim?: string;
   domain?: string;
@@ -330,7 +350,7 @@ export interface VerificationListItem {
   suggested_rewrite?: string | null;
 }
 
-export interface VerificationList {
+export interface VerificationList extends RawBody {
   items: VerificationListItem[];
   total: number;
   page: number;
@@ -341,18 +361,18 @@ export interface VerificationList {
 export type LibraryItem = VerificationListItem;
 
 /** Wrapper for `GET /verifications/{id}/related`. */
-export interface RelatedVerifications {
+export interface RelatedVerifications extends RawBody {
   items: SimilarVerification[];
 }
 
-export interface LibraryList {
+export interface LibraryList extends RawBody {
   items: LibraryItem[];
   total: number;
   page: number;
   page_size: number;
 }
 
-export interface ExtractedEntity {
+export interface ExtractedEntity extends RawBody {
   /** Full formal entity name as identified by framing. */
   name: string;
   /** One of: `person` | `org` | `place` | `topic`. */
@@ -393,7 +413,7 @@ export type ExtractStatus = "ready" | "not_a_claim" | "no_match" | (string & Non
  * there is nothing to index. `text` is the passage as it appears in the
  * text; `null` on a citation's position, whose row carries the statement.
  */
-export interface Position {
+export interface Position extends RawBody {
   start: number | null;
   end: number | null;
   text: string | null;
@@ -406,7 +426,7 @@ export interface Position {
  * it, in text order: at least one, at most 10. `null` only when that claim
  * could not be placed; on `/extract` every returned claim is placed.
  */
-export interface ClaimLocation {
+export interface ClaimLocation extends RawBody {
   claim: string;
   positions: Position[] | null;
 }
@@ -417,7 +437,7 @@ export interface ClaimLocation {
  */
 export type ExtractedClaim = ClaimLocation;
 
-export interface ExtractedClaims {
+export interface ExtractedClaims extends RawBody {
   /**
    * `"ready"`, `"not_a_claim"` or `"no_match"`. The API's newer response
    * shape says `"no_checkable_claim"` for nothing checkable; the SDK reports
@@ -482,7 +502,7 @@ export interface ExtractedClaims {
  * A vague item is assessed on its most likely reading, which `claim`
  * carries.
  */
-export interface AssessClaim {
+export interface AssessClaim extends RawBody {
   claim?: string;
   /** Output language (ISO 639-1). Echoes the request's language. */
   language?: string;
@@ -494,9 +514,15 @@ export interface AssessClaim {
   /**
    * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
    * `"Error"` on a failed row (kept for existing code: read `status`).
+   * On a client made with `legacyAliases: false`, a failed row's verdict is
+   * `null`, as the API sends it (not in this type, so that code reading it
+   * as a string keeps compiling: check `status` first).
    */
   verdict?: Verdict | (string & NonNullable<unknown>);
-  /** "high" | "medium" | "low"; `"low"` on a failed row (read `status`). */
+  /**
+   * "high" | "medium" | "low"; `"low"` on a failed row (read `status`).
+   * `null` there with `legacyAliases: false` (as for `verdict`).
+   */
   confidence?: Confidence | (string & NonNullable<unknown>);
   /**
    * Why a failed row has no verdict: `code` (`no_checkable_claim`,
@@ -591,7 +617,7 @@ export interface AssessClaim {
  * `'no_checkable_claim'`: the input holds no checkable claim (a vague input
  * is assessed on its most likely reading instead).
  */
-export interface AssessResponse {
+export interface AssessResponse extends RawBody {
   /**
    * `"ok"` (at least one row has a verdict), `"error"`, or, when the input
    * holds nothing checkable, `"no_checkable_claim"`. Passed through as the server sent it;
@@ -621,7 +647,7 @@ export interface AssessResponse {
   more_claims?: string[];
 }
 
-export interface TaskAccepted {
+export interface TaskAccepted extends RawBody {
   task_id: string;
   /** The claim this task checks (on `verifyBatch` / `select` items). */
   claim?: string;
@@ -629,7 +655,7 @@ export interface TaskAccepted {
   claim_text?: string;
 }
 
-export interface BatchAccepted {
+export interface BatchAccepted extends RawBody {
   batch_id: string;
   items: TaskAccepted[];
 }
@@ -651,7 +677,7 @@ export interface BatchAccepted {
  * `verifyAndWait` honours it for you. `elapsed_seconds` is how long the run
  * has been going — a measurement, not an estimate of what is left.
  */
-export interface Progress {
+export interface Progress extends RawBody {
   step: string;
   index?: number;
   total?: number;
@@ -667,13 +693,13 @@ export interface Progress {
  * `failed`. A task that `select` already resolved answers `cancelled: false`
  * with `needs_input`; cancel the task ids `select` returned.
  */
-export interface CancelResult {
+export interface CancelResult extends RawBody {
   task_id: string;
   cancelled: boolean;
   status: TaskStatus["status"];
 }
 
-export interface TaskStatus {
+export interface TaskStatus extends RawBody {
   /**
    * `cancelled` is terminal: the task was stopped elsewhere (the website's
    * Stop button, another process). The original API shape reports the same as
@@ -817,7 +843,7 @@ export interface BatchItemResult {
  * {@link Usage} do that division for you, except for the depth prices, which are
  * price with no block of its own.
  */
-export interface UsageCredits {
+export interface UsageCredits extends RawBody {
   total: number;
   used: number;
   remaining: number;
@@ -853,7 +879,7 @@ export interface UsageCredits {
  *   — 5 credits doesn't buy a verification.
  * - `remaining`: equals `quota_remaining` (it already spans both buckets).
  */
-export interface UsageCapacity {
+export interface UsageCapacity extends RawBody {
   quota_used: number;
   quota_total: number;
   quota_remaining: number;
@@ -872,7 +898,7 @@ export interface UsageCapacity {
 }
 
 /** Daily `/extract` usage — a per-day rate limit, not credit-based. */
-export interface UsageExtract {
+export interface UsageExtract extends RawBody {
   calls_today: number;
   daily_limit: number;
   unlimited: boolean;
@@ -900,7 +926,7 @@ export interface UsageExtract {
  * The depth prices are **prices, not capabilities** — there is deliberately
  * no `verify_low` block beside `verify`. See {@link Usage.cost_options}.
  */
-export interface Usage {
+export interface Usage extends RawBody {
   /**
    * The tier slug — `"free" | "plus" | "pro" | "scale"`. This is the
    * field to branch on; it is stable. The Pro plan's slug was `"developer"`
@@ -1002,14 +1028,14 @@ export interface Usage {
 }
 
 /** One message in an `/ask` conversation thread. */
-export interface AskMessage {
+export interface AskMessage extends RawBody {
   role?: string; // "user" | "expert"
   content?: string;
   created_at?: string;
 }
 
 /** Returned by `GET /ask/{verification_id}`. */
-export interface AskHistory {
+export interface AskHistory extends RawBody {
   messages: AskMessage[];
   exchanges_used: number;
   exchange_limit: number;
@@ -1034,7 +1060,7 @@ export interface AskHistory {
  * that never matched the wire — the server has always returned
  * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
  */
-export interface AskReply {
+export interface AskReply extends RawBody {
   role?: string; // 'expert' on every reply (the assistant turn)
   content?: string; // markdown-subset prose (see interface docstring)
   created_at?: string;
@@ -1541,7 +1567,7 @@ export type EscalationDisposition =
   | (string & NonNullable<unknown>);
 
 /** The escalation policy as the review resolved it (defaults filled in). */
-export interface EscalationPolicy {
+export interface EscalationPolicy extends RawBody {
   verdicts: VerdictLabel[];
   confidence: ConfidenceBand[];
   max_verifications: number;
@@ -1557,14 +1583,14 @@ export interface EscalationPolicy {
 }
 
 /** Why a claim did or did not get a deep check. */
-export interface Escalation {
+export interface Escalation extends RawBody {
   /** Which rules matched: `verdict`, `confidence`, both, or none. */
   matched_rules: Array<"verdict" | "confidence">;
   disposition: EscalationDisposition;
 }
 
 /** The failure block `GET /verify/status` answers a failed task with. */
-export interface ReviewFailureBlock {
+export interface ReviewFailureBlock extends RawBody {
   /**
    * The specific cause, e.g. `no_checkable_claim`, `insufficient_credits`,
    * `assessment_failed`, `timeout`. An open set; `null` when the API has no
@@ -1583,15 +1609,20 @@ export interface ReviewFailureBlock {
   retryable: boolean;
   /** One sentence on what to do next. */
   hint: string | null;
+  /**
+   * A page on the failure. The API can send `null` here (a review row's
+   * failure with no page); not in this type, which 2.x code reads as a
+   * string: check it before use.
+   */
   docs_url: string;
 }
 
-export interface ReviewAssessmentCounts {
+export interface ReviewAssessmentCounts extends RawBody {
   completed: number;
   failed: number;
 }
 
-export interface ReviewVerificationCounts {
+export interface ReviewVerificationCounts extends RawBody {
   planned: number;
   completed: number;
   failed: number;
@@ -1603,7 +1634,7 @@ export interface ReviewVerificationCounts {
  * page or the draft. `failed`: no finding, for a reason of ours. A row still
  * running is in none of the three.
  */
-export interface ReviewCitationCheckCounts {
+export interface ReviewCitationCheckCounts extends RawBody {
   checked: number;
   unchecked: number;
   failed: number;
@@ -1614,7 +1645,7 @@ export interface ReviewCitationCheckCounts {
  * counts are `null` (`citation_issues` 0) on a review that did not ask for
  * the citation check.
  */
-export interface ReviewSummary {
+export interface ReviewSummary extends RawBody {
   /** Claims this review works on; `null` until the draft is read. */
   claims_selected: number | null;
   /** Claims found in the draft; `null` until the draft is read. */
@@ -1659,7 +1690,7 @@ export interface ReviewSummary {
     | null;
 }
 
-export interface ReviewCredits {
+export interface ReviewCredits extends RawBody {
   /**
    * Net credits this review cost the account, its citation checks included.
    * Authoritative once no deep check or citation check is running; read it
@@ -1669,7 +1700,7 @@ export interface ReviewCredits {
 }
 
 /** The one answer to read for a claim: a completed deep check overrides the quick one. */
-export interface ReviewResult {
+export interface ReviewResult extends RawBody {
   verdict: VerdictLabel | "Error";
   confidence: ConfidenceBand | null;
   source: "assessment" | "verification";
@@ -1678,7 +1709,7 @@ export interface ReviewResult {
 }
 
 /** The quick check (`/assess`) on one claim. */
-export interface ReviewAssessment {
+export interface ReviewAssessment extends RawBody {
   status: "pending" | "running" | "completed" | "failed";
   verdict: VerdictLabel | "Error" | null;
   confidence: ConfidenceBand | null;
@@ -1716,14 +1747,14 @@ export interface ReviewAssessment {
 }
 
 /** An entity a deep check named. Either field may be `null`. */
-export interface ReviewEntity {
+export interface ReviewEntity extends RawBody {
   name: string | null;
   /** The Wikidata id, when one was matched. */
   qid: string | null;
 }
 
 /** The deep check (`/verify`) on one claim. */
-export interface ReviewVerification {
+export interface ReviewVerification extends RawBody {
   status: "processing" | "completed" | "failed";
   /**
    * `purged` once the verification was deleted or removed under the
@@ -1770,7 +1801,7 @@ export interface ReviewVerification {
  * Compare `text` with your draft before you apply an edit, so a draft that
  * changed since is never edited in the wrong place.
  */
-export interface SuggestedEdit {
+export interface SuggestedEdit extends RawBody {
   position: number;
   start: number;
   end: number;
@@ -1788,13 +1819,13 @@ export interface SuggestedEdit {
  * safely, or it could not be computed). Not themselves verified:
  * review them before you publish.
  */
-export interface SuggestedEdits {
+export interface SuggestedEdits extends RawBody {
   status: "pending" | "completed";
   edits: SuggestedEdit[] | null;
 }
 
 /** One claim of the draft, in the order the draft's claims were read. */
-export interface ReviewClaim {
+export interface ReviewClaim extends RawBody {
   index: number;
   /** The claim as Lenz states it. */
   claim: string | null;
@@ -1831,7 +1862,7 @@ export interface ReviewClaim {
  * A claim whose final verdict is `False`, `Mostly False` or `Mixed`. Until
  * the review is `completed` the list can still change.
  */
-export interface ReviewIssue {
+export interface ReviewIssue extends RawBody {
   claim_index: number;
   claim: string | null;
   /** The deep check's reading of the claim, when it differs from `claim`. */
@@ -1869,7 +1900,7 @@ export interface ReviewIssue {
 }
 
 /** A claim outside the issue set whose work failed. */
-export interface ReviewFailure {
+export interface ReviewFailure extends RawBody {
   claim_index: number;
   claim: string | null;
   stage: "assessment" | "verification";
@@ -1911,7 +1942,7 @@ export type ReviewCitationUncheckedReason =
   | (string & NonNullable<unknown>);
 
 /** The one answer to read for a citation, derived from its `check`. */
-export interface ReviewCitationResult {
+export interface ReviewCitationResult extends RawBody {
   finding: ReviewCitationFinding;
   /** `null` on `unchecked`. */
   source: ReviewCitationSource | null;
@@ -1920,7 +1951,7 @@ export interface ReviewCitationResult {
 }
 
 /** A DOI's record in the registry. */
-export interface ReviewCitationRecord {
+export interface ReviewCitationRecord extends RawBody {
   title: string | null;
   authors: string[];
   year: number | null;
@@ -1928,14 +1959,14 @@ export interface ReviewCitationRecord {
 }
 
 /** One way the reference differs from the registry's record. */
-export interface ReviewCitationDifference {
+export interface ReviewCitationDifference extends RawBody {
   field: "title" | "authors" | "year" | "journal";
   cited: string | null;
   registered: string | null;
 }
 
 /** A citation's check. `status` is progress, as on `assessment`. */
-export interface ReviewCitationCheck {
+export interface ReviewCitationCheck extends RawBody {
   status: "pending" | "running" | "completed" | "failed";
   /** What reading the source gave. */
   page_read: "full" | "partial" | "not_found" | "none" | null;
@@ -1971,7 +2002,7 @@ export interface ReviewCitationCheck {
  * One citation of the draft (a URL or a DOI where the draft uses it), in the
  * draft's order.
  */
-export interface ReviewCitation {
+export interface ReviewCitation extends RawBody {
   index: number;
   /** The citation as the draft writes it. */
   reference: string | null;
@@ -1994,7 +2025,7 @@ export interface ReviewCitation {
  * draft's order. `snippet` and `rationale` are set only when `source` is
  * `support`.
  */
-export interface ReviewCitationIssue {
+export interface ReviewCitationIssue extends RawBody {
   citation_index: number;
   reference: string | null;
   cited_url: string | null;
@@ -2019,7 +2050,7 @@ export interface ReviewCitationIssue {
  * A citation found in the draft past the ones this review checked: found but
  * not checked. Send it in a later request to check it.
  */
-export interface ReviewMoreCitation {
+export interface ReviewMoreCitation extends RawBody {
   index: number;
   reference: string | null;
   cited_url: string | null;
@@ -2031,7 +2062,7 @@ export interface ReviewMoreCitation {
 }
 
 /** A citation whose check failed with nothing established. */
-export interface ReviewCitationFailure {
+export interface ReviewCitationFailure extends RawBody {
   citation_index: number;
   reference: string | null;
   cited_url: string | null;
@@ -2040,7 +2071,7 @@ export interface ReviewCitationFailure {
 }
 
 /** What both views of a review share. */
-export interface ReviewEnvelope {
+export interface ReviewEnvelope extends RawBody {
   review_id: string;
   view: "full" | "issues";
   status: ReviewStatus;
@@ -2098,7 +2129,7 @@ export interface ReviewIssues extends ReviewEnvelope {
 }
 
 /** The `POST /review` receipt. `status` is always `queued`, not the current state. */
-export interface ReviewStarted {
+export interface ReviewStarted extends RawBody {
   review_id: string;
   status: "queued";
 }
@@ -2156,9 +2187,17 @@ export interface ReviewInput {
   /** Applied to every deep check. Default `"private"`. */
   visibility?: "private" | "unlisted";
   /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout returns the first review instead of starting a second one.
+   * Defaults to `true`, generating a random key per call that is reused
+   * across this client's own retries. Set `false` to send none (a retried
+   * submit can then start, and charge for, a second review).
+   */
+  idempotency?: boolean;
+  /**
    * A resend with the same key within 24 hours returns the same review; a new
    * key is a new review. When omitted, a random key is generated per call and
-   * reused across this client's own retries.
+   * reused across this client's own retries. Wins over `idempotency`.
    */
   idempotencyKey?: string;
 }
@@ -2230,25 +2269,33 @@ export interface CitecheckInput {
    */
   webhookUrl?: string | null;
   /**
+   * Send an `Idempotency-Key` so a retry after a network drop or a client
+   * timeout returns the first check instead of starting a second one.
+   * Defaults to `true`, generating a random key per call that is reused
+   * across this client's own retries. Set `false` to send none (a retried
+   * submit can then start, and charge for, a second check).
+   */
+  idempotency?: boolean;
+  /**
    * A resend with the same key within 24 hours returns the same check. When
-   * omitted, a random key is generated per call.
+   * omitted, a random key is generated per call. Wins over `idempotency`.
    */
   idempotencyKey?: string;
 }
 
 /** The `POST /citecheck` receipt. `status` is always `queued`. */
-export interface CitecheckStarted {
+export interface CitecheckStarted extends RawBody {
   citecheck_id: string;
   status: "queued";
 }
 
-export interface CitecheckPolicy {
+export interface CitecheckPolicy extends RawBody {
   /** How many citations are checked (for pairs, the number of pairs). */
   max_citations: number | null;
 }
 
 /** Counts over the check, as on a review's `summary`. */
-export interface CitecheckSummary {
+export interface CitecheckSummary extends RawBody {
   /** Citations in the text, or the pairs sent; `null` until read. */
   citations_found: number | null;
   citations_selected: number | null;
@@ -2269,7 +2316,7 @@ export interface CitecheckSummary {
 export type CitecheckStatus = "queued" | "checking" | "completed" | "failed" | "cancelled";
 
 /** `GET /citechecks/{id}`: a citation check, with the review's citation rows. */
-export interface Citecheck {
+export interface Citecheck extends RawBody {
   citecheck_id: string;
   status: CitecheckStatus;
   /**

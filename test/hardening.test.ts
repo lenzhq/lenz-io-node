@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Lenz,
   LenzAPIError,
+  LenzConnectionError,
   LenzInvalidResponseError,
   type GetStatusOptions,
   type TaskStatus,
@@ -234,10 +235,12 @@ describe("a transport failure that cannot be marked is still a failed poll", () 
       expect(await pending).toMatchObject({ status: "completed" });
     });
 
-    it(`a plain call still throws ${label} as it is`, async () => {
+    it(`a plain call throws LenzConnectionError for ${label} (3.2), its cause`, async () => {
       const fetch = vi.fn(async () => failing(reason)()) as unknown as typeof globalThis.fetch;
       const c = new Lenz({ apiKey: "lenz_t", fetch });
-      expect(await settle(c.usage())).toBe(reason);
+      const err = (await settle(c.usage())) as LenzConnectionError;
+      expect(err).toBeInstanceOf(LenzConnectionError);
+      expect(err.cause).toBe(reason);
     });
   }
 });

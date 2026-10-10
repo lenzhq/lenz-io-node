@@ -84,9 +84,17 @@ export class LenzError extends Error {
   /**
    * The server's machine-readable error code, e.g. `"no_credits"`. Present on
    * 402, 403, 409, 410 (`"purged"`), 429 and a typed 503; `""` when the
-   * server sent none. Branch on this rather than on message text.
+   * server sent none. Branch on this rather than on message text. By default
+   * it is the code lenz-io 2.x reported for that call (which left some out,
+   * e.g. `not_found`, and renamed a few); on a client made with
+   * `legacyAliases: false` it is exactly the `code` of the response body.
    */
   code: string;
+  /**
+   * The parsed JSON body of the error response, exactly as sent (`null` or
+   * `{}` when there was none, or it was not a JSON object). The source of
+   * truth: every other field is read from it.
+   */
   body: Record<string, unknown> | null;
   /**
    * Whether sending the same request again later can succeed: `true` for a
@@ -108,6 +116,20 @@ export class LenzError extends Error {
    * new call mints a new key and can run (and charge) twice.
    */
   idempotencyKey?: string;
+  /**
+   * The `X-Lenz-API-Version` the error response named (`"2026-10-11"` for
+   * this release's, `"2026-05-13"` for an older one), or `""` when it named
+   * none or the error did not come from an HTTP answer. An error response
+   * from another API version is still thrown as its own typed error; this
+   * says which version wrote its `body`.
+   */
+  servedVersion?: string;
+  /**
+   * The response headers of the error answer (names in lower case), e.g.
+   * `headers["retry-after"]`; `undefined` for an error with no HTTP answer
+   * or one the SDK raised itself.
+   */
+  headers?: Record<string, string>;
 
   /**
    * `options.cause` is the native `Error.cause` (the error this one wraps,
@@ -124,6 +146,7 @@ export class LenzError extends Error {
     this.statusCode = ctx.statusCode ?? 0;
     this.code = ctx.code ?? "";
     this.body = ctx.body ?? null;
+    this.servedVersion = "";
     this.retryable =
       ctx.retryable !== undefined
         ? ctx.retryable
@@ -436,16 +459,21 @@ export class LenzWebhookSignatureError extends LenzError {}
  *
  * Every response names the version that served it in `X-Lenz-API-Version`.
  * lenz-io 3.x asks for `2026-10-11` and reads only that shape; when a
- * response names another version (in practice `2026-05-13`, for example an
- * older stored replay of an idempotent call), the body is not parsed into
- * the 3.x shapes. It is thrown instead, as sent, in `body`.
+ * successful response (status below 400) names another version (in practice
+ * `2026-05-13`, for example an older stored replay of an idempotent call),
+ * the body is not parsed into the 3.x shapes. It is thrown instead, as sent,
+ * in `body`. An error response (400 or above) in another version is thrown
+ * as its own typed error, retried as usual, with the version it named in
+ * `servedVersion` (since 3.2; before, it was this error too).
  *
  * A response with no `X-Lenz-API-Version` header is not checked. Webhook
  * events are not checked either: `LenzWebhooks` reads both shapes.
  */
 export class LenzApiVersionError extends LenzError {
-  /** The version the response named, e.g. `"2026-05-13"`. */
+  /** The version the response named, e.g. `"2026-05-13"`. Same as `servedVersion`. */
   apiVersion = "";
+  /** The version this SDK reads (`API_VERSION`, `"2026-10-11"`). */
+  expectedVersion = "";
   /** Always `false`: the same request reads the same version again. */
   override retryable: boolean | null = false;
 }
@@ -777,8 +805,10 @@ function getHeader(headers: Record<string, string>, name: string): string {
  * shape is read as the original one first ({@link legacyErrorBody}), so every
  * field of the error keeps its original value: `code` is `""` where the
  * original error had none, a schema error's `errors` are its field items,
- * `resetInSeconds` reads the daily limit's wait. `body` is always the body as
- * sent.
+ * `resetInSeconds` reads the daily limit's wait. With `request.legacyAliases`
+ * `false`, `code` is the body's own `code`, exactly. `body` is always the body
+ * as sent, and is the source of truth: every other field is read from it.
+ * `headers` are the response headers given, names in lower case.
  */
 /**
  * The longest wait `retryAfter` reports, in seconds: 2,147,483 s, the longest
@@ -835,7 +865,9 @@ export function mapResponseToError(
         ? "Validation failed"
         : entry.message;
 
-  const codeRaw = parsed["code"];
+  // With `legacyAliases: false` the code is the one the API sent, exactly;
+  // by default it is the 2.x reading of it (which may rename or drop it).
+  const codeRaw = request?.legacyAliases === false ? raw["code"] : parsed["code"];
   const code = typeof codeRaw === "string" ? codeRaw : "";
 
   const err = new entry.cls({
@@ -852,6 +884,10 @@ export function mapResponseToError(
     code,
     body: raw,
   });
+  err.headers = Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  err.servedVersion = (err.headers["x-lenz-api-version"] ?? "").trim();
 
   // Per-class enrichment
   if (

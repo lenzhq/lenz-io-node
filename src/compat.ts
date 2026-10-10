@@ -93,9 +93,22 @@ export function normalizeFailureBlock(
 // ── /assess ──
 
 /** One `/assess` row. */
+/**
+ * The fields of `o` (a copy) whose 3.x type has no `null`, read as not sent
+ * when the API sends `null` (a stored replay, a value it has none of), so the
+ * 3.x default (absent, or the 2.x value filled below) applies. Only on the
+ * default (2.x-named) reading of a call's result; with `legacyAliases: false`
+ * the `null` stays, as sent, and webhook events keep it as 2.21 delivered it.
+ * Matches the Python SDK for call results.
+ */
+function nullAsUnsent(o: Obj, names: readonly string[]): Obj {
+  for (const name of names) if (o[name] === null) delete o[name];
+  return o;
+}
+
 function normalizeAssessRow(row: unknown): unknown {
   if (!isObj(row)) return row;
-  const out: Obj = { ...row };
+  const out: Obj = nullAsUnsent({ ...row }, ["verdict", "confidence"]);
   const failed = row["status"] === "failed";
   const failure = normalizeFailureBlock(row["failure"], "no_claim");
   if (has(row, "failure")) out["failure"] = failure;
@@ -115,7 +128,7 @@ function normalizeAssessRow(row: unknown): unknown {
 /** The `POST /assess` body. */
 export function normalizeAssess(body: unknown): unknown {
   if (!isObj(body)) return body;
-  const out: Obj = { ...body };
+  const out: Obj = nullAsUnsent({ ...body }, ["error_code"]);
   if (Array.isArray(body["claims"])) out["claims"] = body["claims"].map(normalizeAssessRow);
   const rows = (Array.isArray(out["claims"]) ? out["claims"] : []).filter(isObj);
   const failure = normalizeFailureBlock(body["failure"], "no_claim");
@@ -189,11 +202,11 @@ export function normalizeBatchAccepted(body: unknown): unknown {
  * `text`. Webhooks only: an event can arrive in either shape, so this fills
  * whichever name is missing.
  */
-export function normalizeOptions(claims: unknown): unknown {
+export function normalizeOptions(claims: unknown, unsent = true): unknown {
   if (!Array.isArray(claims)) return claims;
   return claims.map((c) => {
     if (!isObj(c)) return c;
-    const out: Obj = { ...c };
+    const out: Obj = unsent ? nullAsUnsent({ ...c }, ["text"]) : { ...c };
     if (has(c, "claim")) fill(out, "text", c["claim"]);
     else if (has(c, "text")) fill(out, "claim", c["text"]);
     return out;
@@ -223,9 +236,23 @@ function isNewVerification(v: unknown): v is Obj {
 }
 
 /** A verification (detail, list item, a review's deep check, a webhook result). */
-export function normalizeVerification(v: unknown): unknown {
-  if (!isNewVerification(v)) return v;
-  return { ...v, modified_at: legacyModifiedAt(v["created_at"], v["completed_at"]) };
+export function normalizeVerification(v: unknown, unsent = false): unknown {
+  // An entity's null `name` reads as `""` only on a call's verification,
+  // where `EntityRef.name` is a string; a review row's and a webhook's keep it.
+  const named = unsent ? entityNames(v) : v;
+  if (!isNewVerification(named)) return named;
+  return { ...named, modified_at: legacyModifiedAt(named["created_at"], named["completed_at"]) };
+}
+
+/** `v` with an entity's `name` sent as `null` read as `""`, its 3.x default (Python's too). */
+function entityNames(v: unknown): unknown {
+  if (!isObj(v) || !Array.isArray(v["entities"])) return v;
+  const entities = v["entities"] as unknown[];
+  if (!entities.some((e) => isObj(e) && e["name"] === null)) return v;
+  return {
+    ...v,
+    entities: entities.map((e) => (isObj(e) && e["name"] === null ? { ...e, name: "" } : e)),
+  };
 }
 
 /** `o` with every missing key of `defaults` (each a fresh copy). */
@@ -318,10 +345,13 @@ export function webhookResultDefaults(result: unknown): unknown {
 }
 
 /** A page of verifications (`verifications.list`, `library.list`). */
-export function normalizeVerificationList(body: unknown): unknown {
+export function normalizeVerificationList(body: unknown, unsent = false): unknown {
   if (!isObj(body) || !Array.isArray(body["items"])) return body;
-  if (!body["items"].some(isNewVerification)) return body;
-  return { ...body, items: body["items"].map(normalizeVerification) };
+  const items = body["items"] as unknown[];
+  if (!items.some(isNewVerification) && !(unsent && items.some((v) => entityNames(v) !== v))) {
+    return body;
+  }
+  return { ...body, items: items.map((v) => normalizeVerification(v, unsent)) };
 }
 
 // ── /verify/status ──
@@ -354,11 +384,25 @@ export const CANCELLED_SENTENCE = "Cancelled.";
 export const CANCELLED_DOCS_URL = "https://lenz.io/docs/errors#cancelled";
 
 /** A `GET /verify/status/{task_id}` body (and the body a 3.0 verification webhook carries). */
-export function normalizeTaskStatus(body: unknown): unknown {
+export function normalizeTaskStatus(body: unknown, unsent = true): unknown {
   if (!isObj(body)) return body;
-  const out: Obj = { ...body };
-  if (has(body, "result")) out["result"] = normalizeVerification(body["result"]);
-  if (Array.isArray(body["claims"])) out["claims"] = normalizeOptions(body["claims"]);
+  const out: Obj = nullAsUnsent(
+    { ...body },
+    !unsent
+      ? []
+      : [
+          "reason",
+          "hint",
+          "progress",
+          "claims",
+          "docs_url",
+          "error",
+          "failure_class",
+          "failure_reason",
+        ],
+  );
+  if (has(body, "result")) out["result"] = normalizeVerification(body["result"], unsent);
+  if (Array.isArray(out["claims"])) out["claims"] = normalizeOptions(out["claims"], unsent);
   if (body["status"] === "cancelled") {
     // The newer shape's own status for a task cancelled elsewhere; the
     // original said `failed` with failure class `cancelled`. The 2.x flat
@@ -409,7 +453,8 @@ export function normalizeTaskStatus(body: unknown): unknown {
  * {@link normalizeTaskStatus}.
  */
 export function normalizeWebhookStatus(body: unknown): unknown {
-  const out = normalizeTaskStatus(body);
+  // Webhook events keep a `null` as 2.21 delivered it (no unsent reading).
+  const out = normalizeTaskStatus(body, false);
   if (!isObj(out) || out["status"] !== "failed" || isObj(out["failure"])) return out;
   fill(out, "failure", {
     code: canonicalCode(out["failure_reason"]),
@@ -432,7 +477,7 @@ const PROJECTED = ["verify", "ask", "assess"] as const;
 export function normalizeUsage(body: unknown): unknown {
   if (!isObj(body)) return body;
   const credits = body["credits"];
-  const out: Obj = { ...body };
+  const out: Obj = nullAsUnsent({ ...body }, ["verify", "ask", "assess"]);
   const c: Obj = isObj(credits) ? { ...credits } : {};
   if (c["bonus"] == null && c["extra"] != null) c["bonus"] = c["extra"];
   out["credits"] = c;
@@ -468,6 +513,11 @@ export function normalizeUsage(body: unknown): unknown {
 export interface RequestContext {
   method: string;
   path: string;
+  /**
+   * `false` when the client was made with `legacyAliases: false`: the error's
+   * `code` is then the body's own, never the 2.x reading of it.
+   */
+  legacyAliases?: boolean;
 }
 
 /** `/review`, `/citecheck` and their reads keep their own error envelope. */

@@ -10,7 +10,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Lenz } from "../src/index.js";
+import { Lenz, LenzValidationError } from "../src/index.js";
 import type { CitationPair, VerifyBatchItem } from "../src/index.js";
 
 interface FetchCall {
@@ -78,12 +78,12 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
     {
       name: "sourceUrl only, then a bare item",
       items: [{ sourceUrl: "https://s.example/p", text: "a" }, { claim: "b" }],
-      wire: '{"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b","source_url":""}]}',
+      wire: '{"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b"}]}',
     },
     {
       name: "an empty webhookUrl is omitted",
       items: [{ claim: "a", webhookUrl: "", depth: "low", visibility: "unlisted" }],
-      wire: '{"claims":[{"text":"a","source_url":"","visibility":"unlisted","depth":"low"}]}',
+      wire: '{"claims":[{"text":"a","visibility":"unlisted","depth":"low"}]}',
     },
     {
       name: "one camel, one snake",
@@ -113,7 +113,7 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
     ]);
     expect(raw(call)).toBe(
       '{"claims":[{"text":"a","source_url":"https://s.example/p"},' +
-        '{"text":"b","source_url":"","webhook_url":"https://h.example/w"}]}',
+        '{"text":"b","webhook_url":"https://h.example/w"}]}',
     );
   });
 
@@ -124,15 +124,15 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
       { claim: "c", webhook_url: "", webhookUrl: "https://h.example/w" },
       { claim: "d", webhookUrl: "  ", webhook_url: "https://h.example/v" },
       { claim: "e", webhookUrl: null as unknown as string, webhook_url: "https://h.example/u" },
-      { claim: "f", source_url: "", sourceUrl: null as unknown as string, webhook_url: "" },
+      { claim: "f", sourceUrl: null as unknown as string, webhook_url: "" },
     ]);
     expect(raw(call)).toBe(
       '{"claims":[{"text":"a","source_url":"https://s.example/p"},' +
         '{"text":"b","source_url":"https://s.example/q"},' +
-        '{"text":"c","source_url":"","webhook_url":"https://h.example/w"},' +
-        '{"text":"d","source_url":"","webhook_url":"https://h.example/v"},' +
-        '{"text":"e","source_url":"","webhook_url":"https://h.example/u"},' +
-        '{"text":"f","source_url":""}]}',
+        '{"text":"c","webhook_url":"https://h.example/w"},' +
+        '{"text":"d","webhook_url":"https://h.example/v"},' +
+        '{"text":"e","webhook_url":"https://h.example/u"},' +
+        '{"text":"f"}]}',
     );
   });
 
@@ -158,7 +158,7 @@ describe("verifyBatch: camelCase items send the 2.x bytes", () => {
       })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).constructor).toBe(Error);
+    expect((err as Error).constructor).toBe(LenzValidationError);
     expect((err as Error).message).toBe(
       "verifyBatch() claims[1]: webhookUrl and webhook_url differ; send one of them.",
     );
@@ -343,13 +343,13 @@ describe("citecheck: camelCase pairs send the 2.x bytes", () => {
       "citedYear and cited_year",
     ],
   ] as Array<[CitationPair, string]>)(
-    "both spellings, different: a plain Error naming both (%#)",
+    "both spellings, different: the local argument error naming both (%#)",
     async (pair, names) => {
       const { fetch, calls } = makeFetch([{ status: 202, body: CITECHECK_ACCEPTED }]);
       const err = await new Lenz({ apiKey: "lenz_t", fetch })
         .citecheck({ pairs: [{ statement: "ok", url: "https://x.org" }, pair] })
         .catch((e: unknown) => e);
-      expect((err as Error).constructor).toBe(Error);
+      expect((err as Error).constructor).toBe(LenzValidationError);
       expect((err as Error).message).toBe(
         `citecheck() pairs[1]: ${names} differ; send one of them.`,
       );

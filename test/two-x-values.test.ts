@@ -57,6 +57,8 @@ const NEW_NAMES = new Set([
   "retryable", // every error (3.0); a failed run's keeps its 2.x value
   "eventId", // every webhook event that carries an event_id (3.0)
   "idempotencyKey", // every error of a call that sent one (3.0)
+  "servedVersion", // every error (3.2): the version the error response named
+  "headers", // every error from an HTTP answer (3.2): its response headers
 ]);
 
 /**

@@ -99,15 +99,20 @@ describe("errors keep their 2.x fields", () => {
     it.each([
       ["verify", "Text is required.", (c: Lenz) => c.verify({ claim: " " })],
       ["assess", "Text is required.", (c: Lenz) => c.assess({ claim: " " })],
-    ])("%s: the single blank claim", async (_name, sentence, call) => {
-      const body = blank(["body", "claim"], "claim is required.");
-      const err = await thrown(() => call(client(422, body)));
-      expect(err).toBeInstanceOf(LenzValidationError);
-      expect(err.message).toBe(sentence);
-      expect(err.cause_).toBe(sentence);
-      expect(err.code).toBe("");
-      expect(err.body).toEqual(body);
-    });
+    ])(
+      "%s: the single blank claim (refused before sending, since 3.2)",
+      async (_name, sentence, call) => {
+        const body = blank(["body", "claim"], "claim is required.");
+        const err = await thrown(() => call(client(422, body)));
+        expect(err).toBeInstanceOf(LenzValidationError);
+        expect(err.message).toBe(sentence);
+        expect(err.cause_).toBe(sentence);
+        expect(err.code).toBe("");
+        // No request was made: no status, no body.
+        expect(err.statusCode).toBe(0);
+        expect(err.body).toBeNull();
+      },
+    );
 
     it("verifyBatch: a blank item names its item", async () => {
       const body = blank(["body", "claims", 1, "claim"], "claims[1].claim is required.");

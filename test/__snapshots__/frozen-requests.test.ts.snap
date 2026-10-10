@@ -568,7 +568,7 @@ exports[`frozen: the request of every call form > verify, idempotency false 1`] 
 [
   [
     "POST https://lenz.io/api/v1/verify",
-    "body: {"text":"a","source_url":""}",
+    "body: {"text":"a"}",
     "User-Agent: lenz-io-node/<VERSION>",
     "Accept: application/json",
     "X-Lenz-API-Version: 2026-10-11",
@@ -582,7 +582,7 @@ exports[`frozen: the request of every call form > verify, pinned key 1`] = `
 [
   [
     "POST https://lenz.io/api/v1/verify",
-    "body: {"text":"a","source_url":""}",
+    "body: {"text":"a"}",
     "User-Agent: lenz-io-node/<VERSION>",
     "Accept: application/json",
     "Idempotency-Key: frozen-v",
@@ -597,7 +597,7 @@ exports[`frozen: the request of every call form > verifyAndWait 1`] = `
 [
   [
     "POST https://lenz.io/api/v1/verify",
-    "body: {"text":"a","source_url":""}",
+    "body: {"text":"a"}",
     "User-Agent: lenz-io-node/<VERSION>",
     "Accept: application/json",
     "Idempotency-Key: frozen-vw",
@@ -620,7 +620,7 @@ exports[`frozen: the request of every call form > verifyBatch 1`] = `
 [
   [
     "POST https://lenz.io/api/v1/verify/batch",
-    "body: {"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b","source_url":""}],"language":"de","depth":"low"}",
+    "body: {"claims":[{"text":"a","source_url":"https://s.example/p"},{"text":"b"}],"language":"de","depth":"low"}",
     "User-Agent: lenz-io-node/<VERSION>",
     "Accept: application/json",
     "Idempotency-Key: frozen-b",
@@ -635,7 +635,7 @@ exports[`frozen: the request of every call form > verifyBatchAndWait 1`] = `
 [
   [
     "POST https://lenz.io/api/v1/verify/batch",
-    "body: {"claims":[{"text":"a","source_url":""},{"text":"b","source_url":""}]}",
+    "body: {"claims":[{"text":"a"},{"text":"b"}]}",
     "User-Agent: lenz-io-node/<VERSION>",
     "Accept: application/json",
     "Idempotency-Key: <random>",

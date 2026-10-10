@@ -20,6 +20,7 @@ import {
   LenzRequestTimeoutError,
   type RequestOptions,
   type TaskStatus,
+  LenzValidationError,
 } from "../src/index.js";
 import { header, recorder, settle, wire, type Reply, type Sent } from "./support/recorder.js";
 
@@ -218,7 +219,7 @@ const METHODS: Method[] = [
     name: "verifications.delete",
     python: "verifications.delete",
     takes: "all",
-    replies: [{ status: 204 }],
+    replies: [{ status: 200, body: { ok: true } }],
     run: (c, o) => c.verifications.delete("v1", o),
   },
   {
@@ -246,7 +247,7 @@ const METHODS: Method[] = [
     name: "ask.reset",
     python: "ask.reset",
     takes: "all",
-    replies: [{ status: 204 }],
+    replies: [{ status: 200, body: { ok: true } }],
     run: (c, o) => c.ask.reset("v1", o),
   },
   {
@@ -505,10 +506,10 @@ describe("what the per-call timeoutMs bounds, and precedence", () => {
       expected: 1_000,
     },
     {
-      name: "extract: the floor lifts an inherited copy value",
+      name: "extract: a copy's value is used as given, below the floor (3.2)",
       run: (c) => c.extract({ text: "a" }),
       copy: { timeoutMs: 9_000 },
-      expected: 150_000,
+      expected: 9_000,
     },
     {
       name: "extract: a copy value above the floor is kept",
@@ -528,10 +529,10 @@ describe("what the per-call timeoutMs bounds, and precedence", () => {
       expected: 100_000,
     },
     {
-      name: "assess: the floor lifts an inherited copy value",
+      name: "assess: a copy's value is used as given, below the floor (3.2)",
       run: (c) => c.assess({ claims: ["a"] }),
       copy: { timeoutMs: 5_000 },
-      expected: 100_000,
+      expected: 5_000,
     },
     {
       name: "a wait's poll: the copy's attempt timeout, cut at the budget",
@@ -687,7 +688,9 @@ describe("validation: one rule for every per-request setting", () => {
     }
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(LenzAbortError);
-    expect(err?.constructor).toBe(Error);
+    // Since 3.2 the local argument error (still an Error).
+    expect(err?.constructor).toBe(LenzValidationError);
+    expect((err as LenzValidationError).statusCode).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
     expect(uuid).not.toHaveBeenCalled();
     return err as Error;
