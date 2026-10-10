@@ -446,7 +446,10 @@ wins field by field.
 Prefer **webhooks** for production async flows (no long-lived HTTP connection);
 prefer **polling** for scripts and request/response handlers where awaiting is
 fine. For full control over the loop, call `getStatus(taskId)` yourself — it's a
-single non-blocking poll.
+single non-blocking poll. A `completed` status always carries its `result`:
+one that does not (the API never sends it; an expired verification answers 410
+instead) throws `LenzInvalidResponseError` with the answer's status, headers
+and body (since 3.2), as the waits do.
 
 ## Stopping a run
 
@@ -1146,7 +1149,8 @@ try {
 const verification = await client.wait("tsk_abc123");
 console.log(verification.verdict, verification.lenz_score);
 
-// ...or do a single non-blocking poll yourself:
+// ...or do a single non-blocking poll yourself (a `completed` status with no
+// `result` throws LenzInvalidResponseError; an expired one, LenzGoneError):
 const status = await client.getStatus("tsk_abc123");
 if (status.status === "completed") {
   console.log(status.result?.verdict, status.result?.lenz_score);

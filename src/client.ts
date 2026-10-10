@@ -2895,23 +2895,36 @@ export class Lenz {
   ): Promise<Result<BatchAccepted>> {
     const id = requirePathId("select", "task_id", taskId);
     requireObject(input, "select()", "input");
-    const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
-    // The field the list came in, named in `param`: `texts` (the 2.x name)
-    // when that is the one sent, else `claims`.
-    const field = chosen !== undefined && chosen === input.texts ? "texts" : "claims";
+    // The list the API reads (`resolve_list_input`): `texts` when it holds
+    // an item with text, else `claims`; else, as before, `claims` when it has
+    // items and `texts` otherwise. It is sent as `texts`.
+    const withText = (v: unknown) =>
+      Array.isArray(v) &&
+      (v as unknown[]).some((item) => typeof item === "string" && hasText(item));
+    const chosen = withText(input.texts)
+      ? input.texts
+      : input.claims && input.claims.length > 0
+        ? input.claims
+        : input.texts;
     // Refused locally only where the API would refuse, in its words: it strips
     // every item, drops the blank ones and answers "claims is required." when
-    // nothing is left. A list with some blank items is sent unchanged (the API
-    // drops them); items that are not strings, and a `claims` that is not a
-    // list (from JavaScript), are the API's to judge.
-    const allBlank =
-      Array.isArray(chosen) &&
-      (chosen as unknown[]).every(
-        (item) =>
-          item === null || item === undefined || (typeof item === "string" && !hasText(item)),
-      );
-    if (!chosen || chosen.length === 0 || allBlank) {
+    // nothing is left. Only a list (empty, or) of strings that are all blank
+    // counts: one with some blank items is sent unchanged (the API drops
+    // them), and an item that is not a string (`null`, a hole in a sparse
+    // list) or a `claims` that is not a list (from JavaScript) is the API's
+    // to judge.
+    let nothingLeft = chosen === undefined || chosen === null;
+    if (Array.isArray(chosen)) {
+      nothingLeft = true;
+      for (let i = 0; i < chosen.length; i++) {
+        const item: unknown = chosen[i];
+        if (typeof item !== "string" || hasText(item)) nothingLeft = false;
+      }
+    }
+    if (nothingLeft) {
       const absent = input.claims === undefined && input.texts === undefined;
+      // `param` names the field that list came in.
+      const field = chosen !== undefined && chosen === input.texts ? "texts" : "claims";
       throw blankInput(
         absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list,
         "empty_list",
@@ -2940,7 +2953,10 @@ export class Lenz {
    *
    * On a completed task, throws {@link LenzGoneError} (HTTP 410) when the
    * account's retention period has removed the verification. A running task
-   * never answers 410.
+   * never answers 410. A `completed` status that carries no `result` (absent
+   * or `null`; the API never sends one) throws {@link LenzInvalidResponseError}
+   * with the answer's status, headers and body, in both `legacyAliases` modes
+   * (since 3.2; it was returned as the status).
    */
   async getStatus(
     taskId: string,

@@ -188,6 +188,35 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
     );
   }
 
+  it.each([
+    ["[null]", { claims: [null] }, '{"texts":[null]}'],
+    ["[undefined]", { claims: [undefined] }, '{"texts":[null]}'],
+    // eslint-disable-next-line no-sparse-arrays
+    ["a sparse list", { claims: [, " "] }, '{"texts":[null," "]}'],
+    ["blank claims beside texts with text", { claims: [" "], texts: ["x"] }, '{"texts":["x"]}'],
+    ["claims beside blank texts", { claims: ["a"], texts: [" "] }, '{"texts":["a"]}'],
+  ])(
+    "select sends %s: the API judges it, reading the list it would use",
+    async (_n, input, wire) => {
+      const { fetch, sent } = server(() => ({ status: 202, body: { batch_id: "b", items: [] } }));
+      await new Lenz({ apiKey: "lenz_t", fetch }).select(
+        "t1",
+        input as unknown as { claims: string[] },
+      );
+      expect(sent[0]!.body).toBe(wire);
+    },
+  );
+
+  it("select with both lists blank is refused, naming claims", async () => {
+    const { fetch, sent } = server(() => ({ body: {} }));
+    const err = await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).select("t1", { claims: [" "], texts: ["\t"] }),
+    );
+    expect(err.message).toBe("claims is required.");
+    expect((err as LenzValidationError).param).toBe("claims");
+    expect(sent).toEqual([]);
+  });
+
   it("a select with some blank items sends the list unchanged (the API drops them)", async () => {
     const { fetch, sent } = server(() => ({ status: 202, body: { batch_id: "b", items: [] } }));
     await new Lenz({ apiKey: "lenz_t", fetch }).select("t1", { claims: ["a", " ", ""] });
