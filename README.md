@@ -990,14 +990,36 @@ A 2xx answer whose body is not JSON (a proxy's or captive portal's page, a
 body cut short) throws `LenzInvalidResponseError`, a `LenzAPIError` with the
 real `statusCode`, the `requestId` and `bodyText` (the first 1000 characters
 as received); `retryable` is `null`, so resend a paid call only with its
-`idempotencyKey`. An empty or blank body counts as not JSON; only a 204, a
-205 or a `Content-Length: 0` answer reads as `{}`. So does (since 3.2) a body
-that is JSON but not an object (`null`, a list, a number, a string), where
-every Lenz endpoint answers with an object: `bodyText` holds it, and its
-message says "not a JSON object". `statusCode` 0 means the request got no HTTP
-answer at all (`LenzConnectionError`). Before 3.2 a body that is not JSON threw
-the runtime's `SyntaxError`, and one that is JSON but not an object failed
-later with a `TypeError`.
+`idempotencyKey`. Since 3.2 so does every answer below 400 that is not a JSON
+object, because every endpoint this client calls answers with one:
+
+- an empty or blank body, a 204, a 205 and a `Content-Length: 0` answer
+  included (3.0 and 3.1 read those three as `{}`); its message says "empty
+  body";
+- a body that is JSON but not an object (`null`, a list, a number, a string):
+  `bodyText` holds it, and its message says "not a JSON object";
+- any redirect (3xx, or a browser's opaque redirect, `statusCode` 0): the API
+  never redirects, so something in between did. The client asks `fetch` not to
+  follow redirects (`redirect: "manual"`), so the key never goes to the new
+  address; the error names the `Location` when there is one, and is not
+  retried.
+
+`statusCode` 0 otherwise means the request got no HTTP answer at all
+(`LenzConnectionError`). Before 3.2 a body that is not JSON threw the runtime's
+`SyntaxError`, and one that is JSON but not an object failed later with a
+`TypeError`.
+
+**Only Lenz errors leave a request** (since 3.2): a `fetch` that rejects (a
+`TypeError`, say) is retried and then thrown as `LenzConnectionError`, with the
+`fetch` error as `cause`; a 2xx body that breaks off or does not decode is a
+`LenzConnectionError` too (resend a paid call with `err.idempotencyKey`), and on
+an error status the status stands and the body is lost; a `fetch` that resolves
+to something that is not a `Response` is a `LenzConnectionError`. A header
+value a request cannot carry (an `idempotencyKey` or an option header with a
+line break or a non-ASCII character) is refused before sending with
+`LenzValidationError`, never left to `fetch`. Before, these threw the
+runtime's own errors. `Content-Type: application/json` is sent only with a
+body (a `cancel`, a `DELETE` or a `GET` sends none).
 
 A blank input is refused before anything is sent (since 3.2): `verify` /
 `verifyAndWait` with no `claim` (or one of only whitespace), and `assess` with
@@ -1131,8 +1153,13 @@ returns the run as it stands, so a repeat is harmless.
 
 Every error of a call that sent a key carries it as `err.idempotencyKey`,
 including the timeout of a `*AndWait` (resending it with that key returns the
-work already started). A plain new call mints a new key and can run twice. On `ask.send`,
-asking the same question again in a new call is a new turn.
+work already started). A plain new call mints a new key and can run twice. On
+`ask.send`, the default key is per call: it protects that call's own retries
+(a network drop does not ask twice or charge twice), and asking the same
+question again in a new call is a new turn with a new key, answered and
+charged again. Pin `idempotencyKey` (one per turn, say
+`${conversationId}:turn-4`) to make a resend from another process replay the
+first answer.
 
 ## Steering extract
 

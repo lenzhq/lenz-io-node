@@ -13,6 +13,7 @@ import {
   Lenz,
   LenzApiVersionError,
   LenzAuthError,
+  LenzConnectionError,
   LenzError,
   LenzInvalidResponseError,
   LenzNotFoundError,
@@ -323,11 +324,13 @@ describe("a 2xx whose JSON is not an object", () => {
     });
   }
 
-  it("a 204 still reads as {}", async () => {
+  it("a 204 is not a Lenz answer either (3.2): no endpoint answers empty", async () => {
     const fetch = (async () =>
       new Response(null, { status: 204 })) as unknown as typeof globalThis.fetch;
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    await expect(client.verifications.delete("v1")).resolves.toBe(true);
+    await expect(client.verifications.delete("v1")).rejects.toBeInstanceOf(
+      LenzInvalidResponseError,
+    );
   });
 });
 
@@ -793,5 +796,137 @@ describe("blank input: the API's sentences, and the API's whitespace rule", () =
     const { fetch, sent } = server(() => ({ body: { ok: true } }));
     await new Lenz({ apiKey: "\f\vlenz_t\r\n", fetch }).usage();
     expect(sent[0]!.headers.get("authorization")).toBe("Bearer lenz_t");
+  });
+});
+
+describe("batch 2: redirects, empty answers, foreign errors, Content-Type", () => {
+  it.each([301, 302, 303, 307, 308])(
+    "a %s is LenzInvalidResponseError, never followed or retried",
+    async (status) => {
+      const { fetch, sent } = server(() => ({
+        status,
+        text: '{"ok":true}',
+        headers: { location: "https://elsewhere.example/x" },
+      }));
+      const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 3 });
+      const err = (await thrown(() => client.usage())) as LenzInvalidResponseError;
+      expect(err).toBeInstanceOf(LenzInvalidResponseError);
+      expect(err.statusCode).toBe(status);
+      expect(err.message).toContain("redirect");
+      expect(sent).toHaveLength(1);
+    },
+  );
+
+  it("a 304 (no body) is one too", async () => {
+    const fetch = (async () =>
+      new Response(null, { status: 304 })) as unknown as typeof globalThis.fetch;
+    const err = (await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).usage(),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.statusCode).toBe(304);
+  });
+
+  it("asks fetch not to follow redirects", async () => {
+    const inits: RequestInit[] = [];
+    const fetch = (async (_u: string, init: RequestInit) => {
+      inits.push(init);
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    await new Lenz({ apiKey: "lenz_t", fetch }).usage();
+    expect(inits[0]!.redirect).toBe("manual");
+  });
+
+  it("a browser's opaque redirect is one too", async () => {
+    const opaque = {
+      status: 0,
+      type: "opaqueredirect",
+      headers: new Headers(),
+      text: async () => "",
+    } as unknown as Response;
+    const client = new Lenz({
+      apiKey: "lenz_t",
+      fetch: (async () => opaque) as unknown as typeof globalThis.fetch,
+    });
+    await expect(client.usage()).rejects.toBeInstanceOf(LenzInvalidResponseError);
+  });
+
+  it("an empty 200 is LenzInvalidResponseError", async () => {
+    const { fetch } = server(() => ({ status: 200, text: "" }));
+    const err = (await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).usage(),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.message).toContain("empty body");
+  });
+
+  it("a fetch that resolves to something else is LenzConnectionError", async () => {
+    const client = new Lenz({
+      apiKey: "lenz_t",
+      fetch: (async () => undefined) as unknown as typeof globalThis.fetch,
+    });
+    await expect(client.usage()).rejects.toBeInstanceOf(LenzConnectionError);
+  });
+
+  it("a fetch that rejects with a TypeError is LenzConnectionError", async () => {
+    const client = new Lenz({
+      apiKey: "lenz_t",
+      maxRetries: 0,
+      fetch: (async () => {
+        throw new TypeError("fetch failed");
+      }) as unknown as typeof globalThis.fetch,
+    });
+    const err = (await thrown(() => client.usage())) as LenzConnectionError;
+    expect(err).toBeInstanceOf(LenzConnectionError);
+    expect(err.cause).toBeInstanceOf(TypeError);
+  });
+
+  it.each(["ké", "a\r\nX-Injected: 1", " k", "k\n"])(
+    "an idempotencyKey a header cannot carry (%j) is refused before sending",
+    async (key) => {
+      const { fetch, sent } = server(() => ({ status: 202, body: { task_id: "t1" } }));
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      for (const run of [
+        () => client.verify({ claim: "a", idempotencyKey: key }),
+        () => client.review({ text: "a", idempotencyKey: key }),
+      ]) {
+        const err = (await thrown(run)) as LenzValidationError;
+        expect(err).toBeInstanceOf(LenzValidationError);
+        expect(err.code).toBe("invalid_argument");
+      }
+      expect(sent).toHaveLength(0);
+    },
+  );
+
+  it("a header value with a line break or non-ASCII is refused before sending", async () => {
+    const { fetch, sent } = server(() => ({ body: { ok: true } }));
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    for (const value of ["a\r\nb", "é"]) {
+      await expect(client.usage({ headers: { "X-A": value } })).rejects.toBeInstanceOf(
+        LenzValidationError,
+      );
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it("Content-Type goes only with a body", async () => {
+    const { fetch, sent } = server((s) =>
+      s.url.includes("/cancel")
+        ? { body: { task_id: "t1", cancelled: true, status: "cancelled" } }
+        : s.method === "DELETE"
+          ? { body: { ok: true } }
+          : { status: 202, body: { task_id: "t1", status: "pending" } },
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "a" });
+    await client.cancel("t1");
+    await client.verifications.delete("v1");
+    await client.getStatus("t1").catch(() => undefined);
+    expect(sent.map((s) => [s.method, s.headers.get("content-type")])).toEqual([
+      ["POST", "application/json"],
+      ["POST", null],
+      ["DELETE", null],
+      ["GET", null],
+    ]);
   });
 });

@@ -219,7 +219,7 @@ const METHODS: Method[] = [
     name: "verifications.delete",
     python: "verifications.delete",
     takes: "all",
-    replies: [{ status: 204 }],
+    replies: [{ status: 200, body: { ok: true } }],
     run: (c, o) => c.verifications.delete("v1", o),
   },
   {
@@ -247,7 +247,7 @@ const METHODS: Method[] = [
     name: "ask.reset",
     python: "ask.reset",
     takes: "all",
-    replies: [{ status: 204 }],
+    replies: [{ status: 200, body: { ok: true } }],
     run: (c, o) => c.ask.reset("v1", o),
   },
   {

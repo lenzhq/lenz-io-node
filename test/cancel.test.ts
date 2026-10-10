@@ -436,8 +436,12 @@ describe("a 200 that is not a cancel result", () => {
     new Response(JSON.stringify({ cancelled: true, status: "cancelled" }), { status: 200 });
   const notAnObject = () => new Response("[]", { status: 200 });
 
-  it("cancel throws LenzInvalidResponseError for a list (3.2: no 2xx answer is a list)", async () => {
-    const { fetch, calls } = serving(notAnObject);
+  it.each([
+    ["a list", notAnObject],
+    ["an empty body", empty],
+    ["a 204", noContent],
+  ])("cancel throws LenzInvalidResponseError for %s (3.2)", async (_label, answer) => {
+    const { fetch, calls } = serving(answer);
     const err = (await make(fetch)
       .cancel("t1")
       .catch((e: unknown) => e)) as LenzAPIError;
@@ -446,19 +450,18 @@ describe("a 200 that is not a cancel result", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it.each([
-    ["an empty body", empty],
-    ["a 204", noContent],
-    ["a body without task_id", noTaskId],
-  ])("cancel throws LenzAPIError for %s", async (_label, answer) => {
-    const { fetch, calls } = serving(answer);
-    const err = (await make(fetch)
-      .cancel("t1")
-      .catch((e: unknown) => e)) as LenzAPIError;
-    expect(err).toBeInstanceOf(LenzAPIError);
-    expect(err.message).toBe("POST /verify/t1/cancel answered without a cancel result.");
-    expect(calls).toHaveLength(1);
-  });
+  it.each([["a body without task_id", noTaskId]])(
+    "cancel throws LenzAPIError for %s",
+    async (_label, answer) => {
+      const { fetch, calls } = serving(answer);
+      const err = (await make(fetch)
+        .cancel("t1")
+        .catch((e: unknown) => e)) as LenzAPIError;
+      expect(err).toBeInstanceOf(LenzAPIError);
+      expect(err.message).toBe("POST /verify/t1/cancel answered without a cancel result.");
+      expect(calls).toHaveLength(1);
+    },
+  );
 });
 
 describe("every id that goes into a path", () => {

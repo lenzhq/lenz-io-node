@@ -1774,7 +1774,7 @@ describe("Resource namespaces", () => {
   });
 
   it("ask.reset hits DELETE /ask/{id}", async () => {
-    const { fetch, calls } = makeFetch([{ status: 204 }]);
+    const { fetch, calls } = makeFetch([{ status: 200, body: { ok: true } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     const ok = await client.ask.reset("vid_1");
     expect(ok).toBe(true);

@@ -368,7 +368,7 @@ const FORMS: Form[] = [
   },
   {
     name: "verifications.delete",
-    replies: [{ status: 204 }],
+    replies: [{ status: 200, body: { ok: true } }],
     run: (c) => c.verifications.delete("v1"),
   },
   {
@@ -403,7 +403,7 @@ const FORMS: Form[] = [
   },
   {
     name: "ask.reset",
-    replies: [{ status: 204 }],
+    replies: [{ status: 200, body: { ok: true } }],
     run: (c) => c.ask.reset("v1"),
   },
   {

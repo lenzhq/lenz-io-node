@@ -248,9 +248,23 @@ async function callIdempotencyKey(input: {
   idempotencyKey?: string;
   idempotency?: boolean;
 }): Promise<string | undefined> {
-  if (input.idempotencyKey !== undefined) return input.idempotencyKey;
+  if (input.idempotencyKey !== undefined) return checkedKey(input.idempotencyKey);
   if (input.idempotency === false) return undefined;
   return (await generateUuid()).replace(/-/g, "");
+}
+
+/**
+ * A caller's `idempotencyKey`, refused before anything is sent when it cannot
+ * ride a header (not a string, a line break, a non-ASCII character).
+ */
+function checkedKey(key: unknown): string {
+  if (typeof key !== "string" || (key !== "" && !isHeaderValue(key))) {
+    throw argumentError(
+      "idempotencyKey must be a string of visible ASCII characters, with spaces and tabs " +
+        "only between them (not at either end).",
+    );
+  }
+  return key;
 }
 
 /**
@@ -266,7 +280,7 @@ async function jobIdempotencyKey(input: {
 }): Promise<string | undefined> {
   // A non-empty key wins over `idempotency`; an empty one is no key of the
   // caller's (a random one is made, as before, unless they opted out).
-  if (input.idempotencyKey) return input.idempotencyKey;
+  if (input.idempotencyKey) return checkedKey(input.idempotencyKey);
   if (input.idempotency === false) return undefined;
   return (await generateUuid()).replace(/-/g, "");
 }
@@ -1119,26 +1133,81 @@ function conflictReceipt<T extends object>(receipt: T, body: Record<string, unkn
   return receipt;
 }
 
+/** Whether `value` is a fetch `Response` (or looks enough like one to read). */
+function isResponse(value: unknown): value is Response {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Response).status === "number" &&
+    typeof (value as Response).text === "function" &&
+    typeof (value as Response).headers?.get === "function"
+  );
+}
+
+/** A 2xx whose body broke off or did not decode: the answer was lost on the way. */
+function bodyLost(
+  method: string,
+  path: string,
+  response: Response,
+  exc: unknown,
+): LenzConnectionError {
+  const err = new LenzConnectionError(
+    {
+      message: `${method} ${path} answered HTTP ${response.status}, but its body was lost: ${String(exc)}`,
+      cause: String(exc),
+      fix:
+        "The request reached the server: resend a paid call with the same key " +
+        "(idempotencyKey: err.idempotencyKey) to get the same answer without running it twice.",
+      docUrl: "https://lenz.io/docs/errors",
+      requestId: response.headers.get("X-Request-ID") ?? "",
+    },
+    { cause: exc },
+  );
+  err.headers = headersOf(response);
+  recordTransportFailure(err);
+  return err;
+}
+
 /** The most of a non-JSON body an error keeps. */
 const BODY_TEXT_MAX = 1000;
 
-/** A 2xx whose body is not JSON. */
+/** Why an answer below 400 is not a Lenz answer. */
+type InvalidKind = "not_json" | "not_object" | "empty" | "redirect";
+
+/** An answer below 400 that is not a Lenz answer: a redirect, or a 2xx that is not a JSON object. */
 function invalidResponse(
   method: string,
   path: string,
   response: Response,
   text: string,
   exc: unknown,
-  notAnObject = false,
+  kind: InvalidKind = "not_json",
 ): LenzInvalidResponseError {
+  const status = response.status;
+  const messages: Record<InvalidKind, [string, string]> = {
+    not_json: [
+      `${method} ${path} answered HTTP ${status} with a body that is not JSON.`,
+      `The body (${response.headers.get("content-type") ?? "no content type"}) did not parse as JSON.`,
+    ],
+    not_object: [
+      `${method} ${path} answered HTTP ${status} with JSON that is not a JSON object.`,
+      "The body parsed as JSON, but as an array, a string, a number, a boolean or null; every Lenz answer is an object.",
+    ],
+    empty: [
+      `${method} ${path} answered HTTP ${status} with an empty body.`,
+      "Every Lenz endpoint this client calls answers with a JSON object; this answer had none.",
+    ],
+    redirect: [
+      `${method} ${path} answered with a redirect (HTTP ${status || "3xx"}).`,
+      `The Lenz API never redirects; something between you and it did${
+        response.headers.get("location") ? ` (to ${response.headers.get("location")})` : ""
+      }. The redirect was not followed.`,
+    ],
+  };
   const err = new LenzInvalidResponseError(
     {
-      message: notAnObject
-        ? `${method} ${path} answered HTTP ${response.status} with JSON that is not a JSON object.`
-        : `${method} ${path} answered HTTP ${response.status} with a body that is not JSON.`,
-      cause: notAnObject
-        ? "The body parsed as JSON, but as an array, a string, a number, a boolean or null; every Lenz answer is an object."
-        : `The body (${response.headers.get("content-type") ?? "no content type"}) did not parse as JSON.`,
+      message: messages[kind][0],
+      cause: messages[kind][1],
       fix:
         "Check that baseUrl points at the Lenz API and nothing between you rewrites the answer; " +
         "if it persists, contact support (https://lenz.io/contact) with the request id.",
@@ -3729,6 +3798,9 @@ export class Lenz {
             headers,
             body: opts.json !== undefined ? jsonBody(opts.json) : undefined,
             signal: controller.signal,
+            // The API never redirects: a redirect is something in between,
+            // reported (below), never followed with the key on it.
+            redirect: "manual",
           });
         } catch (exc) {
           lastErr = exc;
@@ -3770,6 +3842,31 @@ export class Lenz {
             `[lenz-io] Retrying ${opts.method} ${opts.path} after ${timedOut ? "a timeout" : "a network error"} in ${retrySleepMs(attempt)}ms (attempt ${attempt + 2} of ${maxRetries + 1})`,
           );
           return { done: false, pauseMs: retrySleepMs(attempt) };
+        }
+        if (!isResponse(response)) {
+          clearTimeout(timer);
+          throw new LenzConnectionError({
+            message: `${opts.method} ${opts.path}: fetch returned something that is not a Response.`,
+            cause: `The fetch passed to the client resolved to ${shown(response)}.`,
+            fix: "Pass a fetch that resolves to a Response (globalThis.fetch does).",
+            docUrl: "https://lenz.io/docs/errors",
+          });
+        }
+        if (
+          (response.status >= 300 && response.status < 400) ||
+          response.type === "opaqueredirect"
+        ) {
+          // Not a Lenz answer, never followed: no retry, no version check.
+          let text = "";
+          try {
+            text = await response.text();
+          } catch {
+            // The redirect is known; its body does not matter.
+          } finally {
+            clearTimeout(timer);
+          }
+          rethrowIfCallerAbort(signals);
+          throw invalidResponse(opts.method, opts.path, response, text, undefined, "redirect");
         }
         const served = response.headers.get("X-Lenz-API-Version")?.trim() ?? "";
         if (served && served !== API_VERSION && response.status < 400) {
@@ -3819,13 +3916,6 @@ export class Lenz {
           // after them must not hang the call.
           let text: string;
           try {
-            if (
-              response.status === 204 ||
-              response.status === 205 ||
-              response.headers.get("content-length") === "0"
-            ) {
-              return { done: true, value: {} as T };
-            }
             text = await response.text();
           } catch (exc) {
             rethrowIfCallerAbort(signals);
@@ -3840,13 +3930,16 @@ export class Lenz {
                 { cause: exc },
               );
             }
-            recordTransportFailure(exc);
-            throw exc;
+            // The answer broke off or did not decode: a transport failure.
+            throw bodyLost(opts.method, opts.path, response, exc);
           } finally {
             clearTimeout(timer);
           }
-          // Only a 204, a 205 or `Content-Length: 0` reads as `{}` (above);
-          // any other body, an empty or blank one included, must be JSON.
+          // Every endpoint this client calls answers with a JSON object: an
+          // empty body (a 204 or 205 included) is not a Lenz answer.
+          if (text.trim() === "") {
+            throw invalidResponse(opts.method, opts.path, response, text, undefined, "empty");
+          }
           let value: unknown;
           try {
             value = JSON.parse(text);
@@ -3859,7 +3952,7 @@ export class Lenz {
           // array, a string, `null`) is not a Lenz answer, and reading it
           // as one would fail later with a TypeError far from the cause.
           if (value === null || typeof value !== "object" || Array.isArray(value)) {
-            throw invalidResponse(opts.method, opts.path, response, text, undefined, true);
+            throw invalidResponse(opts.method, opts.path, response, text, undefined, "not_object");
           }
           setRaw(value, text);
           return { done: true, value: value as T };
@@ -3957,12 +4050,8 @@ export class Lenz {
           rawBody = await response.text();
         } catch (exc) {
           rethrowIfCallerAbort(signals);
-          // A body that stalled until the timer fired: the status stands, the
-          // body is lost.
-          if (!controller.signal.aborted) {
-            recordTransportFailure(exc);
-            throw exc;
-          }
+          // A body that stalled until the timer fired, broke off or did not
+          // decode: the status stands, the body is lost.
         } finally {
           clearTimeout(timer);
         }
