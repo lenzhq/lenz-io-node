@@ -133,6 +133,25 @@ export interface RawBody {
 }
 
 /**
+ * The HTTP answer a top-level result was read from (since 3.2): its status
+ * (`202` for a receipt, `200` for a read) and its headers, names in lower case
+ * (`out.headers?.["location"]`, `out.headers?.["retry-after"]`), the same
+ * record errors carry as `err.headers`.
+ *
+ * Like `raw`, both are non-enumerable: they do not show in `JSON.stringify`,
+ * `Object.keys`, a spread or a deep-equal. Each read of `headers` is a fresh
+ * copy. Only the result that is one answer's body carries them: an object
+ * nested in it (`out.claims[0]`, `status.result`, a wait's verification) and a
+ * result the SDK built (a `verifyBatchAndWait` row) do not. A `review` /
+ * `citecheck` receipt settled by a 409 that names the job carries that 409's.
+ * An object that carries its own key of either name keeps it.
+ */
+export interface ResponseMeta {
+  readonly httpStatus?: number;
+  readonly headers?: Record<string, string>;
+}
+
+/**
  * Full verification report — returned by `verifyAndWait`,
  * `verifications.get`, the `/verify/status/{task_id}` polling endpoint,
  * and the webhook payload.
@@ -150,7 +169,7 @@ export interface RawBody {
  * echoes what you set on submit ("private"/"unlisted" are settable;
  * "public" can only be read, for listed claims). `url` stays dropped.
  */
-export interface Verification extends RawBody {
+export interface Verification extends RawBody, ResponseMeta {
   verification_id?: string;
   claim?: string;
   /** "private" | "unlisted" | "public". Read-back of the claim's visibility. */
@@ -295,7 +314,7 @@ export interface Coverage extends RawBody {
  * A withdrawn certificate is still served — it is the record of what was
  * warranted, and `withdrawn_at` is on it.
  */
-export interface Certificate extends RawBody {
+export interface Certificate extends RawBody, ResponseMeta {
   /**
    * A NUMBER on the wire, unlike `record_version` which is a string. Not a
    * tidy asymmetry, but it is what the server sends: `record_version` is part
@@ -350,7 +369,7 @@ export interface VerificationListItem extends RawBody {
   suggested_rewrite?: string | null;
 }
 
-export interface VerificationList extends RawBody {
+export interface VerificationList extends RawBody, ResponseMeta {
   items: VerificationListItem[];
   total: number;
   page: number;
@@ -361,11 +380,11 @@ export interface VerificationList extends RawBody {
 export type LibraryItem = VerificationListItem;
 
 /** Wrapper for `GET /verifications/{id}/related`. */
-export interface RelatedVerifications extends RawBody {
+export interface RelatedVerifications extends RawBody, ResponseMeta {
   items: SimilarVerification[];
 }
 
-export interface LibraryList extends RawBody {
+export interface LibraryList extends RawBody, ResponseMeta {
   items: LibraryItem[];
   total: number;
   page: number;
@@ -437,7 +456,7 @@ export interface ClaimLocation extends RawBody {
  */
 export type ExtractedClaim = ClaimLocation;
 
-export interface ExtractedClaims extends RawBody {
+export interface ExtractedClaims extends RawBody, ResponseMeta {
   /**
    * `"ready"`, `"not_a_claim"` or `"no_match"`. The API's newer response
    * shape says `"no_checkable_claim"` for nothing checkable; the SDK reports
@@ -617,7 +636,7 @@ export interface AssessClaim extends RawBody {
  * `'no_checkable_claim'`: the input holds no checkable claim (a vague input
  * is assessed on its most likely reading instead).
  */
-export interface AssessResponse extends RawBody {
+export interface AssessResponse extends RawBody, ResponseMeta {
   /**
    * `"ok"` (at least one row has a verdict), `"error"`, or, when the input
    * holds nothing checkable, `"no_checkable_claim"`. Passed through as the server sent it;
@@ -647,7 +666,7 @@ export interface AssessResponse extends RawBody {
   more_claims?: string[];
 }
 
-export interface TaskAccepted extends RawBody {
+export interface TaskAccepted extends RawBody, ResponseMeta {
   task_id: string;
   /** The claim this task checks (on `verifyBatch` / `select` items). */
   claim?: string;
@@ -655,7 +674,7 @@ export interface TaskAccepted extends RawBody {
   claim_text?: string;
 }
 
-export interface BatchAccepted extends RawBody {
+export interface BatchAccepted extends RawBody, ResponseMeta {
   batch_id: string;
   items: TaskAccepted[];
 }
@@ -693,13 +712,13 @@ export interface Progress extends RawBody {
  * `failed`. A task that `select` already resolved answers `cancelled: false`
  * with `needs_input`; cancel the task ids `select` returned.
  */
-export interface CancelResult extends RawBody {
+export interface CancelResult extends RawBody, ResponseMeta {
   task_id: string;
   cancelled: boolean;
   status: TaskStatus["status"];
 }
 
-export interface TaskStatus extends RawBody {
+export interface TaskStatus extends RawBody, ResponseMeta {
   /**
    * `cancelled` is terminal: the task was stopped elsewhere (the website's
    * Stop button, another process). The original API shape reports the same as
@@ -926,7 +945,7 @@ export interface UsageExtract extends RawBody {
  * The depth prices are **prices, not capabilities** — there is deliberately
  * no `verify_low` block beside `verify`. See {@link Usage.cost_options}.
  */
-export interface Usage extends RawBody {
+export interface Usage extends RawBody, ResponseMeta {
   /**
    * The tier slug — `"free" | "plus" | "pro" | "scale"`. This is the
    * field to branch on; it is stable. The Pro plan's slug was `"developer"`
@@ -1035,7 +1054,7 @@ export interface AskMessage extends RawBody {
 }
 
 /** Returned by `GET /ask/{verification_id}`. */
-export interface AskHistory extends RawBody {
+export interface AskHistory extends RawBody, ResponseMeta {
   messages: AskMessage[];
   exchanges_used: number;
   exchange_limit: number;
@@ -1060,7 +1079,7 @@ export interface AskHistory extends RawBody {
  * that never matched the wire — the server has always returned
  * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
  */
-export interface AskReply extends RawBody {
+export interface AskReply extends RawBody, ResponseMeta {
   role?: string; // 'expert' on every reply (the assistant turn)
   content?: string; // markdown-subset prose (see interface docstring)
   created_at?: string;
@@ -2071,7 +2090,7 @@ export interface ReviewCitationFailure extends RawBody {
 }
 
 /** What both views of a review share. */
-export interface ReviewEnvelope extends RawBody {
+export interface ReviewEnvelope extends RawBody, ResponseMeta {
   review_id: string;
   view: "full" | "issues";
   status: ReviewStatus;
@@ -2129,9 +2148,15 @@ export interface ReviewIssues extends ReviewEnvelope {
 }
 
 /** The `POST /review` receipt. `status` is always `queued`, not the current state. */
-export interface ReviewStarted extends RawBody {
+export interface ReviewStarted extends RawBody, ResponseMeta {
   review_id: string;
   status: "queued";
+  /**
+   * `true` when a 409 `idempotency_conflict` that names the review settled
+   * the call (the first submit with this key created it; `httpStatus` 409),
+   * `false` on the 202 that accepted it. Non-enumerable, like `raw`.
+   */
+  readonly settledByConflict?: boolean;
 }
 
 export interface ReviewInput {
@@ -2284,9 +2309,15 @@ export interface CitecheckInput {
 }
 
 /** The `POST /citecheck` receipt. `status` is always `queued`. */
-export interface CitecheckStarted extends RawBody {
+export interface CitecheckStarted extends RawBody, ResponseMeta {
   citecheck_id: string;
   status: "queued";
+  /**
+   * `true` when a 409 `idempotency_conflict` that names the check settled the
+   * call (`httpStatus` 409), `false` on the 202 that accepted it.
+   * Non-enumerable, like `raw`.
+   */
+  readonly settledByConflict?: boolean;
 }
 
 export interface CitecheckPolicy extends RawBody {
@@ -2316,7 +2347,7 @@ export interface CitecheckSummary extends RawBody {
 export type CitecheckStatus = "queued" | "checking" | "completed" | "failed" | "cancelled";
 
 /** `GET /citechecks/{id}`: a citation check, with the review's citation rows. */
-export interface Citecheck extends RawBody {
+export interface Citecheck extends RawBody, ResponseMeta {
   citecheck_id: string;
   status: CitecheckStatus;
   /**

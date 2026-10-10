@@ -19,8 +19,10 @@
 import { LenzValidationError, LenzWebhookSignatureError } from "./errors.js";
 
 /** A bad argument, refused before anything is read: as the client's. */
-function argumentError(message: string): LenzValidationError {
-  return new LenzValidationError({ message, code: "invalid_argument" });
+function argumentError(message: string, param: string): LenzValidationError {
+  const err = new LenzValidationError({ message, code: "invalid_argument" });
+  err.param = param;
+  return err;
 }
 import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
 import {
@@ -77,13 +79,14 @@ function snapshot(body: unknown): Uint8Array {
   if (Object.prototype.toString.call(body) === "[object ArrayBuffer]") {
     return new Uint8Array(body as ArrayBuffer).slice();
   }
-  throw argumentError(NOT_BYTES);
+  throw argumentError(NOT_BYTES, "body");
 }
 
 function requireSecret(secret: string): void {
   if (!secret) {
     throw argumentError(
       "Webhook verification requires a non-empty secret. Get it from /api-credentials.",
+      "secret",
     );
   }
 }
@@ -415,6 +418,7 @@ export class LenzWebhooks {
     if (!opts.secret) {
       throw argumentError(
         "LenzWebhooks requires a non-empty secret. Get it from /api-credentials.",
+        "secret",
       );
     }
     this.secret = opts.secret;

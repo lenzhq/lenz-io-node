@@ -73,6 +73,7 @@ import {
   LenzConnectionError,
   LenzError,
   LenzGoneError,
+  LenzInvalidKeyError,
   LenzInvalidResponseError,
   LenzNeedsInputError,
   LenzNotFoundError,
@@ -262,6 +263,8 @@ function checkedKey(key: unknown): string {
     throw argumentError(
       "idempotencyKey must be a string of visible ASCII characters, with spaces and tabs " +
         "only between them (not at either end).",
+      "invalid_header",
+      "idempotencyKey",
     );
   }
   return key;
@@ -346,7 +349,7 @@ function usableKey(key: unknown, where: string): string {
   // wrong, which the server could only refuse. Refused here, before any
   // request, without showing the key.
   if (/[^\x21-\x7e]/.test(trimmed)) {
-    throw new LenzAuthError({
+    throw new LenzInvalidKeyError({
       message: `${where}: the API key contains a character a key never has.`,
       cause:
         "The key has a space, a control character or a non-ASCII character inside it, " +
@@ -539,12 +542,16 @@ function checkTimeoutMs(value: unknown, where: string, legacy = false): void {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw argumentError(
       `${where}: timeoutMs must be a finite number of milliseconds above 0 (got ${String(value)}).`,
+      "invalid_option",
+      "timeoutMs",
     );
   }
   if (value > MAX_TIMEOUT_MS) {
     throw argumentError(
       `${where}: timeoutMs must be at most ${MAX_TIMEOUT_MS} ms, the longest a timer can wait ` +
         `(got ${String(value)}).`,
+      "invalid_option",
+      "timeoutMs",
     );
   }
 }
@@ -558,6 +565,8 @@ function checkMaxRetries(value: unknown, where: string, legacy = false): void {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw argumentError(
       `${where}: maxRetries must be a whole number, 0 or more (got ${String(value)}).`,
+      "invalid_option",
+      "maxRetries",
     );
   }
 }
@@ -575,27 +584,41 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 function checkHeaders(headers: unknown, where: string): void {
   if (headers === undefined) return;
   if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-    throw argumentError(`${where}: headers must be an object of header names and values.`);
+    throw argumentError(
+      `${where}: headers must be an object of header names and values.`,
+      "invalid_header",
+      "headers",
+    );
   }
   for (const [name, value] of Object.entries(headers)) {
     if (!HEADER_NAME.test(name)) {
-      throw argumentError(`${where}: ${JSON.stringify(name)} is not a valid header name.`);
+      throw argumentError(
+        `${where}: ${JSON.stringify(name)} is not a valid header name.`,
+        "invalid_header",
+        "headers",
+      );
     }
     if (RESERVED_HEADERS.has(name.toLowerCase())) {
       throw argumentError(
         `${where}: the ${name} header is set by the client and cannot be sent as an option ` +
           "(use idempotencyKey for Idempotency-Key and apiKey for Authorization).",
+        "invalid_header",
+        "headers",
       );
     }
     if (value !== undefined && value !== null && typeof value !== "string") {
       throw argumentError(
         `${where}: the value of header ${name} must be a string, or null to remove it.`,
+        "invalid_header",
+        "headers",
       );
     }
     if (typeof value === "string" && !isHeaderValue(value)) {
       throw argumentError(
         `${where}: the value of header ${name} must be a string of visible ASCII characters, ` +
           "with spaces and tabs only between them (not at either end), or null.",
+        "invalid_header",
+        "headers",
       );
     }
   }
@@ -618,17 +641,19 @@ function isHeaderValue(value: string): boolean {
 function checkOptions(options: unknown, where: string, kind: CallKind): RequestOptions {
   if (options === undefined || options === null) return {};
   if (typeof options !== "object" || Array.isArray(options)) {
-    throw argumentError(`${where}: options must be an object.`);
+    throw argumentError(`${where}: options must be an object.`, "invalid_option", "options");
   }
   const o = options as RequestOptions;
   if (o.signal !== undefined && !isAbortSignal(o.signal)) {
-    throw argumentError(`${where}: signal must be an AbortSignal.`);
+    throw argumentError(`${where}: signal must be an AbortSignal.`, "invalid_option", "signal");
   }
   if (kind === "request") checkTimeoutMs(o.timeoutMs, where);
   if (kind === "wait" && o.maxRetries !== undefined) {
     throw argumentError(
       `${where}: a wait takes no maxRetries (each poll uses the client's); ` +
         "set it on a copy with withOptions({ maxRetries }).",
+      "invalid_option",
+      "maxRetries",
     );
   }
   if (kind !== "wait") checkMaxRetries(o.maxRetries, where);
@@ -640,11 +665,15 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
       throw argumentError(
         `${where}: cancelOnAbort is an option of one wait (wait, verifyAndWait, ` +
           "verifyBatchAndWait, reviewAndWait, citecheckAndWait); pass it to the call.",
+        "invalid_option",
+        "cancelOnAbort",
       );
     }
     if (typeof cancelOnAbort !== "boolean") {
       throw argumentError(
         `${where}: cancelOnAbort must be true or false (got ${String(cancelOnAbort)}).`,
+        "invalid_option",
+        "cancelOnAbort",
       );
     }
   }
@@ -921,6 +950,8 @@ function checkPageSize(value: unknown, where: string): void {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_PAGE_SIZE) {
     throw argumentError(
       `${where}: pageSize must be a whole number from 1 to ${MAX_PAGE_SIZE} (got ${shown(value)}).`,
+      "invalid_page_size",
+      "pageSize",
     );
   }
 }
@@ -939,7 +970,11 @@ function shown(value: unknown): string {
 function startPage(page: number | undefined): number {
   const first = page ?? 1;
   if (!Number.isInteger(first) || first < 1) {
-    throw argumentError(`listAll needs a whole start page of 1 or more (got ${String(page)}).`);
+    throw argumentError(
+      `listAll needs a whole start page of 1 or more (got ${String(page)}).`,
+      "invalid_page",
+      "page",
+    );
   }
   return first;
 }
@@ -993,14 +1028,81 @@ function isJobBody(body: unknown, idField: string, id: string, lists: readonly s
   );
 }
 
-/** A 200 whose body is not the thing asked for (a proxy page, another job's body). */
-function unexpectedAnswer(method: string, path: string): LenzAPIError {
-  return new LenzAPIError({
-    message: `${method} ${path} returned an unexpected response body.`,
-    cause: "The answer is not the shape the API documents for this call.",
-    fix: "Retry; if it persists, contact support (https://lenz.io/contact) with the request id.",
+/**
+ * A 200 whose body is not the thing asked for (a proxy page, another job's
+ * body): a {@link LenzInvalidResponseError} (so still a `LenzAPIError`) with
+ * the answer's status, headers, body and body text.
+ */
+function unexpectedAnswer(method: string, path: string, body: unknown): LenzInvalidResponseError {
+  return invalidShape(
+    body,
+    `${method} ${path} returned an unexpected response body.`,
+    "The answer is not the shape the API documents for this call.",
+    "Retry; if it persists, contact support (https://lenz.io/contact) with the request id.",
+  );
+}
+
+/**
+ * A JSON object read from an answer, with a field the SDK reads holding the
+ * wrong type (`items: "x"`, `result: 42`): a {@link LenzInvalidResponseError}
+ * with the status, headers, body and body text of the answer `from` was read
+ * from, instead of a `TypeError` deeper in (or a result of the wrong type).
+ */
+function wrongType(
+  from: unknown,
+  method: string,
+  path: string,
+  field: string,
+): LenzInvalidResponseError {
+  return invalidShape(
+    from,
+    `${method} ${path} answered with ${field} of the wrong type.`,
+    `The answer is a JSON object, but its ${field} is not what the API documents for this call.`,
+    "Check that baseUrl points at the Lenz API and nothing between you rewrites the answer; " +
+      "if it persists, contact support (https://lenz.io/contact) with the request id.",
+  );
+}
+
+/** A `LenzInvalidResponseError` for the answer `from` (a result read from one) came from. */
+function invalidShape(
+  from: unknown,
+  message: string,
+  cause: string,
+  fix: string,
+): LenzInvalidResponseError {
+  const object = from !== null && typeof from === "object" ? from : undefined;
+  const meta = object ? RESPONSE_META.get(object) : undefined;
+  const source = object ? RAW_SOURCE.get(object) : undefined;
+  const headers = meta?.headers;
+  let body: Record<string, unknown> | null = null;
+  if (source !== undefined) {
+    const parsed: unknown = JSON.parse(source.text);
+    if (isPlainObject(parsed)) body = parsed;
+  }
+  const err = new LenzInvalidResponseError({
+    message,
+    cause,
+    fix,
     docUrl: "https://lenz.io/docs/errors",
+    requestId: headers?.["x-request-id"] ?? "",
+    statusCode: meta?.status ?? 0,
+    body,
+    retryable: null,
   });
+  if (headers !== undefined) {
+    err.headers = { ...headers };
+    err.servedVersion = (headers["x-lenz-api-version"] ?? "").trim();
+  }
+  err.bodyText = source !== undefined ? clippedBodyText(source.text) : "";
+  return err;
+}
+
+/** At most the first `BODY_TEXT_MAX` characters of a body, never half a surrogate pair. */
+function clippedBodyText(text: string): string {
+  if (text.length <= BODY_TEXT_MAX) return text;
+  const last = text.charCodeAt(BODY_TEXT_MAX - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? BODY_TEXT_MAX - 1 : BODY_TEXT_MAX;
+  return `${text.slice(0, end)}…`;
 }
 
 /**
@@ -1119,9 +1221,43 @@ function attachRaw(node: unknown, part: unknown, text: string, path: RawPath): v
   }
 }
 
-/** A parsed 2xx answer: it and every object in it carry `raw`. */
-function setRaw(value: object, text: string): void {
+/** A parsed 2xx answer: it and every object in it carry `raw`; it carries the answer's status and headers. */
+function setRaw(value: object, text: string, response: Response): void {
   attachRaw(value, value, text, []);
+  defineMeta(value, { status: response.status, headers: headersOf(response) });
+}
+
+/** The HTTP status and headers (names in lower case) of the answer a result was read from. */
+interface ResponseMetaSource {
+  status: number;
+  headers: Record<string, string>;
+}
+
+/** For each top-level result read from an answer, that answer's status and headers. */
+const RESPONSE_META = new WeakMap<object, ResponseMetaSource>();
+
+/**
+ * Gives a top-level result non-enumerable `httpStatus` and `headers` (a fresh
+ * copy of the headers on each read). An object that carries its own key of
+ * either name keeps it.
+ */
+function defineMeta(target: object, meta: ResponseMetaSource): void {
+  if (!Object.isExtensible(target)) return;
+  RESPONSE_META.set(target, meta);
+  if (!Object.prototype.hasOwnProperty.call(target, "httpStatus")) {
+    Object.defineProperty(target, "httpStatus", {
+      value: meta.status,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  if (!Object.prototype.hasOwnProperty.call(target, "headers")) {
+    Object.defineProperty(target, "headers", {
+      get: () => ({ ...meta.headers }),
+      enumerable: false,
+      configurable: true,
+    });
+  }
 }
 
 /**
@@ -1135,12 +1271,39 @@ function keepRaw<T>(from: unknown, to: T, key?: string): T {
   if (source === undefined || (to === from && key === undefined)) return to;
   const path = key === undefined ? source.path : [...source.path, key];
   attachRaw(to, partAt(JSON.parse(source.text), path), source.text, path);
+  // Only a result built from the whole answer is the answer: one read from a
+  // part of it (a status's `result`) is a nested object, without them.
+  const meta = key === undefined ? RESPONSE_META.get(from) : undefined;
+  if (meta !== undefined) defineMeta(to, meta);
   return to;
 }
 
-/** A receipt read from a 409 that names the job, its `raw` that 409's body. */
-function conflictReceipt<T extends object>(receipt: T, body: Record<string, unknown> | null): T {
-  if (body) defineRaw(receipt, JSON.stringify(body), []);
+/**
+ * A receipt read from a 409 that names the job: its `raw` that 409's body,
+ * its `httpStatus` and `headers` that 409's, and `settledByConflict` true.
+ */
+function conflictReceipt<T extends object>(receipt: T, exc: LenzError): T {
+  if (exc.body) defineRaw(receipt, JSON.stringify(exc.body), []);
+  defineMeta(receipt, { status: exc.statusCode, headers: { ...(exc.headers ?? {}) } });
+  return settled(receipt, true);
+}
+
+/**
+ * Gives a `review` / `citecheck` receipt a non-enumerable `settledByConflict`:
+ * `true` when a 409 `idempotency_conflict` naming the job settled the call,
+ * `false` on the 202 that accepted it.
+ */
+function settled<T extends object>(receipt: T, byConflict: boolean): T {
+  if (
+    Object.isExtensible(receipt) &&
+    !Object.prototype.hasOwnProperty.call(receipt, "settledByConflict")
+  ) {
+    Object.defineProperty(receipt, "settledByConflict", {
+      value: byConflict,
+      enumerable: false,
+      configurable: true,
+    });
+  }
   return receipt;
 }
 
@@ -1232,14 +1395,7 @@ function invalidResponse(
   );
   err.headers = headersOf(response);
   err.servedVersion = response.headers.get("X-Lenz-API-Version")?.trim() ?? "";
-  if (text.length > BODY_TEXT_MAX) {
-    // Never end on half of a surrogate pair.
-    const last = text.charCodeAt(BODY_TEXT_MAX - 1);
-    const end = last >= 0xd800 && last <= 0xdbff ? BODY_TEXT_MAX - 1 : BODY_TEXT_MAX;
-    err.bodyText = `${text.slice(0, end)}…`;
-  } else {
-    err.bodyText = text;
-  }
+  err.bodyText = clippedBodyText(text);
   return err;
 }
 
@@ -1314,14 +1470,42 @@ function pathId(id: string): string | null {
 const ARGUMENT_ERRORS = new WeakSet<object>();
 
 /**
- * The error of a bad argument, raised before any request: a
- * `LenzValidationError` (so still an `Error`) with `statusCode` 0, no `body`
- * and `code` `invalid_argument` unless a closer code is given.
+ * The codes of a bad argument refused before any request, shared with the
+ * Python SDK. A blank `verify` / `assess` input keeps the code the API's 422
+ * would have given instead (see `blankInput`).
  */
-function argumentError(message: string, code = "invalid_argument"): LenzValidationError {
+type ArgumentCode =
+  | "blank_input"
+  | "blank_item"
+  | "empty_list"
+  | "invalid_page_size"
+  | "invalid_page"
+  | "invalid_id"
+  | "invalid_header"
+  | "invalid_option"
+  | "conflicting_input"
+  | "invalid_argument";
+
+/**
+ * The error of a bad argument, raised before any request: a
+ * `LenzValidationError` (so still an `Error`) with `statusCode` 0, no `body`,
+ * `code` (`invalid_argument` unless a closer code is given) and `param`, the
+ * argument it names (`"pageSize"`, `"claims[2]"`), when there is one.
+ */
+function argumentError(
+  message: string,
+  code: ArgumentCode | "" | "validation_error" = "invalid_argument",
+  param?: string,
+): LenzValidationError {
   const err = new LenzValidationError({ message, code });
+  if (param !== undefined) err.param = param;
   ARGUMENT_ERRORS.add(err);
   return err;
+}
+
+/** `task_id` → `taskId`: an id's name as the method's parameter. */
+function camelName(field: string): string {
+  return field.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
 }
 
 /** `pathId`, or the local error a call throws instead of sending a request. */
@@ -1332,6 +1516,8 @@ function requirePathId(method: string, field: string, id: string): string {
     id
       ? `${method}() was given an invalid ${field}.`
       : `${method}() requires a non-empty ${field}.`,
+    "invalid_id",
+    camelName(field),
   );
 }
 
@@ -1478,8 +1664,13 @@ function claimText(input: { claim?: string; text?: string }): string | undefined
  * else the 2.x reading of it), but `statusCode` 0 and no `body`, since no
  * request was made.
  */
-function blankInput(sentence: string, code: string, fix: string): LenzValidationError {
-  const err = argumentError(sentence, code);
+function blankInput(
+  sentence: string,
+  code: "" | "blank_input" | "blank_item" | "validation_error",
+  fix: string,
+  param: string,
+): LenzValidationError {
+  const err = argumentError(sentence, code, param);
   err.cause_ = sentence;
   err.fix = fix;
   err.docUrl = "https://lenz.io/docs/errors";
@@ -1499,8 +1690,8 @@ function verifyText(client: object, input: VerifyInput): string {
  */
 function blankClaim(client: object, fix: string): LenzValidationError {
   return aliasesOn(client)
-    ? blankInput("Text is required.", "", fix)
-    : blankInput("claim is required.", "blank_input", fix);
+    ? blankInput("Text is required.", "", fix, "claim")
+    : blankInput("claim is required.", "blank_input", fix, "claim");
 }
 
 /** The camelCase names a batch item takes beside its 2.x snake_case ones. */
@@ -1555,12 +1746,17 @@ function checkAliases(
   aliases: Readonly<Record<string, string>>,
   where: string,
   isAbsent: IsAbsent,
+  param: string,
 ): void {
   for (const [camel, snake] of Object.entries(aliases)) {
     const a = input[camel];
     const b = input[snake];
     if (!isAbsent(snake, a) && !isAbsent(snake, b) && !sameAliasValue(a, b)) {
-      throw argumentError(`${where}: ${camel} and ${snake} differ; send one of them.`);
+      throw argumentError(
+        `${where}: ${camel} and ${snake} differ; send one of them.`,
+        "conflicting_input",
+        param,
+      );
     }
   }
 }
@@ -1577,7 +1773,13 @@ function pairsToWire(pairs: unknown): unknown {
   const out = pairs.map((pair: unknown, i) => {
     if (pair === null || typeof pair !== "object" || Array.isArray(pair)) return pair;
     const fields = pair as Record<string, unknown>;
-    checkAliases(fields, CITATION_PAIR_ALIASES, `citecheck() pairs[${i}]`, undefinedIsAbsent);
+    checkAliases(
+      fields,
+      CITATION_PAIR_ALIASES,
+      `citecheck() pairs[${i}]`,
+      undefinedIsAbsent,
+      `pairs[${i}]`,
+    );
     const wire = toWireNames(fields, CITATION_PAIR_ALIASES);
     if (wire !== fields) changed = true;
     return wire;
@@ -1950,6 +2152,8 @@ class LibraryNamespace {
     if (input.sort === "random") {
       throw argumentError(
         'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
+        "invalid_option",
+        "sort",
       );
     }
     const first = startPage(input.page);
@@ -1969,10 +2173,21 @@ class LibraryNamespace {
 function citecheckBody(input: CitecheckInput): Record<string, unknown> {
   const hasText = typeof input.text === "string" && input.text.trim() !== "";
   if (hasText === (input.pairs !== undefined)) {
-    throw argumentError("citecheck() needs exactly one of text and pairs.");
+    // Both given conflict; neither is an input left blank.
+    throw hasText
+      ? argumentError(
+          "citecheck() needs exactly one of text and pairs.",
+          "conflicting_input",
+          "pairs",
+        )
+      : argumentError("citecheck() needs exactly one of text and pairs.", "blank_input", "text");
   }
   if (input.pairs !== undefined && input.maxCitations !== undefined) {
-    throw argumentError("maxCitations goes with text: every pair is checked.");
+    throw argumentError(
+      "maxCitations goes with text: every pair is checked.",
+      "conflicting_input",
+      "maxCitations",
+    );
   }
   const body: Record<string, unknown> = hasText
     ? { text: input.text }
@@ -2057,6 +2272,8 @@ export class Lenz {
     if (opts.legacyAliases !== undefined && typeof opts.legacyAliases !== "boolean") {
       throw argumentError(
         `new Lenz(): legacyAliases must be true or false (got ${shown(opts.legacyAliases)}).`,
+        "invalid_option",
+        "legacyAliases",
       );
     }
     this.legacyAliases = opts.legacyAliases ?? true;
@@ -2100,6 +2317,8 @@ export class Lenz {
       throw argumentError(
         "withOptions(): legacyAliases is set when the client is made " +
           "(new Lenz({ legacyAliases })); a copy keeps the client's.",
+        "invalid_option",
+        "legacyAliases",
       );
     }
     for (const name of Object.keys(given)) {
@@ -2107,6 +2326,8 @@ export class Lenz {
         throw argumentError(
           `withOptions(): unknown option ${JSON.stringify(name)} ` +
             `(it takes ${[...COPY_OPTION_NAMES].join(", ")}).`,
+          "invalid_option",
+          name,
         );
       }
     }
@@ -2115,7 +2336,11 @@ export class Lenz {
     const hasKey = "apiKey" in given;
     const apiKey = given["apiKey"];
     if (apiKey !== undefined && apiKey !== null && typeof apiKey !== "string") {
-      throw argumentError(`withOptions(): apiKey must be a string (got ${typeof apiKey}).`);
+      throw argumentError(
+        `withOptions(): apiKey must be a string (got ${typeof apiKey}).`,
+        "invalid_option",
+        "apiKey",
+      );
     }
     const copyKey = hasKey ? usableKey(apiKey, "withOptions()") : undefined;
     const base = COPY_OPTIONS.get(this);
@@ -2172,7 +2397,13 @@ export class Lenz {
         // `sourceUrl` / `webhookUrl` are the camelCase names of `source_url` /
         // `webhook_url`; the body is built in a fixed key order either way.
         const fields = c as Record<string, unknown>;
-        checkAliases(fields, BATCH_ITEM_ALIASES, `verifyBatch() claims[${i}]`, batchItemAbsent);
+        checkAliases(
+          fields,
+          BATCH_ITEM_ALIASES,
+          `verifyBatch() claims[${i}]`,
+          batchItemAbsent,
+          `claims[${i}]`,
+        );
         const sourceUrl = batchItemValue(fields, "sourceUrl", "source_url");
         const webhookUrl = batchItemValue(fields, "webhookUrl", "webhook_url");
         const item: Record<string, unknown> = { text: c.claim || c.text };
@@ -2316,7 +2547,11 @@ export class Lenz {
     const single = claimText(input);
     const list = input.claims;
     if (list && list.length > 0 && single) {
-      const err = argumentError("assess takes one claim (`claim`) or a list (`claims`), not both.");
+      const err = argumentError(
+        "assess takes one claim (`claim`) or a list (`claims`), not both.",
+        "conflicting_input",
+        "claims",
+      );
       err.cause_ = "`claims` was given together with a non-empty `claim` / `text`.";
       err.fix = "Send a single claim as `claim`, or up to 20 claims as `claims`.";
       err.docUrl = "https://lenz.io/docs/errors";
@@ -2328,14 +2563,20 @@ export class Lenz {
         if (typeof item !== "string") {
           // The API's schema error, as this client reads it.
           throw aliasesOn(this)
-            ? blankInput("Validation failed", "", fix)
-            : blankInput(`claims.${i}: Input should be a valid string`, "validation_error", fix);
+            ? blankInput("Validation failed", "", fix, `claims[${i}]`)
+            : blankInput(
+                `claims.${i}: Input should be a valid string`,
+                "validation_error",
+                fix,
+                `claims[${i}]`,
+              );
         }
         if (!hasText(item)) {
           throw blankInput(
             `claims[${i}] is blank.`,
             aliasesOn(this) ? "blank_item" : "blank_input",
             fix,
+            `claims[${i}]`,
           );
         }
       });
@@ -2413,7 +2654,7 @@ export class Lenz {
     const id = requirePathId("select", "task_id", taskId);
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
     if (!chosen || chosen.length === 0) {
-      throw argumentError("select requires a non-empty claims array");
+      throw argumentError("select requires a non-empty claims array", "empty_list", "claims");
     }
     const call = resolveCall(this, options, "select()");
     // One key per call, reused across its own retries, so a retried select
@@ -2572,14 +2813,17 @@ export class Lenz {
     if (input.suggestEdits) escalate.suggest_edits = true;
     if (Object.keys(escalate).length > 0) body.escalate = escalate;
     try {
-      return await this.request<ReviewStarted>({
-        method: "POST",
-        path: "/review",
-        json: body,
-        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
-        conflictReceipt: "review_id",
-        ...transport,
-      });
+      return settled(
+        await this.request<ReviewStarted>({
+          method: "POST",
+          path: "/review",
+          json: body,
+          headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
+          conflictReceipt: "review_id",
+          ...transport,
+        }),
+        false,
+      );
     } catch (exc) {
       // A retried submit whose first attempt created the review (its socket
       // dropped before the 202 arrived) meets the review still being created
@@ -2593,7 +2837,7 @@ export class Lenz {
         reviewId !== ""
       ) {
         // `raw`: the 409's body, the answer that settled the call.
-        return conflictReceipt({ review_id: reviewId, status: "queued" }, exc.body);
+        return conflictReceipt({ review_id: reviewId, status: "queued" }, exc);
       }
       throw exc;
     }
@@ -2643,14 +2887,17 @@ export class Lenz {
     transport: Partial<SendOptions> = {},
   ): Promise<CitecheckStarted> {
     try {
-      return await this.request<CitecheckStarted>({
-        method: "POST",
-        path: "/citecheck",
-        json: body,
-        headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
-        conflictReceipt: "citecheck_id",
-        ...transport,
-      });
+      return settled(
+        await this.request<CitecheckStarted>({
+          method: "POST",
+          path: "/citecheck",
+          json: body,
+          headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
+          conflictReceipt: "citecheck_id",
+          ...transport,
+        }),
+        false,
+      );
     } catch (exc) {
       // A retried submit that meets the first attempt's check still being
       // created: when the server names it, that IS the receipt.
@@ -2662,7 +2909,7 @@ export class Lenz {
         typeof named === "string" &&
         named !== ""
       ) {
-        return conflictReceipt({ citecheck_id: named, status: "queued" }, exc.body);
+        return conflictReceipt({ citecheck_id: named, status: "queued" }, exc);
       }
       throw exc;
     }
@@ -2726,7 +2973,7 @@ export class Lenz {
       ...transport,
     });
     if (!isJobBody(body, "citecheck_id", citecheckId, CITECHECK_LISTS)) {
-      throw unexpectedAnswer("POST", `/citechecks/${id}/cancel`);
+      throw unexpectedAnswer("POST", `/citechecks/${id}/cancel`, body);
     }
     return keepRaw(body, withCitecheckDefaults(body, aliasesOn(this)) as Citecheck);
   }
@@ -2844,7 +3091,7 @@ export class Lenz {
       ...transport,
     });
     if (!isJobBody(body, "review_id", reviewId, REVIEW_LISTS)) {
-      throw unexpectedAnswer("POST", `/reviews/${id}/cancel`);
+      throw unexpectedAnswer("POST", `/reviews/${id}/cancel`, body);
     }
     return keepRaw(body, withReviewDefaults(body, aliasesOn(this)) as ReviewFull);
   }
@@ -3074,6 +3321,8 @@ export class Lenz {
     if (!taskId) {
       throw argumentError(
         "wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).",
+        "invalid_id",
+        "taskId",
       );
     }
     requirePathId("wait", "task_id", taskId);
@@ -3170,6 +3419,9 @@ export class Lenz {
         : this.verifyBatch(batchInput),
       call.signals,
     );
+    if (!Array.isArray(accepted.items) || !accepted.items.every(isPlainObject)) {
+      throw wrongType(accepted, "POST", "/verify/batch", "items");
+    }
     for (const it of accepted.items) acceptedId("task_id", it.task_id);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
     // Each accepted task not yet seen to end is cancelled on an abort.
@@ -3213,7 +3465,8 @@ export class Lenz {
           status: "timeout",
         };
       }
-      if (status.status === "completed" && status.result) {
+      // A result that is not an object reads as no result: the row fails.
+      if (status.status === "completed" && isPlainObject(status.result)) {
         return {
           task_id: it.task_id,
           ...names(it),
@@ -3499,8 +3752,11 @@ export class Lenz {
         emptyErr.taskId = taskId; // parity: the Python SDK sets task_id here too
         throw emptyErr;
       }
+      if (!isPlainObject(polled.result)) {
+        throw wrongType(polled, "GET", `/verify/status/${taskId}`, "result");
+      }
       // `raw` is the verification as the final poll sent it.
-      return keepRaw(polled, polled.result!, "result");
+      return keepRaw(polled, polled.result, "result");
     }
     if (status.status === "needs_input") {
       const err = new LenzNeedsInputError({
@@ -3966,7 +4222,7 @@ export class Lenz {
           if (value === null || typeof value !== "object" || Array.isArray(value)) {
             throw invalidResponse(opts.method, opts.path, response, text, undefined, "not_object");
           }
-          setRaw(value, text);
+          setRaw(value, text, response);
           return { done: true, value: value as T };
         }
         // Error path. Retry on 5xx + 429; otherwise throw. The attempt's

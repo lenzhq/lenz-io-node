@@ -176,6 +176,17 @@ export class LenzError extends Error {
 export class LenzAuthError extends LenzError {}
 
 /**
+ * The `apiKey` (passed, in `LENZ_API_KEY`, or given to `withOptions`) has a
+ * character a key never has inside it (a space, a control character, a
+ * non-ASCII character), so it cannot ride an `Authorization` header: refused
+ * when the client or the copy is made, before any request (`statusCode` 0;
+ * the message never contains the key). A {@link LenzAuthError}, so a handler
+ * for that still catches it; a 401 / 403 from the API stays a plain
+ * `LenzAuthError`. Since 3.2.
+ */
+export class LenzInvalidKeyError extends LenzAuthError {}
+
+/**
  * 402 — you're out of balance, or your plan doesn't cover this call.
  *
  * `remaining` and `requested` are in the **capability's own unit** (you asked
@@ -279,6 +290,13 @@ export class LenzQuotaExceededError extends LenzError {
 
 export class LenzValidationError extends LenzError {
   errors: Array<Record<string, unknown>> = [];
+  /**
+   * On an argument the SDK refused before sending (`statusCode` 0), the
+   * argument it names, e.g. `"pageSize"`, `"claims[2]"`, `"headers"`;
+   * `undefined` on the API's 422 and where no one argument is at fault.
+   * Since 3.2; the README lists each local `code` with its `param`.
+   */
+  declare param?: string;
 }
 
 /**
