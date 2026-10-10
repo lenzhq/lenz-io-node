@@ -312,9 +312,10 @@ const COPY_OPTION_NAMES: ReadonlySet<string> = new Set([
 /** A key as the client keeps it: one of only whitespace (or none) is no key, `""`. */
 function usableKey(key: unknown, where: string): string {
   if (typeof key !== "string") return "";
-  // Whitespace around a key is dropped (fetch drops it from a header value
-  // anyway); empty or whitespace-only is no key.
-  const trimmed = key.trim();
+  // Only ASCII whitespace at the ends is dropped (as on the Python SDK; fetch
+  // drops it from a header value anyway); empty or whitespace-only is no key.
+  // Anything else outside visible ASCII is refused below.
+  const trimmed = key.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, "");
   // Inside the key, only visible ASCII can ride an `Authorization` header: a
   // space, a control character or a non-ASCII letter is a pasted key gone
   // wrong, which the server could only refuse. Refused here, before any
@@ -1368,7 +1369,25 @@ function waitOptions(
 
 /** Whether a value is text with something in it besides whitespace. */
 function hasText(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
+  return typeof value === "string" && !BLANK.test(value);
+}
+
+/**
+ * Empty or whitespace only, by the API's own rule (Python's `str.strip()`):
+ * Unicode White_Space plus the separators U+001C-U+001F; a BOM (U+FEFF) is
+ * not whitespace there, so it is content here too.
+ */
+// eslint-disable-next-line no-control-regex -- U+001C-U+001F are whitespace there.
+const BLANK = /^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/;
+
+/**
+ * The text of `claim` / `text`: whichever carries content, `claim` first (the
+ * API does the same), else what was given.
+ */
+function claimText(input: { claim?: string; text?: string }): string | undefined {
+  if (hasText(input.claim)) return input.claim;
+  if (hasText(input.text)) return input.text;
+  return input.claim || input.text;
 }
 
 /**
@@ -1388,15 +1407,19 @@ function blankInput(sentence: string, code: string, fix: string): LenzValidation
 
 /** The text `verify` sends: `claim`, else `text`; refused when blank. */
 function verifyText(client: object, input: VerifyInput): string {
-  const text = input.claim || input.text;
-  if (!hasText(text)) {
-    throw blankInput(
-      "Text is required.",
-      aliasesOn(client) ? "" : "blank_input",
-      "Pass the claim to check as `claim`.",
-    );
-  }
+  const text = claimText(input);
+  if (!hasText(text)) throw blankClaim(client, "Pass the claim to check as `claim`.");
   return text;
+}
+
+/**
+ * A blank `claim`: the API's 422 as this client reads it (its sentence and
+ * code with `legacyAliases: false`, the 2.x reading by default).
+ */
+function blankClaim(client: object, fix: string): LenzValidationError {
+  return aliasesOn(client)
+    ? blankInput("Text is required.", "", fix)
+    : blankInput("claim is required.", "blank_input", fix);
 }
 
 /** The camelCase names a batch item takes beside its 2.x snake_case ones. */
@@ -2209,7 +2232,7 @@ export class Lenz {
     checkTimeoutMs(input.timeoutMs, "assess() input", true);
     // `claim` is the documented name; `text` the alias. Either way the wire
     // key is `text`, which every server version accepts.
-    const single = input.claim || input.text;
+    const single = claimText(input);
     const list = input.claims;
     if (list && list.length > 0 && single) {
       const err = argumentError("assess takes one claim (`claim`) or a list (`claims`), not both.");
@@ -2219,21 +2242,24 @@ export class Lenz {
       throw err;
     }
     if (list && list.length > 0) {
-      list.forEach((item, i) => {
+      list.forEach((item: unknown, i) => {
+        const fix = "Leave out the blank items: every item of `claims` is one claim to check.";
+        if (typeof item !== "string") {
+          // The API's schema error, as this client reads it.
+          throw aliasesOn(this)
+            ? blankInput("Validation failed", "", fix)
+            : blankInput(`claims.${i}: Input should be a valid string`, "validation_error", fix);
+        }
         if (!hasText(item)) {
           throw blankInput(
-            `claims[${i}] is required.`,
+            `claims[${i}] is blank.`,
             aliasesOn(this) ? "blank_item" : "blank_input",
-            "Leave out the blank items: every item of `claims` is one claim to check.",
+            fix,
           );
         }
       });
     } else if (!hasText(single)) {
-      throw blankInput(
-        "Text is required.",
-        aliasesOn(this) ? "" : "blank_input",
-        "Pass the claim to check as `claim`, or a list as `claims`.",
-      );
+      throw blankClaim(this, "Pass the claim to check as `claim`, or a list as `claims`.");
     }
     const call = resolveCall(this, options, "assess()");
     // A random key per invocation, reused across this client's own retries so
@@ -3458,7 +3484,7 @@ export class Lenz {
     const body: Record<string, unknown> = {
       // `claim` is the documented name; `text` the alias. The wire key stays
       // `text`, which every server version accepts.
-      text: input.claim || input.text,
+      text: claimText(input),
     };
     // Omitted when unset or empty (the server reads that as no source page),
     // so a body carries only what was given.

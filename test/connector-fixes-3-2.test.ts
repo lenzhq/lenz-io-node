@@ -730,3 +730,68 @@ describe("every local bad argument is a LenzValidationError", () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 });
+
+describe("blank input: the API's sentences, and the API's whitespace rule", () => {
+  const sentences = async (c: Lenz) =>
+    Promise.all(
+      [
+        () => c.verify({ claim: " " }),
+        () => c.assess({ claim: " " }),
+        () => c.assess({ claims: ["a", " "] }),
+        () => c.assess({ claims: ["a", 5 as unknown as string] }),
+      ].map(async (run) => {
+        const err = (await thrown(run)) as LenzError;
+        return [err.message, err.code];
+      }),
+    );
+
+  it("with legacyAliases: false, the API's own sentence and code", async () => {
+    expect(await sentences(new Lenz({ apiKey: "lenz_t", legacyAliases: false }))).toEqual([
+      ["claim is required.", "blank_input"],
+      ["claim is required.", "blank_input"],
+      ["claims[1] is blank.", "blank_input"],
+      ["claims.1: Input should be a valid string", "validation_error"],
+    ]);
+  });
+
+  it("by default, the 2.x reading of the same answers", async () => {
+    expect(await sentences(new Lenz({ apiKey: "lenz_t" }))).toEqual([
+      ["Text is required.", ""],
+      ["Text is required.", ""],
+      ["claims[1] is blank.", "blank_item"],
+      ["Validation failed", ""],
+    ]);
+  });
+
+  it("the field with content is sent: a blank claim beside a real text", async () => {
+    const { fetch, sent } = server(() => ({
+      status: 202,
+      body: { task_id: "t1", status: "pending" },
+    }));
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verify({ claim: "  ", text: "real", idempotency: false });
+    expect(sent[0]!.body).toBe('{"text":"real"}');
+  });
+
+  it("U+0085 and U+001F are whitespace (blank); a BOM is content", async () => {
+    const { fetch, sent } = server(() => ({
+      status: 202,
+      body: { task_id: "t1", status: "pending" },
+    }));
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await expect(client.verify({ claim: "\u0085\u001f　" })).rejects.toBeInstanceOf(
+      LenzValidationError,
+    );
+    await client.verify({ claim: "﻿", idempotency: false });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("a key: only ASCII whitespace at the ends is dropped", async () => {
+    expect(() => new Lenz({ apiKey: "lenz_t " })).toThrow(LenzAuthError);
+    expect(() => new Lenz({ apiKey: "﻿lenz_t" })).toThrow(LenzAuthError);
+    expect(() => new Lenz({ apiKey: "lenz_t\u0085" })).toThrow(LenzAuthError);
+    const { fetch, sent } = server(() => ({ body: { ok: true } }));
+    await new Lenz({ apiKey: "\f\vlenz_t\r\n", fetch }).usage();
+    expect(sent[0]!.headers.get("authorization")).toBe("Bearer lenz_t");
+  });
+});

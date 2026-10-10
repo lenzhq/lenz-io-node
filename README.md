@@ -1003,8 +1003,15 @@ A blank input is refused before anything is sent (since 3.2): `verify` /
 `verifyAndWait` with no `claim` (or one of only whitespace), and `assess` with
 no `claim`, an empty `claims` list or a blank item in it, throw
 `LenzValidationError` with the sentence and `code` the API's 422 would have
-given (`"Text is required."`, `claims[1] is required.`), `statusCode` 0 and
-no `body`.
+given, read as the client reads it: with `legacyAliases: false` the API's
+own sentence and code (`"claim is required."` / `blank_input`,
+`"claims[1] is blank."` / `blank_input`, a non-string item
+`"claims.1: Input should be a valid string"` / `validation_error`), by default
+the 2.x reading of them (`"Text is required."` / `""`, `"claims[1] is
+blank."` / `blank_item`, `"Validation failed"` / `""`); `statusCode` 0 and no
+`body`. As on the API, the one of `claim` / `text` that has content is used,
+and blank means empty or whitespace by the API's rule (a BOM is content).
+`verifyBatch` items are not checked locally: the API answers a blank item.
 
 **A bad argument** is refused before anything is sent, with
 `LenzValidationError` (since 3.2; before, a plain `Error`, and a `TypeError`
@@ -1287,8 +1294,10 @@ cannot be timed out.
 A key is visible ASCII with nothing inside it: one with a space, a line break,
 another control character or a non-ASCII character inside it throws
 `LenzAuthError` when the client (or a `withOptions` copy) is made, before any
-request (since 3.2; before, every call failed on it). Whitespace around a key
-is dropped. The message never contains the key.
+request (since 3.2; before, every call failed on it). ASCII whitespace around
+a key (a trailing newline read from a file, say) is dropped; anything else
+outside visible ASCII is refused, at the ends too (a non-breaking space, a
+BOM). The message never contains the key.
 
 A text containing a lone UTF-16 surrogate (half of an emoji cut by a
 `slice`) is sent with each one replaced by U+FFFD; valid pairs are unchanged.
@@ -1307,7 +1316,7 @@ or merged into the options object it already takes (the waits' options,
 `verifications.related`'s `{ limit }`):
 
 ```ts
-await client.assess({ claim }, { timeoutMs: 20_000, maxRetries: 0 });
+await client.assess({ claim }, { timeoutMs: 120_000, maxRetries: 0 });
 await client.verify({ claim }, { signal, headers: { "X-Trace-Id": traceId } });
 await client.getReview(reviewId, { view: "issues", signal });
 ```
@@ -1339,9 +1348,12 @@ Headers merge (case does not matter; the call's value wins), the others
 replace. `extract` and `assess` wait at least 150 s and 100 s when the
 timeout is the client's own (`new Lenz({ timeoutMs })` or the default); a
 `timeoutMs` given for the call or on a `withOptions` copy is used as given
-(3.1 and earlier raised a copy's to the minimum too). Below the minimum it can
-end a call the server is still running; a retry with the same idempotency key
-then replays it rather than running it twice. Invalid values (a `timeoutMs` that is
+(3.1 and earlier raised a copy's to the minimum too). **A `timeoutMs` below
+100 s on `assess` or 150 s on `extract` can end a call the server is still
+running, and charging for**: `/assess` can take about 90 s and charges before
+its panel runs, so the caller pays and loses the answer. Resend it with the
+same idempotency key (`err.idempotencyKey`) to get that answer rather than
+running it twice. Invalid values (a `timeoutMs` that is
 not a finite number above 0, a `maxRetries` that is not a whole number from 0,
 a timeout above 2,147,483,647 ms (the longest a timer can hold), a header name
 that is not a valid token, a header value that is not a string or `null`, or
@@ -1427,7 +1439,7 @@ each result carries `raw`: the JSON object it was read from, exactly as
 received, with none of the names or defaults the SDK adds. It is a getter, not
 an own enumerable key, so it does not show in `JSON.stringify`, `Object.keys`,
 a spread or a deep-equal, and each read is a fresh deep copy (change it
-freely).
+freely): the result keeps the response text and parses it on each read.
 
 ```ts
 const out = await client.assess({ claims: ["A.", "B."] });
@@ -1476,8 +1488,10 @@ const lenz = new Lenz({
 });
 
 export async function check(userToken: string, text: string, signal: AbortSignal) {
-  const client = lenz.withOptions({ apiKey: userToken, timeoutMs: 20_000, signal });
   try {
+    // Inside the try: a malformed key throws LenzAuthError here.
+    const client = lenz.withOptions({ apiKey: userToken, signal });
+    // No timeoutMs: assess keeps its 100 s minimum (see Timeouts below).
     const out = await client.assess({ claim: text });
     return out.raw; // the API's JSON object, as received
   } catch (err) {
@@ -1508,7 +1522,10 @@ export async function check(userToken: string, text: string, signal: AbortSignal
   `Host` and `Transfer-Encoding`), in any casing.
 - **Timeouts**: a `timeoutMs` on the copy or the call is used as given, also
   on `assess` and `extract` (only the client's own timeout is raised to their
-  100 s / 150 s minimum). A custom `fetch` must honour `init.signal`.
+  100 s / 150 s minimum). Below that minimum it can end a call the server is
+  still running and charging for (`/assess` can take about 90 s and charges
+  before its panel runs): leave it out, or give at least 100 000 / 150 000.
+  A custom `fetch` must honour `init.signal`.
 - **Retries**: `maxRetries: 0` when your caller has its own deadline or retry
   budget; the SDK then sends each request once. A resend should reuse
   `err.idempotencyKey`.
