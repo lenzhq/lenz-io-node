@@ -178,7 +178,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "suggested_rewrite",
   ]),
   EntityRef: new Set(["name", "qid"]),
-  Source: new Set(["source_name", "title", "url", "snippet", "date"]),
+  Source: new Set(["source_name", "title", "url", "snippet", "snippet_language", "date"]),
   Audit: new Set([
     "adjudication_summary",
     "assessments",
@@ -645,6 +645,9 @@ describe("contract", () => {
     // fixtures are the two halves of that contract.
     ["verify_status_processing.json", "TaskStatus"],
     ["verifications_detail.json", "Verification"],
+    // Sources with `snippet_language`: a code, a regional code, null, and a
+    // source from an API that predates the key. Same fixture as Python.
+    ["verifications_detail_snippet_language.json", "Verification"],
     // Both halves of the coverage contract: the server omits `coverage`
     // entirely when the feature is off (that is `verifications_detail`),
     // emits a full block with a certificate when a verdict qualifies, and a
@@ -795,6 +798,17 @@ describe("contract", () => {
     delete older.suggested_rewrite;
     expect(older).not.toHaveProperty("suggested_rewrite");
     expect(older.suggested_rewrite ?? null).toBeNull();
+  });
+
+  it("snippet_language: a code when the quote is not English, null for English, absent on an older API", () => {
+    const detail = loadFixture("verifications_detail_snippet_language.json") as Verification;
+    expect(detail.sources?.map((s) => s.snippet_language)).toEqual([null, "uk", "pt", undefined]);
+    // The last source has no key at all; the first has an explicit null.
+    expect(detail.sources?.[0]).toHaveProperty("snippet_language", null);
+    expect(detail.sources?.[3]).not.toHaveProperty("snippet_language");
+    // A response from before the field reads as "no language".
+    const older = loadFixture("verifications_detail.json") as Verification;
+    expect(older.sources?.[0]?.snippet_language ?? null).toBeNull();
   });
 
   it("list items carry suggested_rewrite: a string on a False row, null on a True one", () => {
