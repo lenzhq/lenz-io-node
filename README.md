@@ -512,9 +512,10 @@ try {
   answer), its `name` is `"AbortError"`, and its `cause` is the signal's
   `reason` (a `TimeoutError` for `AbortSignal.timeout(ms)`, which bounds a
   whole call, retries and polls included).
-- **Nothing is cancelled on the server.** Work the server accepted keeps
-  running and is charged if it completes. Stop it with `cancel`,
-  `cancelReview` or `cancelCitecheck`, as above.
+- **Nothing is cancelled on the server** unless a wait asks for it with
+  `cancelOnAbort: true` (below). Work the server accepted keeps running and is
+  charged if it completes. Stop it with `cancel`, `cancelReview` or
+  `cancelCitecheck`, as above.
 - It carries what the call knew: `idempotencyKey` when the request was keyed
   (resend with it to get the same answer, or the submit's receipt, back
   instead of starting the work again), and once the work was accepted,
@@ -525,6 +526,55 @@ try {
 - A client copy made with a signal (`withOptions({ signal })`) is dead once the
   signal fires: every later call on it throws `LenzAbortError`. Make such a
   copy per request, and cancel through the client you made it from.
+
+### Cancel the run when the caller goes away
+
+The waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`,
+`citecheckAndWait`) take `cancelOnAbort: true` (since 3.1; default `false`).
+When the signal fires after the run was accepted, the wait sends the matching
+cancel itself, then throws the same `LenzAbortError`:
+
+```ts
+export async function POST(request: Request): Promise<Response> {
+  const { text } = (await request.json()) as { text: string };
+  const review = await client.reviewAndWait(
+    { text },
+    { signal: request.signal, cancelOnAbort: true },
+  );
+  return Response.json(review);
+}
+```
+
+- The signal must fire when your caller goes away. Where your framework hands
+  you a `Request` whose `signal` fires on a client disconnect (Bun does),
+  pass `request.signal`. On Cloudflare Workers, `request.signal` needs the
+  `enable_request_signal` compatibility flag, and a disconnect may end the
+  invocation before the cancel leaves: send the cancel yourself inside
+  `ctx.waitUntil`, or do not rely on this. Express has no `request.signal`:
+  make an `AbortController`, call `controller.abort()` on `res.on("close", …)`
+  when `!res.writableFinished`, and pass `controller.signal`.
+- The cancel is `cancel` for a verification (one per task a batch accepted and
+  not yet seen to end, sent concurrently), `cancelReview` for a review and
+  `cancelCitecheck` for a citation check. It is best effort: one attempt each,
+  no retry, all within 5 s, after which the abort is thrown whatever the
+  cancels did. So the abort is thrown up to 5 s after the signal fires: with
+  `AbortSignal.timeout(ms)`, the call can overrun `ms` by up to 5 s.
+- A cancel that fails, times out, or finds the run already ended is reported
+  to the client's `logger.warn` with the job id only, never thrown. Without a
+  logger it is silent.
+- What is charged: a cancelled verification is not charged; a cancelled review
+  or citation check is still charged for what it had delivered (only the rest
+  is refunded); a run that completed before the cancel reached it is billed as
+  a completed run.
+- An abort during the submit has nothing to cancel: resend with the error's
+  `idempotencyKey` to find the run, as above. A `*AndWait` called with a
+  signal that has already fired sends nothing; `wait(taskId, …)` already has
+  the id, so it sends the cancel, then throws with `taskId`.
+- The wait's own `timeoutMs` running out is not an abort and never cancels the
+  run. A signal you pass, `AbortSignal.timeout(ms)` included, is an abort.
+- It is an option of one wait, not of `withOptions` (which throws if given
+  `true`): a copy's `signal` firing cancels the run only for the waits called
+  with `cancelOnAbort: true`.
 
 ## Response shape — the unified vocabulary
 
@@ -1124,7 +1174,7 @@ new Lenz({
   timeoutMs: 30000,
   maxRetries: 3,
   fetch: customFetch, // inject for tests
-  logger: console, // optional: retries (debug) and verifyAndWait's task id (info); silent without one
+  logger: console, // optional: retries (debug), verifyAndWait's task id (info), a cancelOnAbort cancel that did not cancel (warn); silent without one
 });
 ```
 
@@ -1167,6 +1217,10 @@ What the options bound, per method:
 | Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
 | `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                 | each page request's retries                                                                                                                     |
 | `withOptions`                                                                                                                                                                    | every call made through the copy                                                                             | every call made through the copy                                                                                                                |
+
+The waits also take `cancelOnAbort: true`: when the `signal` fires after the
+run was accepted, the run is cancelled on the server too (see
+[Cancel the run when the caller goes away](#cancel-the-run-when-the-caller-goes-away)).
 
 For one call, the call's value wins, then the deprecated `timeoutMs` inside an
 `extract` / `assess` input, then a `withOptions` copy's, then the client's.

@@ -180,6 +180,13 @@ const POLL_HINT_MAX_S = 30;
 // than this, whatever the body says.
 const REVIEW_POLL_FLOOR_S = 5;
 const REVIEW_DEFAULT_TIMEOUT_MS = 600_000;
+/**
+ * `cancelOnAbort`: the whole wall-clock budget, in ms, of the cancels sent
+ * after an abort (one attempt each, no retry, no stated wait; a batch's run
+ * concurrently inside it). The call throws its `LenzAbortError` once they
+ * have answered or this has passed.
+ */
+const ABORT_CANCEL_BUDGET = 5_000;
 
 /**
  * 429 codes that throw at once instead of sleeping the stated wait.
@@ -284,7 +291,10 @@ export interface LenzLogger {
   debug?(message: string): void;
   /** A `verifyAndWait` submission: `[lenz-io] Submitted task: <task_id>`. */
   info?(message: string): void;
-  /** Reserved for warnings; nothing is sent here yet. */
+  /**
+   * A `cancelOnAbort` cancel that failed, or that found the run already
+   * ended: `[lenz-io] cancelOnAbort: …`, with the job id only.
+   */
   warn?(message: string): void;
 }
 
@@ -511,6 +521,21 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
   }
   if (kind !== "wait") checkMaxRetries(o.maxRetries, where);
   checkHeaders(o.headers, where);
+  const cancelOnAbort = (o as { cancelOnAbort?: unknown }).cancelOnAbort;
+  // `false` is harmless where the option is not taken; only `true` is refused.
+  if (cancelOnAbort !== undefined && !(kind === "request" && cancelOnAbort === false)) {
+    if (kind === "request") {
+      throw new Error(
+        `${where}: cancelOnAbort is an option of one wait (wait, verifyAndWait, ` +
+          "verifyBatchAndWait, reviewAndWait, citecheckAndWait); pass it to the call.",
+      );
+    }
+    if (typeof cancelOnAbort !== "boolean") {
+      throw new Error(
+        `${where}: cancelOnAbort must be true or false (got ${String(cancelOnAbort)}).`,
+      );
+    }
+  }
   return o;
 }
 
@@ -1493,6 +1518,47 @@ function citecheckBody(input: CitecheckInput): Record<string, unknown> {
   return body;
 }
 
+/** The statuses a verification task ends with. */
+const ENDED_TASK_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "needs_input",
+  "failed",
+  "cancelled",
+]);
+
+/**
+ * The set a nested `wait` records ended tasks in, keyed on the options object
+ * `verifyAndWait` hands it: the outer wait owns the cancel, so it must know
+ * what the inner one saw end. An override of `wait` given other options just
+ * shares nothing (the cancel is then sent, and logged if the run had ended).
+ */
+const NESTED_WAIT_ENDED = new WeakMap<object, Set<string>>();
+
+/** The kinds of run `cancelOnAbort` cancels, and the noun its log lines use. */
+type AbortCancelKind = "task" | "review" | "citecheck";
+
+/** The budget of `cancelOnAbort`'s cancels ran out before one answered. */
+class CancelBudgetSpent extends Error {}
+
+/**
+ * Why a `cancelOnAbort` cancel failed, for a log line: a status and an error
+ * code, or the error's class. Never a message or a body (which could quote
+ * what was submitted).
+ */
+function cancelFailure(exc: unknown): string {
+  if (
+    exc instanceof CancelBudgetSpent ||
+    exc instanceof LenzAbortError ||
+    exc instanceof LenzRequestTimeoutError
+  ) {
+    return `no answer within ${ABORT_CANCEL_BUDGET} ms`;
+  }
+  if (exc instanceof LenzError && exc.statusCode) {
+    return `HTTP ${exc.statusCode}${exc.code ? ` ${exc.code}` : ""}`;
+  }
+  return exc instanceof Error ? exc.name : "an error";
+}
+
 export class Lenz {
   private apiKey: string;
   private baseUrl: string;
@@ -1857,10 +1923,18 @@ export class Lenz {
    * carries no cancel result.
    */
   async cancel(taskId: string, options?: RequestOptions): Promise<CancelResult> {
-    const id = requirePathId("cancel", "task_id", taskId);
+    requirePathId("cancel", "task_id", taskId);
     const call = resolveCall(this, options, "cancel()");
+    return this._cancelTask(taskId, transportOf(call));
+  }
+
+  private async _cancelTask(
+    taskId: string,
+    transport: Partial<SendOptions>,
+  ): Promise<CancelResult> {
+    const id = requirePathId("cancel", "task_id", taskId);
     const path = `/verify/${id}/cancel`;
-    const body = await this.request<unknown>({ method: "POST", path, ...transportOf(call) });
+    const body = await this.request<unknown>({ method: "POST", path, ...transport });
     const result = body as Partial<CancelResult> | null;
     if (
       !result ||
@@ -2076,12 +2150,20 @@ export class Lenz {
    * retention period has removed it.
    */
   async cancelCitecheck(citecheckId: string, options?: RequestOptions): Promise<Citecheck> {
-    const id = requirePathId("cancelCitecheck", "citecheck_id", citecheckId);
+    requirePathId("cancelCitecheck", "citecheck_id", citecheckId);
     const call = resolveCall(this, options, "cancelCitecheck()");
+    return this._cancelCitecheck(citecheckId, transportOf(call));
+  }
+
+  private async _cancelCitecheck(
+    citecheckId: string,
+    transport: Partial<SendOptions>,
+  ): Promise<Citecheck> {
+    const id = requirePathId("cancelCitecheck", "citecheck_id", citecheckId);
     const body = await this.request<unknown>({
       method: "POST",
       path: `/citechecks/${id}/cancel`,
-      ...transportOf(call),
+      ...transport,
     });
     if (!isJobBody(body, "citecheck_id", citecheckId, CITECHECK_LISTS)) {
       throw unexpectedAnswer("POST", `/citechecks/${id}/cancel`);
@@ -2109,13 +2191,22 @@ export class Lenz {
     const onUpdate = opts.onUpdate;
     const body = citecheckBody(input);
     const call = resolveCall(this, opts, "citecheckAndWait()", "submitWait");
+    const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const started = await this._submitCitecheck(body, idempotencyKey, transportOf(call));
       const citecheckId = acceptedId("citecheck_id", started.citecheck_id);
       const deadline = Date.now() + timeoutMs;
-      return withAbortContext({ citecheckId }, () =>
-        this._waitCitecheck(citecheckId, deadline, timeoutMs, onUpdate, call),
+      const ended = { value: false };
+      return this._cancellingOnAbort(
+        cancelOnAbort,
+        call,
+        "citecheck",
+        () => (ended.value ? [] : [citecheckId]),
+        () =>
+          withAbortContext({ citecheckId }, () =>
+            this._waitCitecheck(citecheckId, deadline, timeoutMs, onUpdate, call, ended),
+          ),
       );
     });
   }
@@ -2126,10 +2217,12 @@ export class Lenz {
     timeoutMs: number,
     onUpdate: CitecheckAndWaitOptions["onUpdate"],
     call: Call,
+    ended?: { value: boolean },
   ): Promise<Citecheck> {
     return this._waitJob<Citecheck>({
       deadline,
       call,
+      ...(ended ? { ended } : {}),
       // The raw body, so the guard judges what the server sent: a default
       // filled first would let a bare `{citecheck_id, status}` pass as a result.
       read: async (transport) => {
@@ -2172,12 +2265,20 @@ export class Lenz {
    * purged.
    */
   async cancelReview(reviewId: string, options?: RequestOptions): Promise<ReviewFull> {
-    const id = requirePathId("cancelReview", "review_id", reviewId);
+    requirePathId("cancelReview", "review_id", reviewId);
     const call = resolveCall(this, options, "cancelReview()");
+    return this._cancelReview(reviewId, transportOf(call));
+  }
+
+  private async _cancelReview(
+    reviewId: string,
+    transport: Partial<SendOptions>,
+  ): Promise<ReviewFull> {
+    const id = requirePathId("cancelReview", "review_id", reviewId);
     const body = await this.request<ReviewFull>({
       method: "POST",
       path: `/reviews/${id}/cancel`,
-      ...transportOf(call),
+      ...transport,
     });
     if (!isJobBody(body, "review_id", reviewId, REVIEW_LISTS)) {
       throw unexpectedAnswer("POST", `/reviews/${id}/cancel`);
@@ -2206,6 +2307,7 @@ export class Lenz {
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const onUpdate = opts.onUpdate;
     const call = resolveCall(this, opts, "reviewAndWait()", "submitWait");
+    const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const started = await this._submitReview(input, idempotencyKey, transportOf(call));
@@ -2213,16 +2315,25 @@ export class Lenz {
       // The wait's clock starts once the review is accepted, as every other
       // wait's does.
       const deadline = Date.now() + timeoutMs;
-      return withAbortContext({ reviewId }, () =>
-        this._waitJob<ReviewFull>({
-          deadline,
-          call,
-          read: (transport) => this._getReview(reviewId, {}, transport),
-          isBody: (body) => isReviewBody(body, reviewId),
-          failed: (review) => new ReviewFailedError(review),
-          timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
-          onUpdate,
-        }),
+      const ended = { value: false };
+      return this._cancellingOnAbort(
+        cancelOnAbort,
+        call,
+        "review",
+        () => (ended.value ? [] : [reviewId]),
+        () =>
+          withAbortContext({ reviewId }, () =>
+            this._waitJob<ReviewFull>({
+              deadline,
+              call,
+              read: (transport) => this._getReview(reviewId, {}, transport),
+              isBody: (body) => isReviewBody(body, reviewId),
+              failed: (review) => new ReviewFailedError(review),
+              timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
+              onUpdate,
+              ended,
+            }),
+          ),
       );
     });
   }
@@ -2240,6 +2351,8 @@ export class Lenz {
     failed: (current: T) => Error;
     timedOut: (last: T | null) => Error;
     onUpdate?: (current: T) => void;
+    /** Set once a poll reads the job ended (`cancelOnAbort` then sends no cancel). */
+    ended?: { value: boolean };
   }): Promise<T> {
     const { deadline } = job;
     const signals = job.call?.signals ?? NO_SIGNALS;
@@ -2293,6 +2406,14 @@ export class Lenz {
         }
       }
       if (current) {
+        if (
+          job.ended &&
+          (current.status === "completed" ||
+            current.status === "failed" ||
+            current.status === "cancelled")
+        ) {
+          job.ended.value = true;
+        }
         const json = JSON.stringify(current);
         if (json !== lastJson) {
           lastJson = json;
@@ -2345,17 +2466,29 @@ export class Lenz {
   ): Promise<Verification> {
     const { timeoutMs, onProgress } = waitOptions(input, opts);
     const call = resolveCall(this, opts, "verifyAndWait()", "submitWait");
+    const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await callIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const accepted = await this.submit(input, idempotencyKey, transportOf(call));
       acceptedId("task_id", accepted.task_id);
       this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
-      return withAbortContext({ taskId: accepted.task_id }, () =>
-        // Raced, in case an override of `wait` ignores the signal.
-        raceAbort(
-          this.wait(accepted, { timeoutMs, onProgress, ...ownOptions(call) }),
-          call.signals,
-        ),
+      // This call owns the cancel: the wait below is not handed the flag,
+      // only a set to record what it saw end.
+      const waitOpts: WaitOptions = { timeoutMs, onProgress, ...ownOptions(call) };
+      const ended = new Set<string>();
+      if (cancelOnAbort) NESTED_WAIT_ENDED.set(waitOpts, ended);
+      return this._cancellingOnAbort(
+        cancelOnAbort,
+        call,
+        "task",
+        () => (ended.has(accepted.task_id) ? [] : [accepted.task_id]),
+        () =>
+          withAbortContext({ taskId: accepted.task_id }, () => {
+            const waiting = this.wait(accepted, waitOpts);
+            // The SDK's own wait honours the signal, and records what it saw
+            // end before it throws. An override may not, so it is raced.
+            return this.wait === Lenz.prototype.wait ? waiting : raceAbort(waiting, call.signals);
+          }),
       );
     });
   }
@@ -2379,9 +2512,23 @@ export class Lenz {
     requirePathId("wait", "task_id", taskId);
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const onProgress = opts.onProgress;
-    const call = resolveCall(this, opts, "wait()", "wait");
-    const { terminal, timedOut, gone, permanent } = await withAbortContext({ taskId }, () =>
-      this._pollToTerminal([taskId], timeoutMs, onProgress, call),
+    // With `cancelOnAbort` the task is known before anything is sent, so a
+    // signal that has already fired still cancels it (and the abort carries
+    // its id); without, such a call throws at once and sends nothing.
+    const call = resolveCall(this, opts, "wait()", "wait", false);
+    const cancelOnAbort = opts.cancelOnAbort === true;
+    if (!cancelOnAbort) throwIfAborted(call.signals);
+    const ended = (opts && NESTED_WAIT_ENDED.get(opts)) ?? new Set<string>();
+    const { terminal, timedOut, gone, permanent } = await this._cancellingOnAbort(
+      cancelOnAbort,
+      call,
+      "task",
+      () => (ended.has(taskId) ? [] : [taskId]),
+      () =>
+        withAbortContext({ taskId }, () => {
+          throwIfAborted(call.signals);
+          return this._pollToTerminal([taskId], timeoutMs, onProgress, call, ended);
+        }),
     );
     const goneErr = gone.get(taskId);
     if (goneErr) throw goneErr;
@@ -2425,9 +2572,10 @@ export class Lenz {
   ): Promise<BatchItemResult[]> {
     const { timeoutMs, onProgress } = waitOptions(input, opts);
     const call = resolveCall(this, opts, "verifyBatchAndWait()", "submitWait");
+    const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await callIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, () =>
-      this._verifyBatchAndWait(input, idempotencyKey, timeoutMs, onProgress, call),
+      this._verifyBatchAndWait(input, idempotencyKey, timeoutMs, onProgress, call, cancelOnAbort),
     );
   }
 
@@ -2437,6 +2585,7 @@ export class Lenz {
     timeoutMs: number,
     onProgress: OnProgress | undefined,
     call: Call,
+    cancelOnAbort = false,
   ): Promise<BatchItemResult[]> {
     // Through the public verifyBatch, as 2.x did, so an override (a subclass,
     // a test double) is used. The call's key rides in the input, so the
@@ -2456,9 +2605,17 @@ export class Lenz {
     );
     for (const it of accepted.items) acceptedId("task_id", it.task_id);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
-    const { terminal, timedOut, gone, permanent } = await withAbortContext(
-      { batchId: accepted.batch_id, taskIds: ids },
-      () => this._pollToTerminal(ids, timeoutMs, onProgress, call),
+    // Each accepted task not yet seen to end is cancelled on an abort.
+    const ended = new Set<string>();
+    const { terminal, timedOut, gone, permanent } = await this._cancellingOnAbort(
+      cancelOnAbort,
+      call,
+      "task",
+      () => ids.filter((id) => !ended.has(id)),
+      () =>
+        withAbortContext({ batchId: accepted.batch_id, taskIds: ids }, () =>
+          this._pollToTerminal(ids, timeoutMs, onProgress, call, ended),
+        ),
     );
 
     return accepted.items.map((it): BatchItemResult => {
@@ -2535,6 +2692,8 @@ export class Lenz {
     timeoutMs: number,
     onProgress: OnProgress | undefined,
     call: Call,
+    /** Filled with every task seen to end (terminal, gone or not there), even on a throw. */
+    ended?: Set<string>,
   ): Promise<{
     terminal: Map<string, TaskStatus>;
     timedOut: Set<string>;
@@ -2552,6 +2711,20 @@ export class Lenz {
     const permanent = new Map<string, LenzError>();
     const deadline = Date.now() + timeoutMs;
     let backoffIdx = 0;
+    /** Adds to `ended` the tasks of `pending` a round's results show ended. */
+    const recordEnded = (results: PromiseSettledResult<TaskStatus>[]): void => {
+      if (!ended) return;
+      results.forEach((res, i) => {
+        const done =
+          res.status === "fulfilled"
+            ? ENDED_TASK_STATUSES.has(res.value.status)
+            : // Removed after it finished, or not there. A poll answered in
+              // another API version says nothing about the run: it stays
+              // eligible.
+              res.reason instanceof LenzGoneError || res.reason instanceof LenzNotFoundError;
+        if (done) ended.add(pending[i]!);
+      });
+    };
     for (let round = 0; pending.length > 0; round++) {
       const remaining = deadline - Date.now();
       // The budget is spent: no poll past the deadline. Only a wait given no
@@ -2593,13 +2766,17 @@ export class Lenz {
         settled = await Promise.race([all, fatal]);
       } catch (exc) {
         roundCtl.abort();
-        await all;
+        // What the round saw end counts even when a fatal answer ends it.
+        recordEnded(await all);
         // The caller's abort, if it came first, still wins.
         throwIfAborted(call.signals);
         throw exc;
       } finally {
         own?.removeEventListener("abort", follow);
       }
+      // What this round saw end, recorded before an abort can be thrown, so
+      // `cancelOnAbort` does not cancel a run that already finished.
+      recordEnded(settled);
       // The caller's abort, before any rejection is classified: never a
       // pending poll to try again.
       if (firedSignal(call.signals)) {
@@ -2860,6 +3037,114 @@ export class Lenz {
     } catch {
       // A logger's bug must never break the call.
     }
+  }
+
+  /**
+   * `cancelOnAbort`: runs `run`, and when it throws because the caller's
+   * signal fired, cancels the runs `live()` names before throwing the same
+   * error. Only the outermost wait owns this: the waits it calls are never
+   * handed the flag, so a run is cancelled once.
+   */
+  private async _cancellingOnAbort<T>(
+    enabled: boolean,
+    call: Call,
+    kind: AbortCancelKind,
+    live: () => readonly string[],
+    run: () => Promise<T>,
+  ): Promise<T> {
+    if (!enabled) return run();
+    try {
+      return await run();
+    } catch (exc) {
+      // Only the caller's abort: the wait's own deadline throws a timeout
+      // error, which never cancels.
+      if (exc instanceof LenzAbortError && firedSignal(call.signals)) {
+        await this._cancelAfterAbort(kind, live(), call);
+      }
+      throw exc;
+    }
+  }
+
+  /**
+   * Sends the cancel of each distinct id, concurrently, one attempt each,
+   * inside one `ABORT_CANCEL_BUDGET`. Never throws: a cancel that fails or
+   * finds the run ended is a `warn` line with the id, and the rest go on.
+   * The call's signals are dead by now, so the cancels carry only the
+   * budget's (and the call's headers).
+   */
+  private async _cancelAfterAbort(
+    kind: AbortCancelKind,
+    ids: readonly string[],
+    call: Call,
+  ): Promise<void> {
+    const distinct = [...new Set(ids.filter((id) => typeof id === "string" && id !== ""))];
+    if (distinct.length === 0) return;
+    const budget = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const spent = new Promise<never>((_res, rej) => {
+      timer = setTimeout(() => {
+        rej(new CancelBudgetSpent());
+        budget.abort();
+      }, ABORT_CANCEL_BUDGET);
+    });
+    spent.catch(() => {});
+    const transport: Partial<SendOptions> = {
+      signals: [budget.signal],
+      optionHeaders: call.headers,
+      maxRetries: 0,
+      timeoutMs: ABORT_CANCEL_BUDGET,
+      deadlineAt: Date.now() + ABORT_CANCEL_BUDGET,
+    };
+    const one = async (id: string): Promise<void> => {
+      try {
+        // Raced, so a fetch that ignores its signal still ends at the budget.
+        const ended = await Promise.race([this._cancelOne(kind, id, transport), spent]);
+        if (ended !== null) {
+          this.log(
+            "warn",
+            `[lenz-io] cancelOnAbort: ${kind} ${id} was not cancelled: ` +
+              (ended === "completed"
+                ? "the run had already finished (status: completed); it is billed as a completed run."
+                : `the run had already ended (status: ${ended}).`),
+          );
+        }
+      } catch (exc) {
+        this.log(
+          "warn",
+          `[lenz-io] cancelOnAbort: could not cancel ${kind} ${id} (${cancelFailure(exc)}); ` +
+            "it may still run and be charged.",
+        );
+      }
+    };
+    try {
+      await Promise.all(distinct.map(one));
+    } finally {
+      clearTimeout(timer);
+      budget.abort();
+    }
+  }
+
+  /**
+   * One cancel: `null` when the run is cancelled, else the status it ended
+   * with. Deliberately through the private helpers, not the public `cancel`,
+   * `cancelReview` and `cancelCitecheck`: the cleanup after an abort must not
+   * depend on methods a subclass may override (and a copy's dead signal
+   * would refuse them at entry).
+   */
+  private async _cancelOne(
+    kind: AbortCancelKind,
+    id: string,
+    transport: Partial<SendOptions>,
+  ): Promise<string | null> {
+    if (kind === "task") {
+      const out = await this._cancelTask(id, transport);
+      return out.cancelled ? null : String(out.status);
+    }
+    const out =
+      kind === "review"
+        ? await this._cancelReview(id, transport)
+        : await this._cancelCitecheck(id, transport);
+    return out.status === "cancelled" ? null : String(out.status);
   }
 
   /** Internal: dispatch an HTTP call with auth + retry. Public so the
