@@ -514,9 +514,15 @@ export interface AssessClaim extends RawBody {
   /**
    * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
    * `"Error"` on a failed row (kept for existing code: read `status`).
+   * On a client made with `legacyAliases: false`, a failed row's verdict is
+   * `null`, as the API sends it (not in this type, so that code reading it
+   * as a string keeps compiling: check `status` first).
    */
   verdict?: Verdict | (string & NonNullable<unknown>);
-  /** "high" | "medium" | "low"; `"low"` on a failed row (read `status`). */
+  /**
+   * "high" | "medium" | "low"; `"low"` on a failed row (read `status`).
+   * `null` there with `legacyAliases: false` (as for `verdict`).
+   */
   confidence?: Confidence | (string & NonNullable<unknown>);
   /**
    * Why a failed row has no verdict: `code` (`no_checkable_claim`,
@@ -1603,6 +1609,11 @@ export interface ReviewFailureBlock extends RawBody {
   retryable: boolean;
   /** One sentence on what to do next. */
   hint: string | null;
+  /**
+   * A page on the failure. The API can send `null` here (a review row's
+   * failure with no page); not in this type, which 2.x code reads as a
+   * string: check it before use.
+   */
   docs_url: string;
 }
 

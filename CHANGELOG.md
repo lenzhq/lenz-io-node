@@ -38,6 +38,7 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Fixed
 
+- Every recorded API response is now read in tests through the method for its endpoint, with `legacyAliases` on and off: none ends in an error that is not a `LenzError`, and every field that can hold `null` is typed to accept it, except four documented on their fields and left as they are so code reading them as strings keeps compiling: an assess row's `verdict` and `confidence` (`null` on a failed row only with `legacyAliases: false`), and a review failure block's `docs_url` (the API can send `null`). No type changed.
 - A lone UTF-16 surrogate in a request body (half of an emoji cut by a `slice`) is now sent as U+FFFD; valid pairs are unchanged. `JSON.stringify` sent it as a `\ud800` escape, which the server cannot handle as text; the Python SDK sends the same U+FFFD, so both SDKs send the server the same text. Bodies without one are sent byte for byte as before.
 
 ## [3.1.0] - 2026-10-10
