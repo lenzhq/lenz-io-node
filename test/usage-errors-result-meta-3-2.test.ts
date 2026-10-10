@@ -116,7 +116,8 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
     [
       "select texts []",
       (c) => c.select("t1", { texts: [] }),
-      "texts is required.",
+      // The API's sentence names `claims` whichever list was sent; `param` names `texts`.
+      "claims is required.",
       "empty_list",
       "texts",
     ],

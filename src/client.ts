@@ -1830,8 +1830,11 @@ const BLANK_SENTENCES = {
   claim: "claim is required.",
   /** A field the body does not carry at all (`claim`, `claims`, `message`, `text`). */
   absent: (field: string) => `${field}: Field required`,
-  /** `POST /verify/{task_id}/select` with an empty `claims` (or `texts`) list. */
-  list: (field: string) => `${field} is required.`,
+  /**
+   * `POST /verify/{task_id}/select` with an empty list: the API says
+   * `claims` whichever of `claims` / `texts` was sent (the `param` names it).
+   */
+  list: "claims is required.",
   /** `POST /assess`, `POST /verify/{task_id}/select`: a blank item. */
   item: (i: number, field = "claims") => `${field}[${i}] is blank.`,
   /** `POST /ask/{verification_id}`: a blank `message`. */
@@ -2883,7 +2886,7 @@ export class Lenz {
     if (!chosen || chosen.length === 0) {
       const absent = input.claims === undefined && input.texts === undefined;
       throw blankInput(
-        absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list(field),
+        absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list,
         "empty_list",
         "Pass the claims to check, as offered, in `claims`.",
         absent ? "claims" : field,

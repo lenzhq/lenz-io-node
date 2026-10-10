@@ -1061,7 +1061,7 @@ as the Python SDK):
 | `assess`, `select`                  | a blank item                                       | `blank_item`  | `"claims[1]"`           | `claims[1] is blank.`                                      |
 | `select`                            | `claims: []`                                       | `empty_list`  | `"claims"`              | `claims is required.`                                      |
 | `select`                            | neither `claims` nor `texts`                       | `empty_list`  | `"claims"`              | `claims: Field required`                                   |
-| `select` given `texts`              | `texts: []`; a blank item                          | as above      | `"texts"`, `"texts[0]"` | `texts is required.`; `texts[0] is blank.`                 |
+| `select` given `texts`              | `texts: []`; a blank item                          | as above      | `"texts"`, `"texts[0]"` | `claims is required.`; `texts[0] is blank.`                |
 | `ask.send`                          | `message` only whitespace                          | `blank_input` | `"message"`             | `Message cannot be empty.`                                 |
 | `ask.send`                          | no `message`                                       | `blank_input` | `"message"`             | `message: Field required`                                  |
 | `review`, `reviewAndWait`           | `text` only whitespace                             | `blank_input` | `"text"`                | `text: send the draft, or one public http(s) URL.`         |
