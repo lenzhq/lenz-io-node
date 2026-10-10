@@ -419,6 +419,13 @@ export class LenzWebhooks {
   private replayWindow: number;
 
   constructor(opts: LenzWebhooksOptions) {
+    if (opts === null || typeof opts !== "object" || Array.isArray(opts)) {
+      throw argumentError(
+        "LenzWebhooks takes an options object: { secret }.",
+        "options",
+        "invalid_option",
+      );
+    }
     if (!opts.secret) {
       throw argumentError(
         "LenzWebhooks requires a non-empty secret. Get it from /api-credentials.",
@@ -468,6 +475,9 @@ export class LenzWebhooks {
    * before anything else reads the body.
    */
   async unwrap(request: Request): Promise<WebhookEvent> {
+    if (request === null || typeof request !== "object") {
+      throw argumentError("unwrap() takes the incoming Request.", "request");
+    }
     if (request.bodyUsed) {
       throw new Error(
         "LenzWebhooks.unwrap(request) found the body already read. Call unwrap before reading " +
@@ -510,6 +520,9 @@ export class LenzWebhooks {
   }
 
   private lookupHeader(headers: HeaderBag, name: string): string {
+    if (headers === null || typeof headers !== "object") {
+      throw argumentError("Webhook headers must be an object or a Headers.", "headers");
+    }
     if (typeof (headers as Headers).get === "function") {
       const v = (headers as Headers).get(name);
       return v ? String(v) : "";

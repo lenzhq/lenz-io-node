@@ -10,12 +10,13 @@
  * error is a `LenzInvalidResponseError`: `success-metadata-and-usage-errors.test.ts` pins those.
  */
 
+import { createHmac } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { Lenz, LenzError } from "../src/index.js";
+import { Lenz, LenzError, LenzWebhooks } from "../src/index.js";
 import { type Call, callsFor, DIR, type Recorded } from "./support/recorded-calls.js";
 
 type Json = unknown;
@@ -66,6 +67,36 @@ function fetchOf(status: number, headers: Record<string, string>, body: Json): t
     new Response(JSON.stringify(body), { status, headers })) as unknown as typeof fetch;
 }
 
+/** Read every item of a walk, at most `max` (a runaway guard: a mutated page can repeat). */
+async function drainAll(items: AsyncIterable<unknown>, max = 50): Promise<void> {
+  const it = items[Symbol.asyncIterator]();
+  for (let n = 0; n < max; n++) if ((await it.next()).done) return;
+}
+
+/** The waits and walks over the same answers, beside the one-call reads. */
+function extraCalls(name: string, body: Record<string, unknown>): Call[] {
+  const out: Call[] = [];
+  if (name.startsWith("verify__list_")) {
+    out.push(["walk", (c) => drainAll(c.verifications.listAll())]);
+  }
+  if (name.startsWith("account__library_")) {
+    out.push(["walk", (c) => drainAll(c.library.listAll())]);
+  }
+  if (name.startsWith("verify__batch_")) {
+    out.push([
+      "wait",
+      (c) => c.verifyBatchAndWait({ claims: [{ claim: "a" }, { claim: "b" }] }, { timeoutMs: 5 }),
+    ]);
+  }
+  if (name.startsWith("review__get_") && body["view"] !== "issues") {
+    out.push(["wait", (c) => c.reviewAndWait({ text: "x" }, { timeoutMs: 5 })]);
+  }
+  if (name.startsWith("citecheck__get_")) {
+    out.push(["wait", (c) => c.citecheckAndWait({ text: "x" }, { timeoutMs: 5 })]);
+  }
+  return out;
+}
+
 describe("a field of the wrong type", () => {
   it("never surfaces as a foreign error", async () => {
     const foreign: string[] = [];
@@ -79,7 +110,7 @@ describe("a field of the wrong type", () => {
       const body = (r.body ?? {}) as Record<string, unknown>;
       const calls = callsFor(name, body);
       if (!calls || calls === "skip") continue;
-      for (const [type, run] of calls as Call[]) {
+      for (const [type, run] of [...(calls as Call[]), ...extraCalls(name, body)]) {
         for (const path of paths(body)) {
           const key = shapeKey(name, type, path);
           if (seen.has(key)) continue;
@@ -105,6 +136,33 @@ describe("a field of the wrong type", () => {
                   );
                 }
               }
+            }
+          }
+        }
+      }
+    }
+    expect(foreign).toEqual([]);
+  }, 300_000);
+
+  it("in a webhook event never surfaces as a foreign error", async () => {
+    const foreign: string[] = [];
+    const hooks = new LenzWebhooks({ secret: "whsec_x" });
+    for (const file of readdirSync(DIR).sort()) {
+      if (!file.startsWith("webhook__")) continue;
+      const payload = (JSON.parse(readFileSync(join(DIR, file), "utf8")) as { payload: Json })
+        .payload;
+      for (const path of paths(payload)) {
+        let current: Json = payload;
+        for (const step of path) current = (current as Record<string | number, unknown>)[step];
+        for (const wrong of WRONG) {
+          if (typeOf(wrong) === typeOf(current)) continue;
+          const raw = JSON.stringify(replaced(payload, path, wrong));
+          const sig = "sha256=" + createHmac("sha256", "whsec_x").update(raw).digest("hex");
+          try {
+            hooks.parse(raw, { "X-Lenz-Signature": sig });
+          } catch (exc) {
+            if (!(exc instanceof LenzError)) {
+              foreign.push(`${file}:${path.join(".")} = ${JSON.stringify(wrong)}: ${String(exc)}`);
             }
           }
         }

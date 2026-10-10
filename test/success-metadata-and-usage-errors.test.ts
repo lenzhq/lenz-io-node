@@ -519,17 +519,40 @@ describe("a field of the wrong type where the SDK reads it", () => {
     },
   );
 
-  it("in a batch wait too", async () => {
+  it("in a batch wait, that row fails at once and the others complete", async () => {
+    const polls: string[] = [];
     const { fetch } = server((s) => {
       if (s.url.endsWith("/verify/batch")) {
-        return { status: 202, body: { batch_id: "b", items: [{ task_id: "t1", claim: "a" }] } };
+        return {
+          status: 202,
+          body: {
+            batch_id: "b",
+            items: [
+              { task_id: "t1", claim: "a" },
+              { task_id: "t2", claim: "b" },
+            ],
+          },
+        };
       }
-      return { body: { task_id: "t1", status: "completed", result: "x" } };
+      const id = s.url.endsWith("/t1") ? "t1" : "t2";
+      polls.push(id);
+      return id === "t1"
+        ? { body: { task_id: "t1", status: "completed", result: "x" } }
+        : { body: { task_id: "t2", status: "completed", result: { verification_id: "v2" } } };
     });
-    const err = await thrown(() =>
-      new Lenz({ apiKey: "lenz_t", fetch }).verifyBatchAndWait({ claims: [{ claim: "a" }] }),
-    );
-    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    const rows = await new Lenz({ apiKey: "lenz_t", fetch }).verifyBatchAndWait({
+      claims: [{ claim: "a" }, { claim: "b" }],
+    });
+    expect(rows.map((r) => r.status)).toEqual(["failed", "completed"]);
+    expect(rows[0]!.verification).toBeUndefined();
+    expect(rows[0]!.status_detail?.raw).toEqual({
+      task_id: "t1",
+      status: "completed",
+      result: "x",
+    });
+    expect(rows[1]!.verification?.verification_id).toBe("v2");
+    // Not polled again.
+    expect(polls.filter((p) => p === "t1")).toHaveLength(1);
   });
 
   it("a poll that cannot be read and is not ended is polled again", async () => {
@@ -612,4 +635,157 @@ it("ASCII whitespace around a key is dropped silently", async () => {
   const { fetch, sent } = server(() => ({ body: { tier: "free" } }));
   await new Lenz({ apiKey: " \tlenz_t\r\n", fetch }).usage();
   expect(sent[0]!.headers.get("authorization")).toBe("Bearer lenz_t");
+});
+
+// ── review follow-ups ──
+
+describe("answers that are not the one asked for carry the answer", () => {
+  it("cancel answered with another task's body: LenzInvalidResponseError", async () => {
+    const other = { task_id: "other", cancelled: true, status: "cancelled" };
+    const { fetch } = server(() => ({ body: other, headers: { "X-Request-ID": "req3" } }));
+    const err = (await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).cancel("t1"),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.statusCode).toBe(200);
+    expect(err.requestId).toBe("req3");
+    expect(err.body).toEqual(other);
+    expect(err.message).toBe("POST /verify/t1/cancel answered without a cancel result.");
+  });
+
+  it("an acceptance with an id that cannot be polled: LenzInvalidResponseError", async () => {
+    const accepted = { task_id: 42, status: "pending" };
+    const { fetch } = server(() => ({
+      status: 202,
+      body: accepted,
+      headers: { "X-Request-ID": "req4" },
+    }));
+    const err = (await thrown(() =>
+      new Lenz({ apiKey: "lenz_t", fetch }).verifyAndWait({ claim: "a" }),
+    )) as LenzInvalidResponseError;
+    expect(err).toBeInstanceOf(LenzInvalidResponseError);
+    expect(err.statusCode).toBe(202);
+    expect(err.requestId).toBe("req4");
+    expect(err.body).toEqual(accepted);
+    expect(err.message).toBe("The API accepted the request with an invalid task_id.");
+  });
+});
+
+describe("a wait's timeoutMs must be a finite number", () => {
+  const noFetch = vi.fn(() => {
+    throw new Error("no request expected");
+  }) as unknown as typeof globalThis.fetch;
+  const client = new Lenz({ apiKey: "lenz_t", fetch: noFetch });
+  const waits: Array<[string, (t: number) => Promise<unknown>]> = [
+    ["wait", (t) => client.wait("t1", { timeoutMs: t })],
+    ["verifyAndWait", (t) => client.verifyAndWait({ claim: "a" }, { timeoutMs: t })],
+    ["verifyAndWait (input)", (t) => client.verifyAndWait({ claim: "a", timeoutMs: t })],
+    [
+      "verifyBatchAndWait",
+      (t) => client.verifyBatchAndWait({ claims: [{ claim: "a" }] }, { timeoutMs: t }),
+    ],
+    ["reviewAndWait", (t) => client.reviewAndWait({ text: "Draft." }, { timeoutMs: t })],
+    ["citecheckAndWait", (t) => client.citecheckAndWait({ text: "Draft." }, { timeoutMs: t })],
+  ];
+  for (const [name, run] of waits) {
+    it.each([NaN, Infinity, -Infinity, "5" as unknown as number])(
+      `${name} refuses %s before any request`,
+      async (t) => {
+        const err = (await thrown(() => run(t))) as LenzValidationError;
+        expect(err).toBeInstanceOf(LenzValidationError);
+        expect(err.code).toBe("invalid_option");
+        expect(err.param).toBe("timeoutMs");
+        expect(noFetch).not.toHaveBeenCalled();
+      },
+    );
+  }
+});
+
+describe("an argument of the wrong shape is a LenzValidationError, never a TypeError", () => {
+  const noFetch = (() => {
+    throw new Error("no request expected");
+  }) as unknown as typeof globalThis.fetch;
+  const client = new Lenz({ apiKey: "lenz_t", fetch: noFetch });
+  const hooks = new LenzWebhooks({ secret: "whsec_x" });
+  const cases: Array<[string, () => unknown, string, string]> = [
+    ["new Lenz(null)", () => new Lenz(null as never), "invalid_option", "options"],
+    [
+      "new LenzWebhooks()",
+      () => new (LenzWebhooks as never as new () => unknown)(),
+      "invalid_option",
+      "options",
+    ],
+    ["verify()", () => (client.verify as () => unknown)(), "invalid_argument", "input"],
+    ["verify(null)", () => client.verify(null as never), "invalid_argument", "input"],
+    ["assess()", () => (client.assess as () => unknown)(), "invalid_argument", "input"],
+    ["extract(null)", () => client.extract(null as never), "invalid_argument", "input"],
+    ["review(null)", () => client.review(null as never), "invalid_argument", "input"],
+    ["citecheck(null)", () => client.citecheck(null as never), "invalid_argument", "input"],
+    [
+      "select('t')",
+      () => (client.select as (t: string) => unknown)("t1"),
+      "invalid_argument",
+      "input",
+    ],
+    [
+      "ask.send(id)",
+      () => (client.ask.send as (v: string) => unknown)("abcd1234"),
+      "invalid_argument",
+      "input",
+    ],
+    ["verifyBatch({})", () => client.verifyBatch({} as never), "invalid_argument", "claims"],
+    [
+      "verifyBatch null item",
+      () => client.verifyBatch({ claims: [{ claim: "a" }, null as never] }),
+      "invalid_argument",
+      "claims[1]",
+    ],
+    ["verifyAndWait(null)", () => client.verifyAndWait(null as never), "invalid_argument", "input"],
+    [
+      "verifyBatchAndWait(null)",
+      () => client.verifyBatchAndWait(null as never),
+      "invalid_argument",
+      "input",
+    ],
+    ["reviewAndWait(null)", () => client.reviewAndWait(null as never), "invalid_argument", "input"],
+    [
+      "citecheckAndWait(null)",
+      () => client.citecheckAndWait(null as never),
+      "invalid_argument",
+      "input",
+    ],
+    ["wait(null)", () => client.wait(null as never), "invalid_id", "taskId"],
+    ["wait(id, null)", () => client.wait("t1", null as never), "invalid_option", "options"],
+    [
+      "getReview(id, null)",
+      () => client.getReview("r1", null as never),
+      "invalid_option",
+      "options",
+    ],
+    [
+      "verifications.list(null)",
+      () => client.verifications.list(null as never),
+      "invalid_argument",
+      "input",
+    ],
+    ["library.list(null)", () => client.library.list(null as never), "invalid_argument", "input"],
+    ["a non-string id", () => client.getStatus(5 as never), "invalid_id", "taskId"],
+    [
+      "a non-string verification id",
+      () => client.verifications.get({} as never),
+      "invalid_id",
+      "verificationId",
+    ],
+    ["blank review text", () => client.review({ text: "  " }), "blank_input", "text"],
+    ["blank reviewAndWait text", () => client.reviewAndWait({ text: "" }), "blank_input", "text"],
+    ["webhook headers", () => hooks.parse("{}", undefined as never), "invalid_argument", "headers"],
+    ["unwrap(null)", () => hooks.unwrap(null as never), "invalid_argument", "request"],
+  ];
+  it.each(cases)("%s", async (_name, run, code, param) => {
+    const err = (await thrown(run)) as LenzValidationError;
+    expect(err).toBeInstanceOf(LenzValidationError);
+    expect(err.statusCode).toBe(0);
+    expect(err.code).toBe(code);
+    expect(err.param).toBe(param);
+  });
 });

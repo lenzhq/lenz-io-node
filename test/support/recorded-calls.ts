@@ -40,7 +40,10 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name === "verify__select_202") {
     return [["BatchAccepted", (c) => c.select("t", { claims: ["a"] })]];
   }
-  if (name.startsWith("verify__cancel_200")) return [["CancelResult", (c) => c.cancel("t")]];
+  if (name.startsWith("verify__cancel_200")) {
+    // The fixture's own id: a cancel checks the answer names the task asked for.
+    return [["CancelResult", (c) => c.cancel(String(body["task_id"]))]];
+  }
   if (
     name.startsWith("verify__submit_202") ||
     name === "verify__stored_replay_202" ||

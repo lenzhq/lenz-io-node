@@ -1516,6 +1516,40 @@ function argumentError(
   return err;
 }
 
+/**
+ * Refuses an argument that must be an object (an input, options) and is not
+ * one (`null`, a string, nothing at all), before it is read: a
+ * `LenzValidationError` (`invalid_argument`, or `invalid_option` for
+ * options; `param` the argument's name),
+ * never a `TypeError` from inside.
+ */
+function requireObject(value: unknown, where: string, param: string): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    // Options are `invalid_option`, as `checkOptions` says of them.
+    throw argumentError(
+      `${where}: ${param} must be an object.`,
+      param === "options" ? "invalid_option" : "invalid_argument",
+      param,
+    );
+  }
+}
+
+/**
+ * A wait's budget (`timeoutMs` of a wait): not given, or a finite number of
+ * ms. `NaN` would poll without pause and `Infinity` or a string never time
+ * out, so they are refused before any request. 0 or less reads once.
+ */
+function checkWaitBudget(value: unknown, where: string): void {
+  if (value === undefined || value === null) return;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw argumentError(
+      `${where}: timeoutMs must be a finite number of milliseconds (got ${shown(value)}).`,
+      "invalid_option",
+      "timeoutMs",
+    );
+  }
+}
+
 /** `task_id` → `taskId`: an id's name as the method's parameter. */
 function camelName(field: string): string {
   return field.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
@@ -1523,10 +1557,10 @@ function camelName(field: string): string {
 
 /** `pathId`, or the local error a call throws instead of sending a request. */
 function requirePathId(method: string, field: string, id: string): string {
-  const encoded = pathId(id);
+  const encoded = typeof id === "string" ? pathId(id) : null;
   if (encoded !== null) return encoded;
   throw argumentError(
-    id
+    id || (typeof id !== "string" && id !== undefined && id !== null)
       ? `${method}() was given an invalid ${field}.`
       : `${method}() requires a non-empty ${field}.`,
     "invalid_id",
@@ -1535,18 +1569,20 @@ function requirePathId(method: string, field: string, id: string): string {
 }
 
 /**
- * An id the API handed back in an acceptance body, checked before any poll
- * uses it. One it cannot be polled by is a bad answer from the server (not a
- * mistake of the caller's), so a LenzAPIError, raised at once.
+ * An id the API handed back in an acceptance body (`from`, the answer it was
+ * read from), checked before any poll uses it. One it cannot be polled by is a
+ * bad answer from the server (not a mistake of the caller's), so a
+ * {@link LenzInvalidResponseError} (a `LenzAPIError`) with that answer's
+ * status, headers, request id and body, raised at once.
  */
-function acceptedId(field: string, id: unknown): string {
+function acceptedId(field: string, id: unknown, from: unknown): string {
   if (typeof id === "string" && pathId(id) !== null) return id;
-  throw new LenzAPIError({
-    message: `The API accepted the request with an invalid ${field}.`,
-    cause: `The acceptance body carries no usable ${field}.`,
-    fix: "Retry the request; contact support with the request id if this persists.",
-    docUrl: "https://lenz.io/docs/errors",
-  });
+  throw invalidShape(
+    from,
+    `The API accepted the request with an invalid ${field}.`,
+    `The acceptance body carries no usable ${field}.`,
+    "Retry the request; contact support with the request id if this persists.",
+  );
 }
 
 /** Sleeps `ms`; rejects with `LenzAbortError` as soon as one of `signals` fires. */
@@ -1640,7 +1676,12 @@ function sendsWebhookUrl(url: unknown): boolean {
 function waitOptions(
   input: { timeoutMs?: number; onProgress?: OnProgress },
   opts: WaitOptions,
+  where: string,
 ): { timeoutMs: number; onProgress: OnProgress | undefined } {
+  checkWaitBudget(opts.timeoutMs, where);
+  if (opts.timeoutMs === undefined || opts.timeoutMs === null) {
+    checkWaitBudget(input.timeoutMs, `${where} input`);
+  }
   return {
     timeoutMs: opts.timeoutMs ?? input.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS,
     onProgress: opts.onProgress ?? input.onProgress,
@@ -1920,11 +1961,11 @@ class VerificationsNamespace {
    * whole number from 1 to 100) is sent as `page_size` only when given; the
    * server's default is 20, and the size it used comes back as `page_size`.
    */
-  async list({
-    page = 1,
-    pageSize,
-    ...options
-  }: { page?: number; pageSize?: number } & RequestOptions = {}): Promise<VerificationList> {
+  async list(
+    input: { page?: number; pageSize?: number } & RequestOptions = {},
+  ): Promise<VerificationList> {
+    requireObject(input, "verifications.list", "input");
+    const { page = 1, pageSize, ...options } = input;
     checkPageSize(pageSize, "verifications.list");
     const call = resolveCall(this.client, options, "verifications.list");
     const body = await this.client.request<VerificationList>({
@@ -2105,6 +2146,7 @@ class AskNamespace {
     options?: RequestOptions,
   ): Promise<AskReply> {
     const id = requirePathId("ask.send", "verification_id", verificationId);
+    requireObject(input, "ask.send", "input");
     const call = resolveCall(this.client, options, "ask.send");
     const body: Record<string, unknown> = { message: input.message };
     if (input.language) body.language = input.language;
@@ -2136,6 +2178,7 @@ class LibraryNamespace {
   constructor(private readonly client: Lenz) {}
 
   async list(input: LibraryListInput = {}, options?: RequestOptions): Promise<LibraryList> {
+    requireObject(input, "library.list", "input");
     const call = resolveCall(this.client, options, "library.list");
     const body = await this.client.request<LibraryList>({
       method: "GET",
@@ -2167,6 +2210,7 @@ class LibraryNamespace {
    * read: once it fires, the next item throws `LenzAbortError`.
    */
   listAll(input: LibraryListInput = {}, options?: RequestOptions): AsyncIterable<LibraryItem> {
+    requireObject(input, "library.listAll", "input");
     const call = resolveCall(this.client, options, "library.listAll", "request", false);
     if (input.sort === "random") {
       throw argumentError(
@@ -2182,6 +2226,45 @@ class LibraryNamespace {
       first,
       call.signals,
     );
+  }
+}
+
+/**
+ * A batch's `claims`: a list of objects, refused before anything is sent
+ * otherwise (`invalid_argument`, `param` `"claims"` or `"claims[i]"`). An
+ * item's text is not checked here: the API answers a blank one.
+ */
+function checkBatchItems(input: { claims?: unknown }): void {
+  const claims = input.claims;
+  if (!Array.isArray(claims)) {
+    throw argumentError("verifyBatch(): claims must be a list.", "invalid_argument", "claims");
+  }
+  claims.forEach((item: unknown, i) => {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) {
+      throw argumentError(
+        `verifyBatch(): claims[${i}] must be an object.`,
+        "invalid_argument",
+        `claims[${i}]`,
+      );
+    }
+  });
+}
+
+/**
+ * A review's draft: text with something besides whitespace in it, refused
+ * before anything is sent otherwise (`blank_input`, `param` `"text"`), as
+ * on the Python SDK.
+ */
+function reviewText(input: { text?: unknown }, where: string): void {
+  if (!hasText(input.text)) {
+    const err = argumentError(
+      `${where} needs the draft text, or one public http(s) URL.`,
+      "blank_input",
+      "text",
+    );
+    err.fix = "Pass the draft (or one public http(s) URL) as `text`.";
+    err.docUrl = "https://lenz.io/docs/errors";
+    throw err;
   }
 }
 
@@ -2279,6 +2362,7 @@ export class Lenz {
   readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
+    requireObject(opts, "new Lenz()", "options");
     // One rule for every per-request timeout and retry count, checked first.
     checkTimeoutMs(opts.timeoutMs, "new Lenz()", true);
     checkMaxRetries(opts.maxRetries, "new Lenz()", true);
@@ -2394,12 +2478,15 @@ export class Lenz {
   // ── Marquee verbs ──
 
   async verify(input: VerifyInput, options?: RequestOptions): Promise<TaskAccepted> {
+    requireObject(input, "verify()", "input");
     verifyText(this, input);
     const call = resolveCall(this, options, "verify()");
     return this.submit(input, await callIdempotencyKey(input), transportOf(call));
   }
 
   async verifyBatch(input: VerifyBatchInput, options?: RequestOptions): Promise<BatchAccepted> {
+    requireObject(input, "verifyBatch()", "input");
+    checkBatchItems(input);
     const call = resolveCall(this, options, "verifyBatch()");
     return this._verifyBatch(input, await callIdempotencyKey(input), call);
   }
@@ -2479,6 +2566,7 @@ export class Lenz {
    * chain in one language.
    */
   async extract(input: ExtractInput, options?: RequestOptions): Promise<ExtractedClaims> {
+    requireObject(input, "extract()", "input");
     checkTimeoutMs(input.timeoutMs, "extract() input", true);
     const call = resolveCall(this, options, "extract()");
     const body: Record<string, unknown> = { text: input.text };
@@ -2560,6 +2648,7 @@ export class Lenz {
    * verified.
    */
   async assess(input: AssessInput, options?: RequestOptions): Promise<AssessResponse> {
+    requireObject(input, "assess()", "input");
     checkTimeoutMs(input.timeoutMs, "assess() input", true);
     // `claim` is the documented name; `text` the alias. Either way the wire
     // key is `text`, which every server version accepts.
@@ -2670,6 +2759,7 @@ export class Lenz {
     options?: RequestOptions,
   ): Promise<BatchAccepted> {
     const id = requirePathId("select", "task_id", taskId);
+    requireObject(input, "select()", "input");
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
     if (!chosen || chosen.length === 0) {
       throw argumentError("select requires a non-empty claims array", "empty_list", "claims");
@@ -2761,12 +2851,14 @@ export class Lenz {
       typeof result.cancelled !== "boolean" ||
       typeof result.status !== "string"
     ) {
-      throw new LenzAPIError({
-        message: `POST ${path} answered without a cancel result.`,
-        cause: "The response carries no task_id (this task's), cancelled and status.",
-        fix: "Read the run with getStatus(taskId); contact support with the request id if this persists.",
-        docUrl: "https://lenz.io/docs/errors",
-      });
+      // Another task's body, or not a cancel result: a LenzInvalidResponseError
+      // with the answer, as cancelReview / cancelCitecheck throw.
+      throw invalidShape(
+        body,
+        `POST ${path} answered without a cancel result.`,
+        "The response carries no task_id (this task's), cancelled and status.",
+        "Read the run with getStatus(taskId); contact support with the request id if this persists.",
+      );
     }
     return body as CancelResult;
   }
@@ -2801,6 +2893,8 @@ export class Lenz {
    * review; a new key is a new review.
    */
   async review(input: ReviewInput, options?: RequestOptions): Promise<ReviewStarted> {
+    requireObject(input, "review()", "input");
+    reviewText(input, "review()");
     const call = resolveCall(this, options, "review()");
     return this._submitReview(input, await jobIdempotencyKey(input), transportOf(call));
   }
@@ -2880,6 +2974,7 @@ export class Lenz {
     opts: GetReviewOptions & RequestOptions = {},
   ): Promise<ReviewFull | ReviewIssues> {
     requirePathId("getReview", "review_id", reviewId);
+    requireObject(opts, "getReview()", "options");
     const call = resolveCall(this, opts, "getReview()");
     return this._getReview(reviewId, opts, transportOf(call));
   }
@@ -2894,6 +2989,7 @@ export class Lenz {
    * receive `citecheck.completed` at your webhook.
    */
   async citecheck(input: CitecheckInput, options?: RequestOptions): Promise<CitecheckStarted> {
+    requireObject(input, "citecheck()", "input");
     const body = citecheckBody(input);
     const call = resolveCall(this, options, "citecheck()");
     return this._submitCitecheck(body, await jobIdempotencyKey(input), transportOf(call));
@@ -3011,6 +3107,9 @@ export class Lenz {
     input: CitecheckInput,
     opts: CitecheckAndWaitOptions = {},
   ): Promise<Citecheck> {
+    requireObject(input, "citecheckAndWait()", "input");
+    requireObject(opts, "citecheckAndWait()", "options");
+    checkWaitBudget(opts.timeoutMs, "citecheckAndWait()");
     // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const onUpdate = opts.onUpdate;
@@ -3020,7 +3119,7 @@ export class Lenz {
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const started = await this._submitCitecheck(body, idempotencyKey, transportOf(call));
-      const citecheckId = acceptedId("citecheck_id", started.citecheck_id);
+      const citecheckId = acceptedId("citecheck_id", started.citecheck_id, started);
       const deadline = Date.now() + timeoutMs;
       const ended = { value: false };
       return this._cancellingOnAbort(
@@ -3133,6 +3232,10 @@ export class Lenz {
    * once, and a terminal review it reads is returned or thrown as usual.
    */
   async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
+    requireObject(input, "reviewAndWait()", "input");
+    requireObject(opts, "reviewAndWait()", "options");
+    checkWaitBudget(opts.timeoutMs, "reviewAndWait()");
+    reviewText(input, "reviewAndWait()");
     // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const onUpdate = opts.onUpdate;
@@ -3141,7 +3244,7 @@ export class Lenz {
     const idempotencyKey = await jobIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const started = await this._submitReview(input, idempotencyKey, transportOf(call));
-      const reviewId = acceptedId("review_id", started.review_id);
+      const reviewId = acceptedId("review_id", started.review_id, started);
       // The wait's clock starts once the review is accepted, as every other
       // wait's does.
       const deadline = Date.now() + timeoutMs;
@@ -3325,14 +3428,16 @@ export class Lenz {
     input: VerifyAndWaitInput,
     opts: VerifyAndWaitOptions = {},
   ): Promise<Verification> {
-    const { timeoutMs, onProgress } = waitOptions(input, opts);
+    requireObject(input, "verifyAndWait()", "input");
+    requireObject(opts, "verifyAndWait()", "options");
+    const { timeoutMs, onProgress } = waitOptions(input, opts, "verifyAndWait()");
     verifyText(this, input);
     const call = resolveCall(this, opts, "verifyAndWait()", "submitWait");
     const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await callIdempotencyKey(input);
     return withIdempotencyKey(idempotencyKey, async () => {
       const accepted = await this.submit(input, idempotencyKey, transportOf(call));
-      acceptedId("task_id", accepted.task_id);
+      acceptedId("task_id", accepted.task_id, accepted);
       this.log("info", `[lenz-io] Submitted task: ${accepted.task_id}`);
       // This call owns the cancel: the wait below is not handed the flag,
       // only a set to record what it saw end.
@@ -3367,7 +3472,12 @@ export class Lenz {
    * `LenzAbortError` (carrying the `taskId`); `opts.headers` go on every poll.
    */
   async wait(task: string | TaskAccepted, opts: WaitOptions = {}): Promise<Verification> {
-    const taskId = typeof task === "string" ? task : task.task_id;
+    const taskId =
+      typeof task === "string"
+        ? task
+        : task !== null && typeof task === "object"
+          ? task.task_id
+          : (task as unknown as string);
     if (!taskId) {
       throw argumentError(
         "wait() requires a non-empty task_id (got an empty TaskAccepted.task_id).",
@@ -3376,6 +3486,8 @@ export class Lenz {
       );
     }
     requirePathId("wait", "task_id", taskId);
+    requireObject(opts, "wait()", "options");
+    checkWaitBudget(opts.timeoutMs, "wait()");
     const timeoutMs = opts.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
     const onProgress = opts.onProgress;
     // With `cancelOnAbort` the task is known before anything is sent, so a
@@ -3436,7 +3548,10 @@ export class Lenz {
     input: VerifyBatchAndWaitInput,
     opts: VerifyAndWaitOptions = {},
   ): Promise<BatchItemResult[]> {
-    const { timeoutMs, onProgress } = waitOptions(input, opts);
+    requireObject(input, "verifyBatchAndWait()", "input");
+    requireObject(opts, "verifyBatchAndWait()", "options");
+    checkBatchItems(input);
+    const { timeoutMs, onProgress } = waitOptions(input, opts, "verifyBatchAndWait()");
     const call = resolveCall(this, opts, "verifyBatchAndWait()", "submitWait");
     const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await callIdempotencyKey(input);
@@ -3472,7 +3587,7 @@ export class Lenz {
     if (!Array.isArray(accepted.items) || !accepted.items.every(isPlainObject)) {
       throw wrongType(accepted, "POST", "/verify/batch", "items");
     }
-    for (const it of accepted.items) acceptedId("task_id", it.task_id);
+    for (const it of accepted.items) acceptedId("task_id", it.task_id, accepted);
     const ids = accepted.items.map((it) => it.task_id).filter((id): id is string => Boolean(id));
     // Each accepted task not yet seen to end is cancelled on an abort.
     const ended = new Set<string>();
@@ -3515,7 +3630,8 @@ export class Lenz {
           status: "timeout",
         };
       }
-      // A result that is not an object reads as no result: the row fails.
+      // A completed status whose result is not an object cannot be read: that
+      // row fails (its `status_detail` is the poll as received); the others stand.
       if (status.status === "completed" && isPlainObject(status.result)) {
         return {
           task_id: it.task_id,
@@ -3670,11 +3786,10 @@ export class Lenz {
         const id = pending[i]!;
         if (res.status === "fulfilled") {
           const s = res.value;
-          if (s.status === "completed" && s.result != null && !isPlainObject(s.result)) {
-            // The run finished, but its answer cannot be read: polling again
-            // would only spin to a timeout that hides why.
-            throw wrongType(s, "GET", `/verify/status/${id}`, "result");
-          }
+          // A `completed` status whose `result` is not an object is ended
+          // too: polling again would only spin to a timeout that hides why.
+          // It is terminal here; `wait` throws LenzInvalidResponseError for
+          // it, and a batch wait's row for it is "failed".
           if (typeof s.status !== "string") {
             // No status to read: polled again, like a 5xx; the deadline's
             // error says so if it was the last poll.
@@ -3821,6 +3936,9 @@ export class Lenz {
         emptyErr.taskId = taskId; // parity: the Python SDK sets task_id here too
         throw emptyErr;
       }
+      // The wait reaches here only on a terminal status; a `completed` one
+      // whose `result` is not an object ends here (a batch wait reads it as
+      // that row's failure instead).
       if (!isPlainObject(polled.result)) {
         throw wrongType(polled, "GET", `/verify/status/${taskId}`, "result");
       }
