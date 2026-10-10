@@ -6,6 +6,8 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-10
+
 ### Added
 
 - `error` on a failed `verifyBatchAndWait` row: the error that ended its polling (`LenzGoneError`, `LenzNotFoundError`, `LenzApiVersionError`, or `LenzInvalidResponseError` for a poll that said the run ended but could not be read, its `body` the poll as received), `undefined` otherwise (a run that failed on the server keeps its reason in `status_detail`). Non-enumerable, kept out of serialisation; typed optional readonly on `BatchItemResult`. Matches the Python SDK.
