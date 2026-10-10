@@ -1461,6 +1461,19 @@ two exceptions: the `partial` of a `ReviewTimeoutError` /
 sent it, and `err.code` is exactly the `code` of the response body (since 3.2;
 see [Errors](#errors)).
 
+**A field sent as `null`** (since 3.2). A few fields keep a 3.x type without
+`null` (an assess row's `verdict` / `confidence`, the assess `error_code`, a
+pause option's `text`, an entity's `name`, a status's `reason` / `hint` /
+`progress` / `claims` / `docs_url` / `error` / `failure_class` /
+`failure_reason`, and the `usage` blocks `verify` / `ask` / `assess`), and the
+API may send them as `null` (a stored replay, a value it has none of). By
+default that is read as if the field were not sent: absent, or the 2.x value
+the client fills there (an option's `text` is its `claim`, an entity's `name`
+is `""`). With `legacyAliases: false` the `null` stays, as sent, and `raw`
+always holds it. Webhook events keep a `null` as 2.21 delivered it. One more
+field can be `null` and is typed `string`: a review failure block's
+`docs_url`; check it before use.
+
 **The body as received: `raw`** (since 3.2). Whatever `legacyAliases` says,
 each result carries `raw`: the JSON object it was read from, exactly as
 received, with none of the names or defaults the SDK adds. It is a getter, not

@@ -352,7 +352,7 @@ function buildEvent(payload: Record<string, unknown>): WebhookEvent {
     needsInput ??= {};
     if (Array.isArray(needsInput["claims"])) {
       // Each option under both names: `claim` (newer) and `text` (original).
-      needsInput = { ...needsInput, claims: normalizeOptions(needsInput["claims"]) };
+      needsInput = { ...needsInput, claims: normalizeOptions(needsInput["claims"], false) };
     }
     return {
       ...base,

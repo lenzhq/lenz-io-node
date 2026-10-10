@@ -324,12 +324,23 @@ const COPY_OPTION_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /** A key as the client keeps it: one of only whitespace (or none) is no key, `""`. */
+/** `value` without ASCII whitespace (space, tab, line feed, CR, form feed, VT) at its ends. */
+function trimAsciiSpace(value: string): string {
+  // A loop, not a regex: linear on any input.
+  const space = (c: number) => c === 0x20 || (c >= 0x09 && c <= 0x0d);
+  let start = 0;
+  let end = value.length;
+  while (start < end && space(value.charCodeAt(start))) start++;
+  while (end > start && space(value.charCodeAt(end - 1))) end--;
+  return value.slice(start, end);
+}
+
 function usableKey(key: unknown, where: string): string {
   if (typeof key !== "string") return "";
   // Only ASCII whitespace at the ends is dropped (as on the Python SDK; fetch
   // drops it from a header value anyway); empty or whitespace-only is no key.
   // Anything else outside visible ASCII is refused below.
-  const trimmed = key.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, "");
+  const trimmed = trimAsciiSpace(key);
   // Inside the key, only visible ASCII can ride an `Authorization` header: a
   // space, a control character or a non-ASCII letter is a pasted key gone
   // wrong, which the server could only refuse. Refused here, before any

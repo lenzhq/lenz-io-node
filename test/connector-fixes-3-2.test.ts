@@ -930,3 +930,74 @@ describe("batch 2: redirects, empty answers, foreign errors, Content-Type", () =
     ]);
   });
 });
+
+describe("a null where the 3.x type has none reads as not sent (default reading only)", () => {
+  const status = {
+    task_id: "t1",
+    status: "needs_input",
+    reason: null,
+    hint: null,
+    progress: null,
+    docs_url: null,
+    error: null,
+    failure_class: null,
+    failure_reason: null,
+    claims: [{ claim: "a", text: null }],
+  };
+  const assess = {
+    claims: [{ claim: "a", status: "completed", verdict: null, confidence: null }],
+    error_code: null,
+    more_claims: [],
+  };
+  const usage = {
+    tier: "free",
+    credits: { total: 100, used: 0, remaining: 100, extra: 0, resets_at: null },
+    costs: {},
+    verify: null,
+    ask: null,
+    assess: null,
+  };
+  const verification = { verification_id: "abcd1234", entities: [{ name: null, qid: null }] };
+  const { fetch } = server((s) => {
+    if (s.url.includes("/verify/status/")) return { body: status };
+    if (s.url.endsWith("/assess")) return { body: assess };
+    if (s.url.endsWith("/me/usage")) return { body: usage };
+    return { body: verification };
+  });
+
+  it("by default: absent (or the 2.x value), never null", async () => {
+    const c = new Lenz({ apiKey: "lenz_t", fetch });
+    const st = (await c.getStatus("t1")) as unknown as Record<string, unknown>;
+    for (const k of [
+      "reason",
+      "hint",
+      "progress",
+      "docs_url",
+      "error",
+      "failure_class",
+      "failure_reason",
+    ]) {
+      expect(st[k], k).not.toBeNull();
+    }
+    expect((st["claims"] as Array<Record<string, unknown>>)[0]!["text"]).toBe("a");
+    const a = (await c.assess({ claim: "a" })) as unknown as Record<string, unknown>;
+    expect(a["error_code"]).toBeUndefined();
+    const row = (a["claims"] as Array<Record<string, unknown>>)[0]!;
+    expect(row["verdict"]).toBeUndefined();
+    expect(row["confidence"]).toBeUndefined();
+    const u = (await c.usage()) as unknown as Record<string, unknown>;
+    expect([u["verify"], u["ask"], u["assess"]]).toEqual([undefined, undefined, undefined]);
+    const v = await c.verifications.get("abcd1234");
+    expect(v.entities![0]!.name).toBe("");
+    // raw keeps the null as sent.
+    expect((st as { raw?: Record<string, unknown> }).raw!["hint"]).toBeNull();
+  });
+
+  it("with legacyAliases: false: null, as sent", async () => {
+    const c = new Lenz({ apiKey: "lenz_t", fetch, legacyAliases: false });
+    expect(await c.getStatus("t1")).toEqual(status);
+    expect(await c.assess({ claim: "a" })).toEqual(assess);
+    expect(await c.usage()).toEqual(usage);
+    expect(await c.verifications.get("abcd1234")).toEqual(verification);
+  });
+});
