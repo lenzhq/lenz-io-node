@@ -4,7 +4,9 @@ import { normalizeCitecheck, normalizeReview } from "./compat.js";
  * The same for a citation check's body: `[]` for the three lists, `null` for
  * `more_citations`. Keys the server sent are never touched. Returns a copy.
  */
-export function withCitecheckDefaults<T>(body: T): T {
+export function withCitecheckDefaults<T>(body: T, legacyAliases = true): T {
+  // A client made with `legacyAliases: false` returns the body as sent.
+  if (!legacyAliases) return body;
   const normalized = normalizeCitecheck(body);
   if (!isObject(normalized)) return body;
   const b: Record<string, unknown> = { ...normalized };
@@ -33,7 +35,9 @@ function withNull(v: unknown, key: string): unknown {
  * (each claim row's `assessment.suggested_rewrite`).
  * Keys the server sent are never touched. Returns a copy.
  */
-export function withReviewDefaults<T>(body: T): T {
+export function withReviewDefaults<T>(body: T, legacyAliases = true): T {
+  // A client made with `legacyAliases: false` returns the body as sent.
+  if (!legacyAliases) return body;
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   // Both response shapes first, so a default never sits beside a value the
   // server sent under the other name.

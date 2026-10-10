@@ -45,7 +45,7 @@
  */
 
 export { API_VERSION, DEFAULT_BASE_URL, Lenz } from "./client.js";
-export type { LenzLogger, LenzOptions } from "./client.js";
+export type { ClientCopyOptions, LenzLogger, LenzOptions } from "./client.js";
 
 export {
   LenzAPIError,
@@ -55,6 +55,7 @@ export {
   LenzConnectionError,
   LenzError,
   LenzGoneError,
+  LenzInvalidResponseError,
   LenzNeedsInputError,
   LenzNotFoundError,
   LenzPipelineError,

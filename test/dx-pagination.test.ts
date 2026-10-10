@@ -242,6 +242,13 @@ describe("pageSize on verifications.list and listAll", () => {
     },
   );
 
+  it("the error shows a string pageSize as a string", async () => {
+    const client = new Lenz({ apiKey: "lenz_t", fetch: pages().fetch });
+    await expect(
+      client.verifications.list({ pageSize: "10" as unknown as number }),
+    ).rejects.toThrow('(got "10")');
+  });
+
   it.each([1, 100])("accepts pageSize %s", async (pageSize) => {
     const { fetch, urls } = pages({ ids: [], page: 1, page_size: pageSize });
     const client = new Lenz({ apiKey: "lenz_t", fetch });
