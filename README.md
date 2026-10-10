@@ -1140,12 +1140,15 @@ https://lenz.io/contact.
 
 ### Answer in the language of the text
 
-Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait` or `ask.send` and
-the answer comes back in the language of the text you submitted. A concrete code
-such as `"es"` always wins, and omitting `language` still means English. On
+Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait`, `review`,
+`reviewAndWait` or `ask.send` and the answer comes back in the language of the
+text you submitted (for a review, one language for the whole draft). A concrete
+code such as `"es"` always wins, and omitting `language` still means English. On
 `ask.send`, `"auto"` uses the language of the claim being discussed. `extract`,
-`verifyBatch`, `citecheck` and `review` do not accept `"auto"` (the API answers
-422, as for any unsupported language).
+`verifyBatch` and `citecheck` do not accept `"auto"` (the API answers 422, as for
+any unsupported language). A review of a draft that is only a link decides its
+language once the page is read: until then its `language` reads `"auto"`, and a
+page that cannot be read leaves English.
 
 ```ts
 const v = await client.verifyAndWait({
