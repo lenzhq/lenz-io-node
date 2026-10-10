@@ -443,6 +443,15 @@ export interface ExtractedClaims {
   presumed_intent?: string;
   original_input?: string;
   /**
+   * The language the claims are written in (ISO 639-1, e.g. `"de"`), never
+   * `"auto"`: the code that was used, whether you named it, asked for `"auto"`
+   * or omitted `language` (English). Pass it on to `assess` or `verify` as
+   * `language` to keep a chain in one language. Optional because a replayed
+   * response stored before the field existed lacks it; read it as
+   * `out.language ?? "en"`.
+   */
+  language?: string;
+  /**
    * Where the text makes each returned claim, when the call set
    * `locate: true`: one entry per returned claim, in the order of
    * `identified_claims` (one entry for a single `claim`).
@@ -1151,7 +1160,14 @@ export interface VerifyBatchInput {
 
 export interface ExtractInput {
   text: string;
-  /** Output language (ISO 639-1). `"auto"` is not accepted here. */
+  /**
+   * Language the claims are written in (ISO 639-1). Omit for English
+   * (default). Or `"auto"`: the claims are written in the language of the
+   * text (of the fetched page when `text` is a single URL); a short or
+   * undetectable text gives English. A concrete code always wins. The code
+   * used comes back as `ExtractedClaims.language`; pass it on to `assess` or
+   * `verify` to keep a chain in one language.
+   */
   language?: string;
   /**
    * Narrows the result to the claims this describes, e.g.
