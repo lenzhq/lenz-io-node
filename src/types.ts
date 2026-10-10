@@ -154,6 +154,22 @@ export interface ResponseMeta {
 }
 
 /**
+ * {@link ResponseMeta} with both members required: what a top-level call's
+ * result always carries (since 3.2), so code reading `out.httpStatus` /
+ * `out.headers` needs no guard. Nested objects, a wait's verification and a
+ * `verifyBatchAndWait` row keep the optional {@link ResponseMeta}. `getStatus`
+ * and `verifyBatch`, the methods the waits call through (and that 2.x code
+ * overrides), keep their plain types; their results carry both at runtime.
+ */
+export interface ResultMeta {
+  readonly httpStatus: number;
+  readonly headers: Record<string, string>;
+}
+
+/** A top-level call's result: `T` with {@link ResultMeta}. Since 3.2. */
+export type Result<T> = T & ResultMeta;
+
+/**
  * Full verification report — returned by `verifyAndWait`,
  * `verifications.get`, the `/verify/status/{task_id}` polling endpoint,
  * and the webhook payload.

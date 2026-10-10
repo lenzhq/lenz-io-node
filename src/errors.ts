@@ -187,6 +187,17 @@ export class LenzAuthError extends LenzError {}
 export class LenzInvalidKeyError extends LenzAuthError {}
 
 /**
+ * No key is configured and the call needs one: `apiKey` was not given (or
+ * was empty or only whitespace), `LENZ_API_KEY` is unset, or a `withOptions`
+ * copy was made without one. Thrown before any request (`statusCode` 0,
+ * message "API key required"). A {@link LenzAuthError}, so a handler for that
+ * still catches it; distinct from {@link LenzInvalidKeyError} (a key that
+ * cannot be sent) and from the API's 401 / 403 (a plain `LenzAuthError`).
+ * Since 3.2.
+ */
+export class LenzMissingKeyError extends LenzAuthError {}
+
+/**
  * 402 — you're out of balance, or your plan doesn't cover this call.
  *
  * `remaining` and `requested` are in the **capability's own unit** (you asked
@@ -292,8 +303,7 @@ export class LenzQuotaExceededError extends LenzError {
  * The `code`s of a {@link LenzValidationError} the SDK raises itself, before
  * any request, for an argument it cannot use (`statusCode` 0), shared with the
  * Python SDK (`USAGE_ERROR_CODES` there too). `invalid_argument` is anything
- * no other code names. Local codes: the same whatever `legacyAliases` says
- * (which only picks the wording of a blank input's message).
+ * no other code names. Local codes: the same whatever `legacyAliases` says.
  */
 export const USAGE_ERROR_CODES = [
   "blank_input",

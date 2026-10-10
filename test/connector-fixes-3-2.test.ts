@@ -785,16 +785,16 @@ describe("blank input: the API's sentences, and the API's whitespace rule", () =
       ["claim is required.", "blank_input"],
       ["claim is required.", "blank_input"],
       ["claims[1] is blank.", "blank_item"],
-      ["claims.1: Input should be a valid string", "invalid_argument"],
+      ["claims[1] must be a string (got number).", "invalid_argument"],
     ]);
   });
 
-  it("by default, the 2.x reading of the same sentences; the same local codes", async () => {
+  it("by default, the API's own sentence for a blank one too (since 3.2); the same local codes", async () => {
     expect(await sentences(new Lenz({ apiKey: "lenz_t" }))).toEqual([
-      ["Text is required.", "blank_input"],
-      ["Text is required.", "blank_input"],
+      ["claim is required.", "blank_input"],
+      ["claim is required.", "blank_input"],
       ["claims[1] is blank.", "blank_item"],
-      ["Validation failed", "invalid_argument"],
+      ["claims[1] must be a string (got number).", "invalid_argument"],
     ]);
   });
 

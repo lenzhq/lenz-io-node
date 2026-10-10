@@ -97,8 +97,10 @@ describe("errors keep their 2.x fields", () => {
     });
 
     it.each([
-      ["verify", "Text is required.", (c: Lenz) => c.verify({ claim: " " })],
-      ["assess", "Text is required.", (c: Lenz) => c.assess({ claim: " " })],
+      // Refused before sending (since 3.2) with the API's own sentence, not
+      // the 2.x reading of it.
+      ["verify", "claim is required.", (c: Lenz) => c.verify({ claim: " " })],
+      ["assess", "claim is required.", (c: Lenz) => c.assess({ claim: " " })],
     ])(
       "%s: the single blank claim (refused before sending, since 3.2)",
       async (_name, sentence, call) => {
@@ -127,7 +129,9 @@ describe("errors keep their 2.x fields", () => {
 
     it("select: a list of blanks asks for the 2.x name", async () => {
       const body = blank(["body", "claims"], "claims is required.");
-      const err = await thrown(() => client(422, body).select("task1", { claims: [" "] }));
+      // A blank item is refused before sending (since 3.2): the server's 422
+      // is what a list it judges empty gets.
+      const err = await thrown(() => client(422, body).select("task1", { claims: ["x"] }));
       expect(err.message).toBe("texts is required and must be non-empty.");
       expect(err.cause_).toBe("texts is required and must be non-empty.");
       expect(err.code).toBe("");

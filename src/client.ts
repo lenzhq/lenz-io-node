@@ -74,6 +74,7 @@ import {
   LenzError,
   LenzGoneError,
   LenzInvalidKeyError,
+  LenzMissingKeyError,
   LenzInvalidResponseError,
   LenzNeedsInputError,
   LenzNotFoundError,
@@ -91,6 +92,7 @@ import {
   type UsageErrorCode,
 } from "./errors.js";
 import type {
+  Result,
   AskHistory,
   AskReply,
   AskSendInput,
@@ -1071,6 +1073,57 @@ function wrongType(
 }
 
 /**
+ * A top-level call's result, typed with the `httpStatus` and `headers` it
+ * carries (set when it was read from its answer: `setRaw`, `keepRaw`,
+ * `conflictReceipt`).
+ */
+function asResult<T>(value: T): Result<T> {
+  return value as Result<T>;
+}
+
+/**
+ * A `completed` poll that carries no `result` (absent or `null`): the run
+ * ended, but its verification cannot be read. A
+ * {@link LenzInvalidResponseError} with the poll's status, headers and body;
+ * the same sentence as the Python SDK.
+ */
+function noResult(from: unknown): LenzInvalidResponseError {
+  const meta = from !== null && typeof from === "object" ? RESPONSE_META.get(from) : undefined;
+  const answered = meta !== undefined ? `answered HTTP ${meta.status}` : "answered";
+  return invalidShape(
+    from,
+    `The API ${answered} with status completed and no result: the run ended, but its verification cannot be read.`,
+    "The poll says the run completed but carries no result block.",
+    "Retry the wait; contact support (https://lenz.io/contact) with the request id if this persists.",
+  );
+}
+
+/**
+ * Whether `body` (a status, an assess body or row) has a `failure` the SDK
+ * cannot read: present, and neither an object nor `null`.
+ */
+function badFailureBlock(body: unknown): boolean {
+  if (!isPlainObject(body)) return false;
+  const failure = (body as Record<string, unknown>)["failure"];
+  return failure !== undefined && failure !== null && !isPlainObject(failure);
+}
+
+/**
+ * An `/assess` body read with the 2.x names reads every `failure` in it (its
+ * own and each row's): one of the wrong type throws
+ * {@link LenzInvalidResponseError}, as any field the SDK reads does.
+ */
+function checkAssessFailures(client: object, body: unknown): void {
+  if (!aliasesOn(client) || !isPlainObject(body)) return;
+  if (badFailureBlock(body)) throw wrongType(body, "POST", "/assess", "failure");
+  const rows = (body as Record<string, unknown>)["claims"];
+  if (!Array.isArray(rows)) return;
+  rows.forEach((row, i) => {
+    if (badFailureBlock(row)) throw wrongType(body, "POST", "/assess", `claims[${i}].failure`);
+  });
+}
+
+/**
  * A wait's timeout whose last polls could not be read: their last error
  * becomes the timeout's `cause` (the native `Error.cause`), and the message
  * and cause line say so. Without one, `err` is returned unchanged.
@@ -1732,10 +1785,11 @@ function claimText(input: { claim?: string; text?: string }): string | undefined
 
 /**
  * Refuses a blank input before anything is sent: the API would only answer
- * 422. A `LenzValidationError` with the sentence that 422 would have given,
- * as this client reads it (by `legacyAliases`), but the local `code` (the
- * same in both modes, and on the Python SDK), `statusCode` 0 and no `body`,
- * since no request was made.
+ * 422. A `LenzValidationError` with the sentence of that operation's 422 in
+ * the API's own words (`"claim is required."`), whatever `legacyAliases`
+ * says, and the local `code` (the same on the Python SDK), `statusCode` 0
+ * and no `body`, since no request was made. The sentences are the
+ * `BLANK_SENTENCES`, shared with the Python SDK.
  */
 function blankInput(
   sentence: string,
@@ -1750,27 +1804,62 @@ function blankInput(
   return err;
 }
 
-/** The text `verify` sends: `claim`, else `text`; refused when blank. */
-function verifyText(client: object, input: VerifyInput): string {
+/** The text `verify` sends: `claim`, else `text`; refused when blank or absent. */
+function verifyText(input: VerifyInput): string {
   const text = claimText(input);
-  if (!hasText(text)) throw blankClaim(client, "Pass the claim to check as `claim`.");
+  if (!hasText(text)) {
+    throw blankClaim("Pass the claim to check as `claim`.", "blank_input", !claimGiven(input));
+  }
   return text;
 }
 
+/** Whether `claim` or `text` is in the input at all (`undefined` is absent: JSON drops it). */
+function claimGiven(input: { claim?: unknown; text?: unknown }): boolean {
+  return input.claim !== undefined || input.text !== undefined;
+}
+
 /**
- * A blank `claim`: `blank_input`, with the sentence of the API's 422 as this
- * client reads it (its own with `legacyAliases: false`, the 2.x reading by
- * default). An empty `claims` list (`code` `empty_list`) says the same.
+ * The API's own 422 sentence (the canonical shape's `detail`) for a blank
+ * input, by operation, used as the message of the local refusal in both
+ * modes. The same strings as the Python SDK's. A field that is absent from
+ * the body (not just blank) gets the API's schema sentence, `"<field>: Field
+ * required"`.
+ */
+const BLANK_SENTENCES = {
+  /** `POST /verify`, `POST /assess`: a blank `claim` / `text`. */
+  claim: "claim is required.",
+  /** A field the body does not carry at all (`claim`, `claims`, `message`, `text`). */
+  absent: (field: string) => `${field}: Field required`,
+  /** `POST /verify/{task_id}/select` with an empty `claims` (or `texts`) list. */
+  list: (field: string) => `${field} is required.`,
+  /** `POST /assess`, `POST /verify/{task_id}/select`: a blank item. */
+  item: (i: number, field = "claims") => `${field}[${i}] is blank.`,
+  /** `POST /ask/{verification_id}`: a blank `message`. */
+  message: "Message cannot be empty.",
+  /** `POST /review`: a blank `text`. */
+  review: "text: send the draft, or one public http(s) URL.",
+  /** `POST /citecheck` with neither `text` nor `pairs`. */
+  citecheck: "payload: Value error, send exactly one of text and pairs",
+} as const;
+
+/**
+ * A blank `claim` (`blank_input`, `"claim is required."`), or, with no
+ * `claim` / `text` in the body at all, the API's `"claim: Field required"`
+ * (`blank_input`, or `empty_list` beside an empty `claims` list, which the
+ * API reads as absent).
  */
 function blankClaim(
-  client: object,
   fix: string,
   code: "blank_input" | "empty_list" = "blank_input",
+  absent = false,
 ): LenzValidationError {
-  const param = code === "empty_list" ? "claims" : "claim";
-  return aliasesOn(client)
-    ? blankInput("Text is required.", code, fix, param)
-    : blankInput("claim is required.", code, fix, param);
+  if (!absent) return blankInput(BLANK_SENTENCES.claim, "blank_input", fix, "claim");
+  return blankInput(
+    BLANK_SENTENCES.absent("claim"),
+    code,
+    fix,
+    code === "empty_list" ? "claims" : "claim",
+  );
 }
 
 /** The camelCase names a batch item takes beside its 2.x snake_case ones. */
@@ -1982,7 +2071,7 @@ class VerificationsNamespace {
    */
   async list(
     input: { page?: number; pageSize?: number } & RequestOptions = {},
-  ): Promise<VerificationList> {
+  ): Promise<Result<VerificationList>> {
     requireObject(input, "verifications.list", "input");
     const { page = 1, pageSize, ...options } = input;
     checkPageSize(pageSize, "verifications.list");
@@ -1993,7 +2082,7 @@ class VerificationsNamespace {
       query: { page, page_size: pageSize },
       ...transportOf(call),
     });
-    return aliased(this.client, (b) => normalizeVerificationList(b, true), body);
+    return asResult(aliased(this.client, (b) => normalizeVerificationList(b, true), body));
   }
 
   /**
@@ -2041,7 +2130,7 @@ class VerificationsNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  async get(verificationId: string, options?: RequestOptions): Promise<Verification> {
+  async get(verificationId: string, options?: RequestOptions): Promise<Result<Verification>> {
     const id = requirePathId("verifications.get", "verification_id", verificationId);
     const call = resolveCall(this.client, options, "verifications.get");
     const body = await this.client.request<Verification>({
@@ -2051,7 +2140,7 @@ class VerificationsNamespace {
       authOptional: true, // send the key if we have one → owner sees private rows
       ...transportOf(call),
     });
-    return aliased(this.client, (b) => normalizeVerification(b, true), body);
+    return asResult(aliased(this.client, (b) => normalizeVerification(b, true), body));
   }
 
   /**
@@ -2072,14 +2161,19 @@ class VerificationsNamespace {
    * open-source checker without involving Lenz. A withdrawn certificate is
    * still served — it is the record of what was warranted.
    */
-  async getCertificate(verificationId: string, options?: RequestOptions): Promise<Certificate> {
+  async getCertificate(
+    verificationId: string,
+    options?: RequestOptions,
+  ): Promise<Result<Certificate>> {
     const id = requirePathId("verifications.getCertificate", "verification_id", verificationId);
     const call = resolveCall(this.client, options, "verifications.getCertificate");
-    return this.client.request<Certificate>({
-      method: "GET",
-      path: `/verifications/${id}/certificate`,
-      ...transportOf(call),
-    });
+    return asResult(
+      await this.client.request<Certificate>({
+        method: "GET",
+        path: `/verifications/${id}/certificate`,
+        ...transportOf(call),
+      }),
+    );
   }
 
   async delete(verificationId: string, options?: RequestOptions): Promise<boolean> {
@@ -2117,17 +2211,19 @@ class VerificationsNamespace {
   async related(
     verificationId: string,
     { limit = 5, ...options }: { limit?: number } & RequestOptions = {},
-  ): Promise<RelatedVerifications> {
+  ): Promise<Result<RelatedVerifications>> {
     const id = requirePathId("verifications.related", "verification_id", verificationId);
     const call = resolveCall(this.client, options, "verifications.related");
-    return this.client.request<RelatedVerifications>({
-      method: "GET",
-      path: `/verifications/${id}/related`,
-      query: { limit },
-      authRequired: false,
-      authOptional: true, // send the key if we have one → owner sees own rows
-      ...transportOf(call),
-    });
+    return asResult(
+      await this.client.request<RelatedVerifications>({
+        method: "GET",
+        path: `/verifications/${id}/related`,
+        query: { limit },
+        authRequired: false,
+        authOptional: true, // send the key if we have one → owner sees own rows
+        ...transportOf(call),
+      }),
+    );
   }
 }
 
@@ -2139,14 +2235,16 @@ class AskNamespace {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
    */
-  async history(verificationId: string, options?: RequestOptions): Promise<AskHistory> {
+  async history(verificationId: string, options?: RequestOptions): Promise<Result<AskHistory>> {
     const id = requirePathId("ask.history", "verification_id", verificationId);
     const call = resolveCall(this.client, options, "ask.history");
-    return this.client.request<AskHistory>({
-      method: "GET",
-      path: `/ask/${id}`,
-      ...transportOf(call),
-    });
+    return asResult(
+      await this.client.request<AskHistory>({
+        method: "GET",
+        path: `/ask/${id}`,
+        ...transportOf(call),
+      }),
+    );
   }
 
   /**
@@ -2163,22 +2261,33 @@ class AskNamespace {
     verificationId: string,
     input: AskSendInput,
     options?: RequestOptions,
-  ): Promise<AskReply> {
+  ): Promise<Result<AskReply>> {
     const id = requirePathId("ask.send", "verification_id", verificationId);
     requireObject(input, "ask.send", "input");
+    const message: unknown = input.message;
+    if (message === undefined || (typeof message === "string" && !hasText(message))) {
+      throw blankInput(
+        message === undefined ? BLANK_SENTENCES.absent("message") : BLANK_SENTENCES.message,
+        "blank_input",
+        "Pass the follow-up question as `message`.",
+        "message",
+      );
+    }
     const call = resolveCall(this.client, options, "ask.send");
     const body: Record<string, unknown> = { message: input.message };
     if (input.language) body.language = input.language;
     const idempotencyKey = await callIdempotencyKey(input);
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-    return this.client.request<AskReply>({
-      method: "POST",
-      path: `/ask/${id}`,
-      json: body,
-      headers,
-      ...transportOf(call),
-    });
+    return asResult(
+      await this.client.request<AskReply>({
+        method: "POST",
+        path: `/ask/${id}`,
+        json: body,
+        headers,
+        ...transportOf(call),
+      }),
+    );
   }
 
   async reset(verificationId: string, options?: RequestOptions): Promise<boolean> {
@@ -2196,7 +2305,7 @@ class AskNamespace {
 class LibraryNamespace {
   constructor(private readonly client: Lenz) {}
 
-  async list(input: LibraryListInput = {}, options?: RequestOptions): Promise<LibraryList> {
+  async list(input: LibraryListInput = {}, options?: RequestOptions): Promise<Result<LibraryList>> {
     requireObject(input, "library.list", "input");
     const call = resolveCall(this.client, options, "library.list");
     const body = await this.client.request<LibraryList>({
@@ -2214,7 +2323,7 @@ class LibraryNamespace {
       authRequired: false,
       ...transportOf(call),
     });
-    return aliased(this.client, (b) => normalizeVerificationList(b, true), body);
+    return asResult(aliased(this.client, (b) => normalizeVerificationList(b, true), body));
   }
 
   /**
@@ -2274,16 +2383,14 @@ function checkBatchItems(input: { claims?: unknown }): void {
  * before anything is sent otherwise (`blank_input`, `param` `"text"`), as
  * on the Python SDK.
  */
-function reviewText(input: { text?: unknown }, where: string): void {
+function reviewText(input: { text?: unknown }): void {
   if (!hasText(input.text)) {
-    const err = argumentError(
-      `${where} needs the draft text, or one public http(s) URL.`,
+    throw blankInput(
+      input.text === undefined ? BLANK_SENTENCES.absent("text") : BLANK_SENTENCES.review,
       "blank_input",
+      "Pass the draft (or one public http(s) URL) as `text`.",
       "text",
     );
-    err.fix = "Pass the draft (or one public http(s) URL) as `text`.";
-    err.docUrl = "https://lenz.io/docs/errors";
-    throw err;
   }
 }
 
@@ -2292,16 +2399,22 @@ function reviewText(input: { text?: unknown }, where: string): void {
  * `text` and `pairs`, and `maxCitations` only with `text`.
  */
 function citecheckBody(input: CitecheckInput): Record<string, unknown> {
-  const hasText = typeof input.text === "string" && input.text.trim() !== "";
-  if (hasText === (input.pairs !== undefined)) {
+  // Blank by the API's rule (`hasText`), as everywhere else.
+  const withText = hasText(input.text);
+  if (withText === (input.pairs !== undefined)) {
     // Both given conflict; neither is an input left blank.
-    throw hasText
+    throw withText
       ? argumentError(
           "citecheck() needs exactly one of text and pairs.",
           "conflicting_input",
           "text",
         )
-      : argumentError("citecheck() needs exactly one of text and pairs.", "blank_input", "text");
+      : blankInput(
+          BLANK_SENTENCES.citecheck,
+          "blank_input",
+          "Pass the draft as `text`, or the statements and their sources as `pairs`.",
+          "text",
+        );
   }
   if (input.pairs !== undefined && input.maxCitations !== undefined) {
     throw argumentError(
@@ -2310,7 +2423,7 @@ function citecheckBody(input: CitecheckInput): Record<string, unknown> {
       "maxCitations",
     );
   }
-  const body: Record<string, unknown> = hasText
+  const body: Record<string, unknown> = withText
     ? { text: input.text }
     : { pairs: pairsToWire(input.pairs) };
   if (input.maxCitations !== undefined) body.max_citations = input.maxCitations;
@@ -2496,11 +2609,11 @@ export class Lenz {
 
   // ── Marquee verbs ──
 
-  async verify(input: VerifyInput, options?: RequestOptions): Promise<TaskAccepted> {
+  async verify(input: VerifyInput, options?: RequestOptions): Promise<Result<TaskAccepted>> {
     requireObject(input, "verify()", "input");
-    verifyText(this, input);
+    verifyText(input);
     const call = resolveCall(this, options, "verify()");
-    return this.submit(input, await callIdempotencyKey(input), transportOf(call));
+    return asResult(await this.submit(input, await callIdempotencyKey(input), transportOf(call)));
   }
 
   async verifyBatch(input: VerifyBatchInput, options?: RequestOptions): Promise<BatchAccepted> {
@@ -2584,7 +2697,7 @@ export class Lenz {
    * code they were written in; pass it on to `assess` or `verify` to keep a
    * chain in one language.
    */
-  async extract(input: ExtractInput, options?: RequestOptions): Promise<ExtractedClaims> {
+  async extract(input: ExtractInput, options?: RequestOptions): Promise<Result<ExtractedClaims>> {
     requireObject(input, "extract()", "input");
     checkTimeoutMs(input.timeoutMs, "extract() input", true);
     const call = resolveCall(this, options, "extract()");
@@ -2617,7 +2730,7 @@ export class Lenz {
         this.copyTimeoutMs ??
         Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
     });
-    return aliased(this, (b) => normalizeExtract(b, input.locate), out);
+    return asResult(aliased(this, (b) => normalizeExtract(b, input.locate), out));
   }
 
   /**
@@ -2666,7 +2779,7 @@ export class Lenz {
    * claim with its wrong part corrected. No extra credit; not itself
    * verified.
    */
-  async assess(input: AssessInput, options?: RequestOptions): Promise<AssessResponse> {
+  async assess(input: AssessInput, options?: RequestOptions): Promise<Result<AssessResponse>> {
     requireObject(input, "assess()", "input");
     checkTimeoutMs(input.timeoutMs, "assess() input", true);
     // `claim` is the documented name; `text` the alias. Either way the wire
@@ -2688,25 +2801,25 @@ export class Lenz {
       list.forEach((item: unknown, i) => {
         const fix = "Leave out the blank items: every item of `claims` is one claim to check.";
         if (typeof item !== "string") {
-          // The sentence of the API's schema error, as this client reads it.
-          throw aliasesOn(this)
-            ? blankInput("Validation failed", "invalid_argument", fix, `claims[${i}]`)
-            : blankInput(
-                `claims.${i}: Input should be a valid string`,
-                "invalid_argument",
-                fix,
-                `claims[${i}]`,
-              );
+          // The same sentence in both modes and on the Python SDK, with the
+          // JavaScript type name (`null` for null).
+          const type = item === null ? "null" : typeof item;
+          throw blankInput(
+            `claims[${i}] must be a string (got ${type}).`,
+            "invalid_argument",
+            "Every item of `claims` is one claim to check, as a string.",
+            `claims[${i}]`,
+          );
         }
         if (!hasText(item)) {
-          throw blankInput(`claims[${i}] is blank.`, "blank_item", fix, `claims[${i}]`);
+          throw blankInput(BLANK_SENTENCES.item(i), "blank_item", fix, `claims[${i}]`);
         }
       });
     } else if (!hasText(single)) {
       throw blankClaim(
-        this,
         "Pass the claim to check as `claim`, or a list as `claims`.",
         Array.isArray(list) ? "empty_list" : "blank_input",
+        !claimGiven(input),
       );
     }
     const call = resolveCall(this, options, "assess()");
@@ -2730,38 +2843,22 @@ export class Lenz {
       this.copyTimeoutMs ??
       Math.max(this.timeoutMs, ASSESS_TIMEOUT_MS);
     const transport = { ...transportOf(call), timeoutMs };
-    if (list && list.length > 0) {
-      const body: Record<string, unknown> = { claims: list };
-      if (input.language) body.language = input.language;
-      // Sent only when asked, so a request without the option (and what its
-      // idempotency key covers) is exactly what it was before.
-      if (input.suggestRewrite) body.suggest_rewrite = true;
-      return aliased(
-        this,
-        normalizeAssess,
-        await this.request<AssessResponse>({
-          method: "POST",
-          path: "/assess",
-          json: body,
-          headers,
-          ...transport,
-        }),
-      );
-    }
-    const body: Record<string, unknown> = { text: single };
+    const body: Record<string, unknown> =
+      list && list.length > 0 ? { claims: list } : { text: single };
     if (input.language) body.language = input.language;
+    // Sent only when asked, so a request without the option (and what its
+    // idempotency key covers) is exactly what it was before.
     if (input.suggestRewrite) body.suggest_rewrite = true;
-    return aliased(
-      this,
-      normalizeAssess,
-      await this.request<AssessResponse>({
-        method: "POST",
-        path: "/assess",
-        json: body,
-        headers,
-        ...transport,
-      }),
-    );
+    const answer = await this.request<AssessResponse>({
+      method: "POST",
+      path: "/assess",
+      json: body,
+      headers,
+      ...transport,
+    });
+    // The key rides an error read from this answer too: it may have charged.
+    await withIdempotencyKey(idempotencyKey, async () => checkAssessFailures(this, answer));
+    return asResult(aliased(this, normalizeAssess, answer));
   }
 
   /**
@@ -2776,13 +2873,35 @@ export class Lenz {
     taskId: string,
     input: SelectInput,
     options?: RequestOptions,
-  ): Promise<BatchAccepted> {
+  ): Promise<Result<BatchAccepted>> {
     const id = requirePathId("select", "task_id", taskId);
     requireObject(input, "select()", "input");
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
+    // The field the list came in, named in the error: `texts` (the 2.x name)
+    // when that is the one sent, else `claims`.
+    const field = chosen !== undefined && chosen === input.texts ? "texts" : "claims";
     if (!chosen || chosen.length === 0) {
-      throw argumentError("select requires a non-empty claims array", "empty_list", "claims");
+      const absent = input.claims === undefined && input.texts === undefined;
+      throw blankInput(
+        absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list(field),
+        "empty_list",
+        "Pass the claims to check, as offered, in `claims`.",
+        absent ? "claims" : field,
+      );
     }
+    // A blank item is refused before sending (since 3.2), as on `assess`;
+    // the API would skip it. Items that are not strings, and a `claims` that
+    // is not a list (from JavaScript), are the API's to judge, as before.
+    (Array.isArray(chosen) ? (chosen as unknown[]) : []).forEach((item, i) => {
+      if (typeof item === "string" && !hasText(item)) {
+        throw blankInput(
+          BLANK_SENTENCES.item(i, field),
+          "blank_item",
+          `Leave out the blank items: every item of \`${field}\` is one claim to check.`,
+          `${field}[${i}]`,
+        );
+      }
+    });
     const call = resolveCall(this, options, "select()");
     // One key per call, reused across its own retries, so a retried select
     // does not start (and charge for) the chosen claims twice.
@@ -2796,7 +2915,7 @@ export class Lenz {
       headers,
       ...transportOf(call),
     });
-    return aliased(this, normalizeBatchAccepted, accepted);
+    return asResult(aliased(this, normalizeBatchAccepted, accepted));
   }
 
   /**
@@ -2848,10 +2967,10 @@ export class Lenz {
    * {@link Lenz.cancelReview} instead. Throws {@link LenzAPIError} when a 200
    * carries no cancel result.
    */
-  async cancel(taskId: string, options?: RequestOptions): Promise<CancelResult> {
+  async cancel(taskId: string, options?: RequestOptions): Promise<Result<CancelResult>> {
     requirePathId("cancel", "task_id", taskId);
     const call = resolveCall(this, options, "cancel()");
-    return this._cancelTask(taskId, transportOf(call));
+    return asResult(await this._cancelTask(taskId, transportOf(call)));
   }
 
   private async _cancelTask(
@@ -2882,7 +3001,7 @@ export class Lenz {
     return body as CancelResult;
   }
 
-  async usage(options?: RequestOptions): Promise<Usage> {
+  async usage(options?: RequestOptions): Promise<Result<Usage>> {
     const call = resolveCall(this, options, "usage()");
     const usage = await this.request<Usage>({
       method: "GET",
@@ -2892,7 +3011,7 @@ export class Lenz {
     // Both response shapes: `credits.extra` / `credits.bonus` (the same
     // number), `quota_resets_at`, and the per-capability blocks, recomputed
     // from `credits` and `costs` when the server sends only the pool.
-    return aliased(this, normalizeUsage, usage);
+    return asResult(aliased(this, normalizeUsage, usage));
   }
 
   // ── Review: the whole recipe in one call ──
@@ -2911,11 +3030,13 @@ export class Lenz {
    * A resend with the same `idempotencyKey` within 24 hours returns the same
    * review; a new key is a new review.
    */
-  async review(input: ReviewInput, options?: RequestOptions): Promise<ReviewStarted> {
+  async review(input: ReviewInput, options?: RequestOptions): Promise<Result<ReviewStarted>> {
     requireObject(input, "review()", "input");
-    reviewText(input, "review()");
+    reviewText(input);
     const call = resolveCall(this, options, "review()");
-    return this._submitReview(input, await jobIdempotencyKey(input), transportOf(call));
+    return asResult(
+      await this._submitReview(input, await jobIdempotencyKey(input), transportOf(call)),
+    );
   }
 
   private async _submitReview(
@@ -2980,22 +3101,28 @@ export class Lenz {
    *
    * Throws {@link LenzGoneError} (HTTP 410) when the review was purged.
    */
-  getReview(reviewId: string): Promise<ReviewFull>;
-  getReview(reviewId: string, opts: { view: "issues" } & RequestOptions): Promise<ReviewIssues>;
-  getReview(reviewId: string, opts: { view: "full" } & RequestOptions): Promise<ReviewFull>;
-  getReview(reviewId: string, opts: { view?: undefined } & RequestOptions): Promise<ReviewFull>;
+  getReview(reviewId: string): Promise<Result<ReviewFull>>;
+  getReview(
+    reviewId: string,
+    opts: { view: "issues" } & RequestOptions,
+  ): Promise<Result<ReviewIssues>>;
+  getReview(reviewId: string, opts: { view: "full" } & RequestOptions): Promise<Result<ReviewFull>>;
+  getReview(
+    reviewId: string,
+    opts: { view?: undefined } & RequestOptions,
+  ): Promise<Result<ReviewFull>>;
   getReview(
     reviewId: string,
     opts?: GetReviewOptions & RequestOptions,
-  ): Promise<ReviewFull | ReviewIssues>;
+  ): Promise<Result<ReviewFull> | Result<ReviewIssues>>;
   async getReview(
     reviewId: string,
     opts: GetReviewOptions & RequestOptions = {},
-  ): Promise<ReviewFull | ReviewIssues> {
+  ): Promise<Result<ReviewFull> | Result<ReviewIssues>> {
     requirePathId("getReview", "review_id", reviewId);
     requireObject(opts, "getReview()", "options");
     const call = resolveCall(this, opts, "getReview()");
-    return this._getReview(reviewId, opts, transportOf(call));
+    return asResult(await this._getReview(reviewId, opts, transportOf(call)));
   }
 
   // ── Citation check: the check on its own ──
@@ -3007,11 +3134,16 @@ export class Lenz {
    * read the check with `getCitecheck`, wait with `citecheckAndWait`, or
    * receive `citecheck.completed` at your webhook.
    */
-  async citecheck(input: CitecheckInput, options?: RequestOptions): Promise<CitecheckStarted> {
+  async citecheck(
+    input: CitecheckInput,
+    options?: RequestOptions,
+  ): Promise<Result<CitecheckStarted>> {
     requireObject(input, "citecheck()", "input");
     const body = citecheckBody(input);
     const call = resolveCall(this, options, "citecheck()");
-    return this._submitCitecheck(body, await jobIdempotencyKey(input), transportOf(call));
+    return asResult(
+      await this._submitCitecheck(body, await jobIdempotencyKey(input), transportOf(call)),
+    );
   }
 
   private async _submitCitecheck(
@@ -3052,10 +3184,10 @@ export class Lenz {
    * Read a citation check. Throws {@link LenzGoneError} (HTTP 410) once the
    * account's retention period has removed it.
    */
-  async getCitecheck(citecheckId: string, options?: RequestOptions): Promise<Citecheck> {
+  async getCitecheck(citecheckId: string, options?: RequestOptions): Promise<Result<Citecheck>> {
     requirePathId("getCitecheck", "citecheck_id", citecheckId);
     const call = resolveCall(this, options, "getCitecheck()");
-    return this._getCitecheck(citecheckId, transportOf(call));
+    return asResult(await this._getCitecheck(citecheckId, transportOf(call)));
   }
 
   private async _getCitecheck(
@@ -3089,10 +3221,10 @@ export class Lenz {
    * or is not yours, and {@link LenzGoneError} (HTTP 410) once the account's
    * retention period has removed it.
    */
-  async cancelCitecheck(citecheckId: string, options?: RequestOptions): Promise<Citecheck> {
+  async cancelCitecheck(citecheckId: string, options?: RequestOptions): Promise<Result<Citecheck>> {
     requirePathId("cancelCitecheck", "citecheck_id", citecheckId);
     const call = resolveCall(this, options, "cancelCitecheck()");
-    return this._cancelCitecheck(citecheckId, transportOf(call));
+    return asResult(await this._cancelCitecheck(citecheckId, transportOf(call)));
   }
 
   private async _cancelCitecheck(
@@ -3125,7 +3257,7 @@ export class Lenz {
   async citecheckAndWait(
     input: CitecheckInput,
     opts: CitecheckAndWaitOptions = {},
-  ): Promise<Citecheck> {
+  ): Promise<Result<Citecheck>> {
     requireObject(input, "citecheckAndWait()", "input");
     requireObject(opts, "citecheckAndWait()", "options");
     checkWaitBudget(opts.timeoutMs, "citecheckAndWait()");
@@ -3136,22 +3268,24 @@ export class Lenz {
     const call = resolveCall(this, opts, "citecheckAndWait()", "submitWait");
     const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await jobIdempotencyKey(input);
-    return withIdempotencyKey(idempotencyKey, async () => {
-      const started = await this._submitCitecheck(body, idempotencyKey, transportOf(call));
-      const citecheckId = acceptedId("citecheck_id", started.citecheck_id, started);
-      const deadline = Date.now() + timeoutMs;
-      const ended = { value: false };
-      return this._cancellingOnAbort(
-        cancelOnAbort,
-        call,
-        "citecheck",
-        () => (ended.value ? [] : [citecheckId]),
-        () =>
-          withAbortContext({ citecheckId }, () =>
-            this._waitCitecheck(citecheckId, deadline, timeoutMs, onUpdate, call, ended),
-          ),
-      );
-    });
+    return asResult(
+      await withIdempotencyKey(idempotencyKey, async () => {
+        const started = await this._submitCitecheck(body, idempotencyKey, transportOf(call));
+        const citecheckId = acceptedId("citecheck_id", started.citecheck_id, started);
+        const deadline = Date.now() + timeoutMs;
+        const ended = { value: false };
+        return this._cancellingOnAbort(
+          cancelOnAbort,
+          call,
+          "citecheck",
+          () => (ended.value ? [] : [citecheckId]),
+          () =>
+            withAbortContext({ citecheckId }, () =>
+              this._waitCitecheck(citecheckId, deadline, timeoutMs, onUpdate, call, ended),
+            ),
+        );
+      }),
+    );
   }
 
   private _waitCitecheck(
@@ -3212,10 +3346,10 @@ export class Lenz {
    * or is not yours, and {@link LenzGoneError} (HTTP 410) when the review was
    * purged.
    */
-  async cancelReview(reviewId: string, options?: RequestOptions): Promise<ReviewFull> {
+  async cancelReview(reviewId: string, options?: RequestOptions): Promise<Result<ReviewFull>> {
     requirePathId("cancelReview", "review_id", reviewId);
     const call = resolveCall(this, options, "cancelReview()");
-    return this._cancelReview(reviewId, transportOf(call));
+    return asResult(await this._cancelReview(reviewId, transportOf(call)));
   }
 
   private async _cancelReview(
@@ -3250,47 +3384,52 @@ export class Lenz {
    * first poll always runs, so a `timeoutMs` of 0 or less reads the review
    * once, and a terminal review it reads is returned or thrown as usual.
    */
-  async reviewAndWait(input: ReviewInput, opts: ReviewAndWaitOptions = {}): Promise<ReviewFull> {
+  async reviewAndWait(
+    input: ReviewInput,
+    opts: ReviewAndWaitOptions = {},
+  ): Promise<Result<ReviewFull>> {
     requireObject(input, "reviewAndWait()", "input");
     requireObject(opts, "reviewAndWait()", "options");
     checkWaitBudget(opts.timeoutMs, "reviewAndWait()");
-    reviewText(input, "reviewAndWait()");
+    reviewText(input);
     // Read once, with the other options: a later change to `opts` changes nothing.
     const timeoutMs = opts.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
     const onUpdate = opts.onUpdate;
     const call = resolveCall(this, opts, "reviewAndWait()", "submitWait");
     const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await jobIdempotencyKey(input);
-    return withIdempotencyKey(idempotencyKey, async () => {
-      const started = await this._submitReview(input, idempotencyKey, transportOf(call));
-      const reviewId = acceptedId("review_id", started.review_id, started);
-      // The wait's clock starts once the review is accepted, as every other
-      // wait's does.
-      const deadline = Date.now() + timeoutMs;
-      const ended = { value: false };
-      return this._cancellingOnAbort(
-        cancelOnAbort,
-        call,
-        "review",
-        () => (ended.value ? [] : [reviewId]),
-        () =>
-          withAbortContext({ reviewId }, () =>
-            this._waitJob<ReviewFull>({
-              deadline,
-              path: `/reviews/${reviewId}`,
-              id: ["review_id", reviewId],
-              call,
-              read: (transport) => this._getReview(reviewId, {}, transport),
-              isBody: (body) => isReviewBody(body, reviewId),
-              // The error is the same either way: built from the body with the 2.x names.
-              failed: (review) => new ReviewFailedError(withReviewDefaults(review)),
-              timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
-              onUpdate,
-              ended,
-            }),
-          ),
-      );
-    });
+    return asResult(
+      await withIdempotencyKey(idempotencyKey, async () => {
+        const started = await this._submitReview(input, idempotencyKey, transportOf(call));
+        const reviewId = acceptedId("review_id", started.review_id, started);
+        // The wait's clock starts once the review is accepted, as every other
+        // wait's does.
+        const deadline = Date.now() + timeoutMs;
+        const ended = { value: false };
+        return this._cancellingOnAbort(
+          cancelOnAbort,
+          call,
+          "review",
+          () => (ended.value ? [] : [reviewId]),
+          () =>
+            withAbortContext({ reviewId }, () =>
+              this._waitJob<ReviewFull>({
+                deadline,
+                path: `/reviews/${reviewId}`,
+                id: ["review_id", reviewId],
+                call,
+                read: (transport) => this._getReview(reviewId, {}, transport),
+                isBody: (body) => isReviewBody(body, reviewId),
+                // The error is the same either way: built from the body with the 2.x names.
+                failed: (review) => new ReviewFailedError(withReviewDefaults(review)),
+                timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
+                onUpdate,
+                ended,
+              }),
+            ),
+        );
+      }),
+    );
   }
 
   /**
@@ -3450,7 +3589,7 @@ export class Lenz {
     requireObject(input, "verifyAndWait()", "input");
     requireObject(opts, "verifyAndWait()", "options");
     const { timeoutMs, onProgress } = waitOptions(input, opts, "verifyAndWait()");
-    verifyText(this, input);
+    verifyText(input);
     const call = resolveCall(this, opts, "verifyAndWait()", "submitWait");
     const cancelOnAbort = opts.cancelOnAbort === true;
     const idempotencyKey = await callIdempotencyKey(input);
@@ -3680,8 +3819,18 @@ export class Lenz {
         status: "failed",
         status_detail: status,
       };
-      return status.status === "completed"
-        ? withRowError(row, wrongType(status, "GET", `/verify/status/${it.task_id}`, "result"))
+      if (status.status === "completed") {
+        return withRowError(
+          row,
+          status.result === undefined || status.result === null
+            ? noResult(status)
+            : wrongType(status, "GET", `/verify/status/${it.task_id}`, "result"),
+        );
+      }
+      // Failed or cancelled with a failure block of the wrong type: that
+      // row's error says it could not be read.
+      return badFailureBlock(status)
+        ? withRowError(row, wrongType(status, "GET", `/verify/status/${it.task_id}`, "failure"))
         : row;
     });
   }
@@ -3949,20 +4098,20 @@ export class Lenz {
    * error. Shared by `wait` (and thus `verifyAndWait`).
    */
   private _verificationFromTerminal(polled: TaskStatus, taskId: string): Verification {
+    // A run that ended without a verdict is read from its failure block: one
+    // of the wrong type cannot be read, so it is a bad answer, at once.
+    // Read only where the run ended without a verdict (as a batch wait reads
+    // it): a completed or paused run's verdict or claims are never lost to it.
+    if ((polled.status === "failed" || polled.status === "cancelled") && badFailureBlock(polled)) {
+      throw wrongType(polled, "GET", `/verify/status/${taskId}`, "failure");
+    }
     // Errors are the same either way: their fields are read with the 2.x
     // names; a needs-input error's payload is the poll as returned.
     const status = normalizeTaskStatus(polled) as TaskStatus;
     if (status.status === "completed") {
-      if (!status.result) {
-        const emptyErr = new LenzPipelineError({
-          message: "Pipeline completed but the result is empty.",
-          cause: "Server reported status=completed without a result block.",
-          fix: "File an issue at https://github.com/lenzhq/lenz-io-node/issues with the Request ID.",
-          docUrl: "https://lenz.io/docs/errors",
-        });
-        emptyErr.taskId = taskId; // parity: the Python SDK sets task_id here too
-        throw emptyErr;
-      }
+      // No `result` at all: ended, but nothing to read (since 3.2, as on the
+      // Python SDK; was a LenzPipelineError).
+      if (polled.result === undefined || polled.result === null) throw noResult(polled);
       // The wait reaches here only on a terminal status; a `completed` one
       // whose `result` is not an object ends here (a batch wait reads it as
       // that row's failure instead).
@@ -4211,7 +4360,7 @@ export class Lenz {
     const signals = opts.signals ?? NO_SIGNALS;
     const authRequired = opts.authRequired !== false;
     if (authRequired && !this.apiKey) {
-      throw new LenzAuthError({
+      throw new LenzMissingKeyError({
         message: "API key required",
         cause: "This method requires authentication; no API key was provided.",
         fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-credentials. Library endpoints work without a key.",

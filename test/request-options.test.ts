@@ -1116,7 +1116,7 @@ describe("withOptions()", () => {
     (root as unknown as { ask: object }).ask = new MyAsk(root);
     root.verifications.get = (async () => ({
       verification_id: "stub",
-    })) as typeof root.verifications.get;
+    })) as unknown as typeof root.verifications.get;
     const copy = root.withOptions({ headers: { "X-A": "1" } });
     expect(copy.ask).toBeInstanceOf(MyAsk);
     expect((copy.ask as unknown as { tag: string }).tag).toBe("mine");

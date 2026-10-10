@@ -24,6 +24,7 @@ import {
   type CancelResult,
   type Citecheck,
   type ReviewFull,
+  type Result,
   type TaskStatus,
   LenzValidationError,
 } from "../src/index.js";
@@ -283,7 +284,7 @@ describe("cancelReview(reviewId)", () => {
     const read = await make(serving(reply(name)).fetch).getReview("r1");
     expect(cancelled).toEqual(read);
     expect(cancelled.status).toBe(String(recorded(name).body["status"]));
-    expectTypeOf(cancelled).toEqualTypeOf<ReviewFull>();
+    expectTypeOf(cancelled).toEqualTypeOf<Result<ReviewFull>>();
   });
 
   it("a review it stopped reads cancelled, and one that had finished is returned as it was", async () => {
@@ -365,7 +366,7 @@ describe("cancelCitecheck(citecheckId)", () => {
     const read = await make(serving(reply(name)).fetch).getCitecheck("c1");
     expect(cancelled).toEqual(read);
     expect(cancelled.status).toBe(String(recorded(name).body["status"]));
-    expectTypeOf(cancelled).toEqualTypeOf<Citecheck>();
+    expectTypeOf(cancelled).toEqualTypeOf<Result<Citecheck>>();
   });
 
   it("encodes the id and refuses an empty one before any request", async () => {
