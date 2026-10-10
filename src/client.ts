@@ -2853,8 +2853,9 @@ export class Lenz {
       );
     }
     // A blank item is refused before sending (since 3.2), as on `assess`;
-    // the API would skip it. Items that are not strings are the API's to judge.
-    chosen.forEach((item: unknown, i) => {
+    // the API would skip it. Items that are not strings, and a `claims` that
+    // is not a list (from JavaScript), are the API's to judge, as before.
+    (Array.isArray(chosen) ? (chosen as unknown[]) : []).forEach((item, i) => {
       if (typeof item === "string" && !hasText(item)) {
         throw blankInput(
           BLANK_SENTENCES.item(i),

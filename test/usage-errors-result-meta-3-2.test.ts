@@ -159,6 +159,14 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
     expect(sent[0]!.body).toBe('{"texts":["a","b"]}');
   });
 
+  it("a select claims that is not a list (from JavaScript) still reaches the API", async () => {
+    const { fetch, sent } = server(() => ({ status: 202, body: { batch_id: "b", items: [] } }));
+    await new Lenz({ apiKey: "lenz_t", fetch }).select("t1", {
+      claims: "a claim" as unknown as string[],
+    });
+    expect(sent[0]!.body).toBe('{"texts":"a claim"}');
+  });
+
   it("an ask.send with a message sends the same request as before", async () => {
     const { fetch, sent } = server(() => ({ body: { reply: "x" } }));
     await new Lenz({ apiKey: "lenz_t", fetch }).ask.send("abcd1234", {
