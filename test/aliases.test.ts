@@ -105,6 +105,6 @@ describe("select", () => {
 
   it("neither throws", async () => {
     const client = new Lenz({ apiKey: "lenz_t" });
-    await expect(() => client.select("tsk_1", {})).rejects.toThrow("claims is required.");
+    await expect(() => client.select("tsk_1", {})).rejects.toThrow("claims: Field required");
   });
 });

@@ -1082,6 +1082,23 @@ function asResult<T>(value: T): Result<T> {
 }
 
 /**
+ * A `completed` poll that carries no `result` (absent or `null`): the run
+ * ended, but its verification cannot be read. A
+ * {@link LenzInvalidResponseError} with the poll's status, headers and body;
+ * the same sentence as the Python SDK.
+ */
+function noResult(from: unknown): LenzInvalidResponseError {
+  const meta = from !== null && typeof from === "object" ? RESPONSE_META.get(from) : undefined;
+  const answered = meta !== undefined ? `answered HTTP ${meta.status}` : "answered";
+  return invalidShape(
+    from,
+    `The API ${answered} with status completed and no result: the run ended, but its verification cannot be read.`,
+    "The poll says the run completed but carries no result block.",
+    "Retry the wait; contact support (https://lenz.io/contact) with the request id if this persists.",
+  );
+}
+
+/**
  * Whether `body` (a status, an assess body or row) has a `failure` the SDK
  * cannot read: present, and neither an object nor `null`.
  */
@@ -1787,25 +1804,36 @@ function blankInput(
   return err;
 }
 
-/** The text `verify` sends: `claim`, else `text`; refused when blank. */
+/** The text `verify` sends: `claim`, else `text`; refused when blank or absent. */
 function verifyText(input: VerifyInput): string {
   const text = claimText(input);
-  if (!hasText(text)) throw blankClaim("Pass the claim to check as `claim`.");
+  if (!hasText(text)) {
+    throw blankClaim("Pass the claim to check as `claim`.", "blank_input", !claimGiven(input));
+  }
   return text;
+}
+
+/** Whether `claim` or `text` is in the input at all (`undefined` is absent: JSON drops it). */
+function claimGiven(input: { claim?: unknown; text?: unknown }): boolean {
+  return input.claim !== undefined || input.text !== undefined;
 }
 
 /**
  * The API's own 422 sentence (the canonical shape's `detail`) for a blank
  * input, by operation, used as the message of the local refusal in both
- * modes. The same strings as the Python SDK's.
+ * modes. The same strings as the Python SDK's. A field that is absent from
+ * the body (not just blank) gets the API's schema sentence, `"<field>: Field
+ * required"`.
  */
 const BLANK_SENTENCES = {
   /** `POST /verify`, `POST /assess`: a blank `claim` / `text`. */
   claim: "claim is required.",
-  /** `POST /verify/{task_id}/select` with no claims; `POST /assess` with `claims: []`. */
-  claims: "claims is required.",
+  /** A field the body does not carry at all (`claim`, `claims`, `message`, `text`). */
+  absent: (field: string) => `${field}: Field required`,
+  /** `POST /verify/{task_id}/select` with an empty `claims` (or `texts`) list. */
+  list: (field: string) => `${field} is required.`,
   /** `POST /assess`, `POST /verify/{task_id}/select`: a blank item. */
-  item: (i: number) => `claims[${i}] is blank.`,
+  item: (i: number, field = "claims") => `${field}[${i}] is blank.`,
   /** `POST /ask/{verification_id}`: a blank `message`. */
   message: "Message cannot be empty.",
   /** `POST /review`: a blank `text`. */
@@ -1815,16 +1843,23 @@ const BLANK_SENTENCES = {
 } as const;
 
 /**
- * A blank `claim` (`blank_input`), or an empty `claims` list (`empty_list`):
- * the API's own sentence for each.
+ * A blank `claim` (`blank_input`, `"claim is required."`), or, with no
+ * `claim` / `text` in the body at all, the API's `"claim: Field required"`
+ * (`blank_input`, or `empty_list` beside an empty `claims` list, which the
+ * API reads as absent).
  */
 function blankClaim(
   fix: string,
   code: "blank_input" | "empty_list" = "blank_input",
+  absent = false,
 ): LenzValidationError {
-  return code === "empty_list"
-    ? blankInput(BLANK_SENTENCES.claims, code, fix, "claims")
-    : blankInput(BLANK_SENTENCES.claim, code, fix, "claim");
+  if (!absent) return blankInput(BLANK_SENTENCES.claim, "blank_input", fix, "claim");
+  return blankInput(
+    BLANK_SENTENCES.absent("claim"),
+    code,
+    fix,
+    code === "empty_list" ? "claims" : "claim",
+  );
 }
 
 /** The camelCase names a batch item takes beside its 2.x snake_case ones. */
@@ -2230,13 +2265,9 @@ class AskNamespace {
     const id = requirePathId("ask.send", "verification_id", verificationId);
     requireObject(input, "ask.send", "input");
     const message: unknown = input.message;
-    if (
-      message === undefined ||
-      message === null ||
-      (typeof message === "string" && !hasText(message))
-    ) {
+    if (message === undefined || (typeof message === "string" && !hasText(message))) {
       throw blankInput(
-        BLANK_SENTENCES.message,
+        message === undefined ? BLANK_SENTENCES.absent("message") : BLANK_SENTENCES.message,
         "blank_input",
         "Pass the follow-up question as `message`.",
         "message",
@@ -2355,7 +2386,7 @@ function checkBatchItems(input: { claims?: unknown }): void {
 function reviewText(input: { text?: unknown }): void {
   if (!hasText(input.text)) {
     throw blankInput(
-      BLANK_SENTENCES.review,
+      input.text === undefined ? BLANK_SENTENCES.absent("text") : BLANK_SENTENCES.review,
       "blank_input",
       "Pass the draft (or one public http(s) URL) as `text`.",
       "text",
@@ -2788,6 +2819,7 @@ export class Lenz {
       throw blankClaim(
         "Pass the claim to check as `claim`, or a list as `claims`.",
         Array.isArray(list) ? "empty_list" : "blank_input",
+        !claimGiven(input),
       );
     }
     const call = resolveCall(this, options, "assess()");
@@ -2844,12 +2876,16 @@ export class Lenz {
     const id = requirePathId("select", "task_id", taskId);
     requireObject(input, "select()", "input");
     const chosen = input.claims && input.claims.length > 0 ? input.claims : input.texts;
+    // The field the list came in, named in the error: `texts` (the 2.x name)
+    // when that is the one sent, else `claims`.
+    const field = chosen !== undefined && chosen === input.texts ? "texts" : "claims";
     if (!chosen || chosen.length === 0) {
+      const absent = input.claims === undefined && input.texts === undefined;
       throw blankInput(
-        BLANK_SENTENCES.claims,
+        absent ? BLANK_SENTENCES.absent("claims") : BLANK_SENTENCES.list(field),
         "empty_list",
         "Pass the claims to check, as offered, in `claims`.",
-        "claims",
+        absent ? "claims" : field,
       );
     }
     // A blank item is refused before sending (since 3.2), as on `assess`;
@@ -2858,10 +2894,10 @@ export class Lenz {
     (Array.isArray(chosen) ? (chosen as unknown[]) : []).forEach((item, i) => {
       if (typeof item === "string" && !hasText(item)) {
         throw blankInput(
-          BLANK_SENTENCES.item(i),
+          BLANK_SENTENCES.item(i, field),
           "blank_item",
-          "Leave out the blank items: every item of `claims` is one claim to check.",
-          `claims[${i}]`,
+          `Leave out the blank items: every item of \`${field}\` is one claim to check.`,
+          `${field}[${i}]`,
         );
       }
     });
@@ -3785,7 +3821,9 @@ export class Lenz {
       if (status.status === "completed") {
         return withRowError(
           row,
-          wrongType(status, "GET", `/verify/status/${it.task_id}`, "result"),
+          status.result === undefined || status.result === null
+            ? noResult(status)
+            : wrongType(status, "GET", `/verify/status/${it.task_id}`, "result"),
         );
       }
       // Failed or cancelled with a failure block of the wrong type: that
@@ -4061,23 +4099,18 @@ export class Lenz {
   private _verificationFromTerminal(polled: TaskStatus, taskId: string): Verification {
     // A run that ended without a verdict is read from its failure block: one
     // of the wrong type cannot be read, so it is a bad answer, at once.
-    if (badFailureBlock(polled)) {
+    // Read only where the run ended without a verdict (as a batch wait reads
+    // it): a completed or paused run's verdict or claims are never lost to it.
+    if ((polled.status === "failed" || polled.status === "cancelled") && badFailureBlock(polled)) {
       throw wrongType(polled, "GET", `/verify/status/${taskId}`, "failure");
     }
     // Errors are the same either way: their fields are read with the 2.x
     // names; a needs-input error's payload is the poll as returned.
     const status = normalizeTaskStatus(polled) as TaskStatus;
     if (status.status === "completed") {
-      if (!status.result) {
-        const emptyErr = new LenzPipelineError({
-          message: "Pipeline completed but the result is empty.",
-          cause: "Server reported status=completed without a result block.",
-          fix: "File an issue at https://github.com/lenzhq/lenz-io-node/issues with the Request ID.",
-          docUrl: "https://lenz.io/docs/errors",
-        });
-        emptyErr.taskId = taskId; // parity: the Python SDK sets task_id here too
-        throw emptyErr;
-      }
+      // No `result` at all: ended, but nothing to read (since 3.2, as on the
+      // Python SDK; was a LenzPipelineError).
+      if (polled.result === undefined || polled.result === null) throw noResult(polled);
       // The wait reaches here only on a terminal status; a `completed` one
       // whose `result` is not an object ends here (a batch wait reads it as
       // that row's failure instead).

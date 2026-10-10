@@ -1053,18 +1053,26 @@ A blank input is refused before anything is sent (since 3.2), with
 sentence for that operation, whatever `legacyAliases` says (the same strings
 as the Python SDK):
 
-| Call                                | Blank input                          | `code`        | `param`       | Message                                                    |
-| ----------------------------------- | ------------------------------------ | ------------- | ------------- | ---------------------------------------------------------- |
-| `verify`, `verifyAndWait`, `assess` | no `claim` (or only whitespace)      | `blank_input` | `"claim"`     | `claim is required.`                                       |
-| `assess`                            | `claims: []` (and no `claim`)        | `empty_list`  | `"claims"`    | `claims is required.`                                      |
-| `assess`, `select`                  | a blank item                         | `blank_item`  | `"claims[1]"` | `claims[1] is blank.`                                      |
-| `select`                            | no claims (`claims` / `texts` empty) | `empty_list`  | `"claims"`    | `claims is required.`                                      |
-| `ask.send`                          | no `message` (or only whitespace)    | `blank_input` | `"message"`   | `Message cannot be empty.`                                 |
-| `review`, `reviewAndWait`           | no `text` (or only whitespace)       | `blank_input` | `"text"`      | `text: send the draft, or one public http(s) URL.`         |
-| `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`           | `blank_input` | `"text"`      | `payload: Value error, send exactly one of text and pairs` |
+| Call                                | Input                                              | `code`        | `param`                 | Message                                                    |
+| ----------------------------------- | -------------------------------------------------- | ------------- | ----------------------- | ---------------------------------------------------------- |
+| `verify`, `verifyAndWait`, `assess` | `claim` (or `text`) only whitespace                | `blank_input` | `"claim"`               | `claim is required.`                                       |
+| `verify`, `verifyAndWait`, `assess` | no `claim` or `text` at all                        | `blank_input` | `"claim"`               | `claim: Field required`                                    |
+| `assess`                            | `claims: []` and no `claim` (the API reads absent) | `empty_list`  | `"claims"`              | `claim: Field required`                                    |
+| `assess`, `select`                  | a blank item                                       | `blank_item`  | `"claims[1]"`           | `claims[1] is blank.`                                      |
+| `select`                            | `claims: []`                                       | `empty_list`  | `"claims"`              | `claims is required.`                                      |
+| `select`                            | neither `claims` nor `texts`                       | `empty_list`  | `"claims"`              | `claims: Field required`                                   |
+| `select` given `texts`              | `texts: []`; a blank item                          | as above      | `"texts"`, `"texts[0]"` | `texts is required.`; `texts[0] is blank.`                 |
+| `ask.send`                          | `message` only whitespace                          | `blank_input` | `"message"`             | `Message cannot be empty.`                                 |
+| `ask.send`                          | no `message`                                       | `blank_input` | `"message"`             | `message: Field required`                                  |
+| `review`, `reviewAndWait`           | `text` only whitespace                             | `blank_input` | `"text"`                | `text: send the draft, or one public http(s) URL.`         |
+| `review`, `reviewAndWait`           | no `text`                                          | `blank_input` | `"text"`                | `text: Field required`                                     |
+| `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`                         | `blank_input` | `"text"`                | `payload: Value error, send exactly one of text and pairs` |
 
-A 422 the API sends itself is still read by `legacyAliases` (the default
-client reads its blank-claim 422 as the 2.x `"Text is required."`).
+A field the call does not carry at all (`undefined`, which JSON leaves out)
+gets the API's sentence for a missing field. A 422 the API sends itself is
+still read by `legacyAliases`: by default, a local refusal says the canonical
+sentence above while the same input answered by the server (an older
+client, a request built by hand) reads the 2.x one (`"Text is required."`).
 An `assess` item that is not a string is `invalid_argument` (`param` `"claims[1]"`), with the message `claims[1] must be a string (got number).` in both modes (the JavaScript type name, `null` for null; the same sentence as the Python SDK, with its type names). As on the API,
 the one of `claim` / `text` that has content is used, and blank means empty or
 whitespace by the API's rule (a BOM is content). A blank `select` item is
@@ -1587,8 +1595,10 @@ started.headers?.["retry-after"]; // a wait, when the answer states one
 started.headers?.["x-request-id"]; // quote it on a support ticket
 ```
 
-Like `raw`, they are not enumerable keys (not in `JSON.stringify`, a spread or
-a deep-equal), and each read of `headers` is a fresh copy. `reviewAndWait` /
+Like `raw`, they are not enumerable keys, so a copy drops them: a spread
+(`{ ...out }`), `structuredClone`, `JSON.parse(JSON.stringify(out))` and a
+deep-equal do not carry or compare them. Read them from the result itself
+(or copy them by name). Each read of `headers` is a fresh copy. `reviewAndWait` /
 `citecheckAndWait` report their final poll's. Only the top-level result has
 them: an object nested in it (`out.claims[0]`, `status.result`), a wait's
 verification (read from inside the final poll's body) and a
@@ -1604,8 +1614,10 @@ On the result of a top-level call both are required in the types (since
 `out.httpStatus` is a `number` with no guard. Nested objects, a wait's
 verification and a `verifyBatchAndWait` row keep `ResponseMeta`. `getStatus`
 and `verifyBatch`, which the waits call through and 2.x code overrides, keep
-their plain types (their results carry both at runtime). A test double that
-replaces another method with one returning a plain object needs a cast
+their plain types (their results carry both at runtime). A subclass that
+overrides another of these methods declares `Promise<Result<T>>` (for example
+`override async verify(input: VerifyInput): Promise<Result<TaskAccepted>>`),
+and a stub or mock returning a plain object needs a cast
 (`as unknown as typeof client.verify`).
 
 ## Using lenz-io from a server that forwards per-user credentials

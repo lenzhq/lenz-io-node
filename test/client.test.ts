@@ -13,6 +13,7 @@ import {
   LenzError,
   LenzGoneError,
   LenzNeedsInputError,
+  LenzInvalidResponseError,
   LenzPipelineError,
   LenzQuotaExceededError,
   LenzRateLimitError,
@@ -429,7 +430,7 @@ describe("Marquee verbs", () => {
 
   it("select requires a non-empty texts array", async () => {
     const client = new Lenz({ apiKey: "lenz_t" });
-    await expect(() => client.select("tsk", { texts: [] })).rejects.toThrow("claims is required.");
+    await expect(() => client.select("tsk", { texts: [] })).rejects.toThrow("texts is required.");
   });
 
   it("select fans out one task per claim and sends { texts }", async () => {
@@ -1233,7 +1234,9 @@ describe("wait", () => {
   it("completed-without-result rejects", async () => {
     const { fetch } = makeFetch([{ body: { status: "completed" } }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await expect(client.wait("t", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(LenzPipelineError);
+    await expect(client.wait("t", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(
+      LenzInvalidResponseError,
+    );
   });
 
   it("failed surfaces the error wire field", async () => {

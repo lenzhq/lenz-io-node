@@ -17,6 +17,7 @@ import {
   LenzInvalidKeyError,
   LenzInvalidResponseError,
   LenzMissingKeyError,
+  LenzNeedsInputError,
   LenzValidationError,
 } from "../src/index.js";
 
@@ -80,7 +81,17 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       "claim",
     ],
     ["assess", (c) => c.assess({ claim: "\n" }), "claim is required.", "blank_input", "claim"],
-    ["assess []", (c) => c.assess({ claims: [] }), "claims is required.", "empty_list", "claims"],
+    // Absent, not blank: the API's schema sentence (an empty list reads as absent there).
+    ["verify {}", (c) => c.verify({}), "claim: Field required", "blank_input", "claim"],
+    ["assess {}", (c) => c.assess({}), "claim: Field required", "blank_input", "claim"],
+    ["assess []", (c) => c.assess({ claims: [] }), "claim: Field required", "empty_list", "claims"],
+    [
+      "assess [] beside a blank claim",
+      (c) => c.assess({ claims: [], claim: " " }),
+      "claim is required.",
+      "blank_input",
+      "claim",
+    ],
     [
       "assess blank item",
       (c) => c.assess({ claims: ["a", " "] }),
@@ -95,7 +106,20 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       "empty_list",
       "claims",
     ],
-    ["select no claims", (c) => c.select("t1", {}), "claims is required.", "empty_list", "claims"],
+    [
+      "select no claims",
+      (c) => c.select("t1", {}),
+      "claims: Field required",
+      "empty_list",
+      "claims",
+    ],
+    [
+      "select texts []",
+      (c) => c.select("t1", { texts: [] }),
+      "texts is required.",
+      "empty_list",
+      "texts",
+    ],
     [
       "select blank item",
       (c) => c.select("t1", { claims: ["a", " "] }),
@@ -106,9 +130,9 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
     [
       "select blank texts item",
       (c) => c.select("t1", { texts: ["\t"] }),
-      "claims[0] is blank.",
+      "texts[0] is blank.",
       "blank_item",
-      "claims[0]",
+      "texts[0]",
     ],
     [
       "ask.send blank",
@@ -120,11 +144,18 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
     [
       "ask.send none",
       (c) => c.ask.send("abcd1234", {} as { message: string }),
-      "Message cannot be empty.",
+      "message: Field required",
       "blank_input",
       "message",
     ],
     ["review", (c) => c.review({ text: " " }), REVIEW, "blank_input", "text"],
+    [
+      "review {}",
+      (c) => c.review({} as { text: string }),
+      "text: Field required",
+      "blank_input",
+      "text",
+    ],
     ["reviewAndWait", (c) => c.reviewAndWait({ text: "" }), REVIEW, "blank_input", "text"],
     ["citecheck", (c) => c.citecheck({}), CITECHECK, "blank_input", "text"],
     [
@@ -219,6 +250,31 @@ describe("a failure block that is not an object", () => {
     expect(err.body).toEqual(status(s, failure));
   });
 
+  it("a completed poll with a bad failure still returns its verification", async () => {
+    const body = {
+      task_id: "t1",
+      status: "completed",
+      failure: "broken",
+      result: { verification_id: "abcd1234" },
+    };
+    const { fetch } = server(() => ({ body }));
+    const v = await new Lenz({ apiKey: "lenz_t", fetch }).wait("t1");
+    expect(v.verification_id).toBe("abcd1234");
+  });
+
+  it("a needs_input poll with a bad failure still throws LenzNeedsInputError", async () => {
+    const body = {
+      task_id: "t1",
+      status: "needs_input",
+      reason: "multi_claim",
+      claims: [],
+      failure: 5,
+    };
+    const { fetch } = server(() => ({ body }));
+    const err = await thrown(() => new Lenz({ apiKey: "lenz_t", fetch }).wait("t1"));
+    expect(err).toBeInstanceOf(LenzNeedsInputError);
+  });
+
   it("a null or absent failure on cancelled still reads as cancelled", async () => {
     for (const body of [status("cancelled", null), { task_id: "t1", status: "cancelled" }]) {
       const { fetch } = server(() => ({ body }));
@@ -294,6 +350,60 @@ describe("a failure block that is not an object", () => {
     const { fetch } = server(() => ({ body }));
     const out = await new Lenz({ apiKey: "lenz_t", fetch }).assess({ claim: "a" });
     expect(out.claims[0]!.verdict).toBe("True");
+  });
+});
+
+// ── a completed poll with no result ──
+
+describe("a completed poll that carries no result", () => {
+  const SENTENCE =
+    "The API answered HTTP 200 with status completed and no result: the run ended, but its verification cannot be read.";
+
+  it.each([
+    [{ task_id: "t1", status: "completed" }],
+    [{ task_id: "t1", status: "completed", result: null }],
+  ])("wait and verifyAndWait throw LenzInvalidResponseError (%j)", async (body) => {
+    const { fetch } = server((s) =>
+      s.url.endsWith("/verify") ? { status: 202, body: { task_id: "t1" } } : { body },
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    for (const run of [() => client.wait("t1"), () => client.verifyAndWait({ claim: "a" })]) {
+      const err = await thrown(run);
+      expect(err).toBeInstanceOf(LenzInvalidResponseError);
+      expect(err.message).toBe(SENTENCE);
+      expect(err.statusCode).toBe(200);
+      expect(err.requestId).toBe("req-1");
+      expect(err.headers?.["x-request-id"]).toBe("req-1");
+      expect(err.body).toEqual(body);
+    }
+  });
+
+  it("a batch wait's row carries the same error; the others stand", async () => {
+    const { fetch } = server((s) => {
+      if (s.url.endsWith("/verify/batch")) {
+        return {
+          status: 202,
+          body: {
+            batch_id: "b",
+            items: [
+              { task_id: "t1", claim: "a" },
+              { task_id: "t2", claim: "b" },
+            ],
+          },
+        };
+      }
+      if (s.url.endsWith("/t1")) return { body: { task_id: "t1", status: "completed" } };
+      return {
+        body: { task_id: "t2", status: "completed", result: { verification_id: "abcd1234" } },
+      };
+    });
+    const rows = await new Lenz({ apiKey: "lenz_t", fetch }).verifyBatchAndWait({
+      claims: [{ claim: "a" }, { claim: "b" }],
+    });
+    expect(rows[0]!.status).toBe("failed");
+    expect(rows[0]!.error).toBeInstanceOf(LenzInvalidResponseError);
+    expect(rows[0]!.error!.message).toBe(SENTENCE);
+    expect(rows[1]!.status).toBe("completed");
   });
 });
 
