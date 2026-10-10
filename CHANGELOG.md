@@ -6,6 +6,28 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### What's new in 3.0
+
+- **Stop a run**: `cancel(taskId)`, `cancelReview(reviewId)` and
+  `cancelCitecheck(citecheckId)`. A stopped
+  verification is not charged; a stopped review or citation check refunds
+  what it had not delivered.
+- **`cancelled` is a status of its own**, with `verification.cancelled`,
+  `review.cancelled` and `citecheck.cancelled` webhook events; a polling loop
+  or an exhaustive `switch` must treat it as final.
+- **Per-call options**: `signal`, `timeoutMs`, `maxRetries` and `headers` on
+  every method (`LenzAbortError` when the signal fires), and
+  `client.withOptions(...)` for a copy with other defaults.
+- **Webhooks on edge runtimes**: `await webhooks.unwrap(request)` on
+  Cloudflare Workers, Deno and Bun; the package loads with no Node built-ins.
+- **Errors say whether a retry can help** (`retryable`) and carry the
+  `idempotencyKey` the call sent.
+- **The SDK reads the API's `2026-10-11` response shape.** Every 2.x name
+  keeps working as a deprecated alias.
+- **`dissent` on assess rows is deprecated** and always `null`.
+- **Before you upgrade**, see the box below: Node 22.12 or later, move webhook
+  receivers to 2.21+ first, and re-record tests that replay 2.x response bodies.
+
 Major release (3.0.0). The SDK now speaks the API's `2026-10-11` response
 shape, in which every field, status and error code has one name. Code written
 against 2.x keeps compiling and reading the same fields with the same values
