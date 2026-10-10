@@ -1037,3 +1037,10 @@ describe("an entity's null name: \"\" only on a call's verification", () => {
     expect(event.verification.result.entities[0]!.name).toBeNull();
   });
 });
+
+it("mapResponseToError reads servedVersion from the headers it is given", async () => {
+  const { mapResponseToError } = await import("../src/index.js");
+  const err = mapResponseToError(404, '{"detail":"x"}', { "X-Lenz-API-Version": "2026-05-13" });
+  expect(err.servedVersion).toBe("2026-05-13");
+  expect(mapResponseToError(404, "{}", {}).servedVersion).toBe("");
+});

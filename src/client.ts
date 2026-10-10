@@ -1175,6 +1175,7 @@ function bodyLost(
     { cause: exc },
   );
   err.headers = headersOf(response);
+  err.servedVersion = response.headers.get("X-Lenz-API-Version")?.trim() ?? "";
   recordTransportFailure(err);
   return err;
 }

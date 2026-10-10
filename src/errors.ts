@@ -887,6 +887,7 @@ export function mapResponseToError(
   err.headers = Object.fromEntries(
     Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value]),
   );
+  err.servedVersion = (err.headers["x-lenz-api-version"] ?? "").trim();
 
   // Per-class enrichment
   if (
