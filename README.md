@@ -288,11 +288,11 @@ gets its 20 most check-worthy checked and the rest in `more_claims`, unchecked
 and free — send them back as `claims`, 20 a call. The two are mutually
 exclusive.
 
-Each verdict row also carries two optional notes. `rationale` is the
-reasoning of a reviewer who agrees with the panel's verdict; `dissent`, when
-set, is the reasoning of the reviewer farthest from it. Both are reviewers'
-notes, not checked sources; for sourced evidence, call `verify`. Read them as
-optional: either can be `null` or absent.
+Each verdict row also carries an optional note. `rationale` is the
+reasoning of a reviewer who agrees with the panel's verdict. It is a
+reviewer's note, not a checked source; for sourced evidence, call `verify`.
+Read it as optional: it can be `null` or absent. (`dissent` is deprecated: it
+is always `null` and is kept only so code that reads it keeps working.)
 
 **Suggested rewrite.** `suggestRewrite: true` also writes, on each row the
 check found `False` or `Mostly False` with high confidence, the claim with its
