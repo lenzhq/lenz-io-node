@@ -29,7 +29,7 @@ export interface Source {
   snippet?: string;
   /**
    * The language of `snippet`, the source page's own language, when it is not
-   * English (a lowercase code such as `"uk"` or `"pt-br"`); `null` for English
+   * English, as an ISO 639-1 code (e.g. `"uk"`, `"pt"`); `null` for English
    * or unknown. Absent on responses from an API that predates it.
    */
   snippet_language?: string | null;

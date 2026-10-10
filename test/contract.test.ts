@@ -802,12 +802,7 @@ describe("contract", () => {
 
   it("snippet_language: a code when the quote is not English, null for English, absent on an older API", () => {
     const detail = loadFixture("verifications_detail_snippet_language.json") as Verification;
-    expect(detail.sources?.map((s) => s.snippet_language)).toEqual([
-      null,
-      "uk",
-      "pt-br",
-      undefined,
-    ]);
+    expect(detail.sources?.map((s) => s.snippet_language)).toEqual([null, "uk", "pt", undefined]);
     // The last source has no key at all; the first has an explicit null.
     expect(detail.sources?.[0]).toHaveProperty("snippet_language", null);
     expect(detail.sources?.[3]).not.toHaveProperty("snippet_language");
