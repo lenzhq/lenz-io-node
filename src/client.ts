@@ -2856,7 +2856,8 @@ export class Lenz {
       headers,
       ...transport,
     });
-    checkAssessFailures(this, answer);
+    // The key rides an error read from this answer too: it may have charged.
+    await withIdempotencyKey(idempotencyKey, async () => checkAssessFailures(this, answer));
     return asResult(aliased(this, normalizeAssess, answer));
   }
 

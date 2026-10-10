@@ -331,6 +331,13 @@ describe("a failure block that is not an object", () => {
         /^POST \/assess answered with (claims\[0\]\.)?failure of the wrong type\.$/,
       );
       expect(err.body).toEqual(body);
+      // It may have charged: the key it sent rides the error, for a safe resend.
+      const sentKey = new Headers(
+        (fetch as unknown as { mock: { calls: [unknown, RequestInit][] } }).mock.calls.at(-1)![1]
+          .headers,
+      ).get("Idempotency-Key");
+      expect(sentKey).toBeTruthy();
+      expect(err.idempotencyKey).toBe(sentKey);
       // Read as sent, the body is returned as sent.
       const raw = await new Lenz({ apiKey: "lenz_t", fetch, legacyAliases: false }).assess({
         claim: "a",
