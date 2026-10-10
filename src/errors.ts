@@ -310,6 +310,21 @@ export class LenzAPIError extends LenzError {
 export class LenzUpstreamUnavailableError extends LenzAPIError {}
 
 /**
+ * A 2xx whose body is not JSON (a proxy's or captive portal's HTML page, a
+ * body cut short). `statusCode` is the real HTTP status, `requestId` the
+ * response's `X-Request-ID`, and `bodyText` the first 1000 characters of the
+ * body as received. `retryable` is `null`: whether the request ran is
+ * unknown, so resend a paid call only with `idempotencyKey: err.idempotencyKey`.
+ *
+ * Status 0 stays for a request that got no HTTP answer at all
+ * ({@link LenzConnectionError}). Subclasses {@link LenzAPIError}.
+ */
+export class LenzInvalidResponseError extends LenzAPIError {
+  /** The start of the body as received (at most 1000 characters, then `…`). */
+  bodyText = "";
+}
+
+/**
  * The request never got an HTTP answer: DNS, a refused or dropped
  * connection, TLS. Thrown after this client's own retries. Always
  * `retryable`; the original `fetch` rejection is the native `cause`.
