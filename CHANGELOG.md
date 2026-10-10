@@ -6,6 +6,14 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `pageSize` on `verifications.list({ page, pageSize })` and `verifications.listAll({ pageSize })`: how many verifications a page holds, a whole number from 1 to 100, sent as `page_size` only when given (a call without it sends the same request as before; the server's default is 20). Any other value throws an `Error` before a request is made. `listAll` asks every page for the same size. Matches `page_size` on the Python SDK. (`library.list` has no page size: `GET /library` does not take one.)
+
+### Changed
+
+- An `apiKey` of only whitespace (passed, or in `LENZ_API_KEY`) now counts as no key: a call that needs one throws `LenzAuthError` ("API key required") before any request, and keyless calls send no `Authorization` header. Before, it was sent as an empty bearer and the server answered 401, which read as a bad key rather than a missing one. An explicit `apiKey: ""` already meant no key and never read `LENZ_API_KEY`; that is now documented and tested.
+
 ## [3.1.0] - 2026-10-10
 
 ### Added

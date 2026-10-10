@@ -201,3 +201,51 @@ describe("S5: listAll stops on every end signal", () => {
     expect(urls).toHaveLength(0);
   });
 });
+
+describe("pageSize on verifications.list and listAll", () => {
+  it("list sends page_size only when it is set", async () => {
+    const { fetch, urls } = pages(
+      { ids: ["a"], page: 1, page_size: 20 },
+      { ids: ["a"], page: 2, page_size: 50 },
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifications.list();
+    await client.verifications.list({ page: 2, pageSize: 50 });
+    expect(new URL(urls[0]!).search).toBe("?page=1");
+    expect(new URL(urls[1]!).search).toBe("?page=2&page_size=50");
+  });
+
+  it("listAll asks every page for the same size and reads the size back", async () => {
+    const { fetch, urls } = pages(
+      { ids: ["a", "b"], page: 1, page_size: 2 },
+      { ids: ["c"], page: 2, page_size: 2 },
+    );
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const rows = await collect(client.verifications.listAll({ pageSize: 2 }));
+    expect(ids(rows)).toEqual(["a", "b", "c"]);
+    expect(urls.map((u) => new URL(u).searchParams.get("page_size"))).toEqual(["2", "2"]);
+  });
+
+  it.each([0, 101, -1, 1.5, Number.NaN, "20", null])(
+    "refuses pageSize %s before any request",
+    async (pageSize) => {
+      const { fetch, urls } = pages();
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const bad = pageSize as unknown as number;
+      await expect(client.verifications.list({ pageSize: bad })).rejects.toThrow(
+        /pageSize must be a whole number from 1 to 100/,
+      );
+      expect(() => client.verifications.listAll({ pageSize: bad })).toThrow(
+        /pageSize must be a whole number from 1 to 100/,
+      );
+      expect(urls).toHaveLength(0);
+    },
+  );
+
+  it.each([1, 100])("accepts pageSize %s", async (pageSize) => {
+    const { fetch, urls } = pages({ ids: [], page: 1, page_size: pageSize });
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    await client.verifications.list({ pageSize });
+    expect(new URL(urls[0]!).searchParams.get("page_size")).toBe(String(pageSize));
+  });
+});

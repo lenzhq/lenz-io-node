@@ -299,6 +299,11 @@ export interface LenzLogger {
 }
 
 export interface LenzOptions {
+  /**
+   * The API key (or an OAuth access token). Omitted, `LENZ_API_KEY` is read;
+   * an explicit empty or whitespace-only string means no key (the environment
+   * is not read), so a call that needs one throws `LenzAuthError`.
+   */
   apiKey?: string;
   baseUrl?: string;
   timeoutMs?: number;
@@ -800,6 +805,19 @@ async function* walkPages<T>(
   }
 }
 
+/** The most items a list page may ask for (`GET /verifications` clamps to 1-100). */
+const MAX_PAGE_SIZE = 100;
+
+/** A `pageSize`: omitted, or a whole number from 1 to 100, checked before any request. */
+function checkPageSize(value: unknown, where: string): void {
+  if (value === undefined) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_PAGE_SIZE) {
+    throw new Error(
+      `${where}: pageSize must be a whole number from 1 to ${MAX_PAGE_SIZE} (got ${String(value)}).`,
+    );
+  }
+}
+
 /** The start page of a `listAll`: a whole number from 1, checked when it is called. */
 function startPage(page: number | undefined): number {
   const first = page ?? 1;
@@ -1247,15 +1265,22 @@ function pollHintMs(progress: Progress | undefined): number | undefined {
 class VerificationsNamespace {
   constructor(private readonly client: Lenz) {}
 
+  /**
+   * One page of the account's verifications, newest first. `pageSize` (a
+   * whole number from 1 to 100) is sent as `page_size` only when given; the
+   * server's default is 20, and the size it used comes back as `page_size`.
+   */
   async list({
     page = 1,
+    pageSize,
     ...options
-  }: { page?: number } & RequestOptions = {}): Promise<VerificationList> {
+  }: { page?: number; pageSize?: number } & RequestOptions = {}): Promise<VerificationList> {
+    checkPageSize(pageSize, "verifications.list");
     const call = resolveCall(this.client, options, "verifications.list");
     const body = await this.client.request<VerificationList>({
       method: "GET",
       path: "/verifications",
-      query: { page },
+      query: { page, page_size: pageSize },
       ...transportOf(call),
     });
     return normalizeVerificationList(body) as VerificationList;
@@ -1270,7 +1295,9 @@ class VerificationsNamespace {
    *
    * One `list` request per page, made when the previous page has been read;
    * starts at `page` (default 1; a page below 1 throws when called) and stops
-   * on a short or empty page, or one that reaches `total`.
+   * on a short or empty page, or one that reaches `total`. `pageSize` (1-100,
+   * checked when called) is asked of every page; without it the server's
+   * default applies.
    *
    * The request options apply to every page request; they are checked when
    * `listAll` is called. A `signal` also stops the items of a page already
@@ -1278,12 +1305,17 @@ class VerificationsNamespace {
    */
   listAll({
     page,
+    pageSize,
     ...options
-  }: { page?: number } & RequestOptions = {}): AsyncIterable<VerificationListItem> {
+  }: {
+    page?: number;
+    pageSize?: number;
+  } & RequestOptions = {}): AsyncIterable<VerificationListItem> {
     const first = startPage(page);
+    checkPageSize(pageSize, "verifications.listAll");
     const call = resolveCall(this.client, options, "verifications.listAll", "request", false);
     // Every page uses the options as they were when listAll was called.
-    return walkPages((p) => this.list({ ...call.own, page: p }), first, call.signals);
+    return walkPages((p) => this.list({ ...call.own, page: p, pageSize }), first, call.signals);
   }
 
   /**
@@ -1575,7 +1607,12 @@ export class Lenz {
     // One rule for every per-request timeout and retry count, checked first.
     checkTimeoutMs(opts.timeoutMs, "new Lenz()", true);
     checkMaxRetries(opts.maxRetries, "new Lenz()", true);
-    this.apiKey = opts.apiKey ?? envVar("LENZ_API_KEY") ?? "";
+    // Only an omitted key (undefined, or null from JS) reads LENZ_API_KEY: an explicit "" stays "" (no
+    // key), and a key of only whitespace counts as no key, whichever source
+    // it came from, so the call fails with the SDK's own "API key required"
+    // rather than sending an empty bearer the server rejects.
+    const key = opts.apiKey ?? envVar("LENZ_API_KEY");
+    this.apiKey = typeof key === "string" && key.trim() !== "" ? key : "";
     this.baseUrl = (opts.baseUrl ?? envVar("LENZ_BASE_URL") ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;

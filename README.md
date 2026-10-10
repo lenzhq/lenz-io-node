@@ -360,7 +360,7 @@ throws an `Error` naming both before anything is sent.)
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
 - **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
-- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll()) …`), one request a page. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
+- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.list({ page, pageSize })` reads one page; `pageSize` is a whole number from 1 to 100 (anything else throws before a request) and, when omitted, the server's default of 20 applies. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll({ pageSize: 100 })) …`), one request a page, each asking for the same `pageSize`. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
 - **`client.library.list(...)`** → browse the public catalog (no API key needed). `library.listAll(filters)` iterates every page of a filtered list (any `sort` but `"random"`).
 - **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
@@ -1184,7 +1184,7 @@ retried. Any other value throws an `Error` when the client is made.
 
 Environment variables:
 
-- `LENZ_API_KEY` — read if `apiKey` is not passed
+- `LENZ_API_KEY` — read if `apiKey` is not passed. An explicit `apiKey: ""` (or one of only whitespace) means no key and never reads the environment: a call that needs a key throws `LenzAuthError`.
 - `LENZ_BASE_URL` — read if `baseUrl` is not passed
 
 ### Per-call options
@@ -1192,7 +1192,7 @@ Environment variables:
 Every method takes request options for one call: in its options argument
 (`verify(input, options)`, `getStatus(taskId, options)`, `usage(options)`, …),
 or merged into the options object it already takes (the waits' options,
-`getReview`'s `{ view }`, `verifications.list`'s `{ page }`,
+`getReview`'s `{ view }`, `verifications.list`'s `{ page, pageSize }`,
 `verifications.related`'s `{ limit }`):
 
 ```ts
