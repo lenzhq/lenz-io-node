@@ -1127,6 +1127,7 @@ describe("getReview() citations", () => {
           assessment: {
             ...c.assessment,
             suggested_rewrite: null,
+            searched_pages: [],
             more_claims: c.assessment.identified_claims,
           },
         })),
@@ -1171,6 +1172,7 @@ describe("getReview() claim positions", () => {
         assessment: {
           ...c.assessment,
           suggested_rewrite: null,
+          searched_pages: [],
           more_claims: c.assessment.identified_claims,
         },
       })),
