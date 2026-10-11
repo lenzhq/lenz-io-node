@@ -569,6 +569,10 @@ export interface AssessClaim extends RawBody {
    * On a client made with `legacyAliases: false`, a failed row's verdict is
    * `null`, as the API sends it (not in this type, so that code reading it
    * as a string keeps compiling: check `status` first).
+   *
+   * @deprecated The `"Error"` value will be removed in a future major release
+   * (4.0). Read a failed row from `status === "failed"` and its `failure`
+   * block (`code`, `retryable`).
    */
   verdict?: Verdict | (string & NonNullable<unknown>);
   /**

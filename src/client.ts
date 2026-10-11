@@ -412,6 +412,12 @@ export interface LenzOptions {
    * blocks, and no other 2.x field (the README lists them). Errors, webhooks
    * and the request sent are the same either way. Set once, on the client;
    * a `withOptions` copy keeps it.
+   *
+   * @deprecated The compatibility layer this option controls (the 2.x names
+   * and values, including `"Error"` on a failed `assess` row) will be removed
+   * in a future major release (4.0). Set it to `false` to read results as the
+   * API sends them, and read a failed row from `status === "failed"` and its
+   * `failure` block.
    */
   legacyAliases?: boolean;
 }

@@ -15,6 +15,10 @@ Release only after the Lenz API deploy that enables the "No Public Record" outco
 - `Verification.verdict` and `VerificationListItem.verdict` name `"No Public Record"`.
 - `searched_pages` on every `assess` row (`AssessClaim`) and every review quick check (`ReviewAssessment`): the pages the reviewers looked at, as `SearchedPage` items (`title`, `url`; the type is exported). `[]` when there is nothing to show and on a failed row. On an `assess` row from a response stored before the API sent it the key is absent, so read it as `row.searched_pages ?? []`; a review body reads `[]` (with the default `legacyAliases`). What the pages say has not been checked; for sourced evidence, call `verify`. Needs the API release that sends it.
 
+### Deprecated
+
+- The `"Error"` verdict value and the `legacyAliases` compatibility layer (the 2.x names and values 3.x adds on top of the `2026-10-11` shape, such as `verdict: "Error"` and `confidence: "low"` on a failed `assess` row) are deprecated and will be removed in a future major release (4.0). Nothing changes today and the SDK warns of nothing at run time. Read a failed `assess` row from `status === "failed"` and its `failure` block (`code`, `retryable`), and read results as the API sends them (`new Lenz({ legacyAliases: false })`) to be ready for the removal.
+
 ### Changed
 
 - `ReviewVerification.verdict` is `VerificationVerdict | null`, and `ReviewResult.verdict` is `VerificationVerdict | "Error"`. `ReviewIssue.verdict` is `VerificationVerdict`. A deep check with `"No Public Record"` is an issue (`is_issue: true`, listed in `issues`, no suggested edit) and the review reads `outcome: "issues_found"`, never `clean`.

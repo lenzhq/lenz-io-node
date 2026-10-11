@@ -597,7 +597,9 @@ Every claim-shaped response shares these fields at top level:
 
 `"Error"` is not a verification verdict. It is the placeholder a failed `assess`
 row carries for 2.x code (read the row's `status` and `failure`; see the
-`legacyAliases` table).
+`legacyAliases` table). The `"Error"` value is deprecated and will be removed
+in a future major release (4.0): read a failed row from `status === "failed"`
+and its `failure` block (`code`, `retryable`).
 
 #### No Public Record
 
@@ -1548,6 +1550,13 @@ await forTenant.assess({ claim });
 An OAuth access token for the Lenz API works wherever the API key goes: pass it as `apiKey` or in `LENZ_API_KEY`.
 
 ### Results as the API sends them (`legacyAliases`)
+
+> **Deprecated.** The `"Error"` verdict value and the `legacyAliases`
+> compatibility layer are deprecated and will be removed in a future major
+> release (4.0). Nothing changes today. Read a failed `assess` row from
+> `status === "failed"` and its `failure` block (`code`, `retryable`), and
+> use `new Lenz({ legacyAliases: false })` to read results as the API sends
+> them.
 
 3.x results also carry the names and values 2.x returned, computed from the
 `2026-10-11` response (see [Newer field names](#newer-field-names)).
