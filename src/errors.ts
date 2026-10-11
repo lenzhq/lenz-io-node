@@ -459,9 +459,9 @@ export class LenzPipelineError extends LenzError {
   taskId = "";
   failureReason = "";
   /**
-   * WHY (closed set: `upstream_unavailable` | `insufficient_evidence` |
-   * `invalid_input` | `cancelled` | `internal`); "" when an older server
-   * omits it.
+   * WHY (closed set: `upstream_unavailable` | `invalid_input` | `cancelled` |
+   * `internal`; `insufficient_evidence` only in API version `2026-05-13`);
+   * "" when an older server omits it.
    */
   failureClass = "";
   /** true iff `upstream_unavailable` — resubmit the same claim after a short wait. `null` = server didn't say. */

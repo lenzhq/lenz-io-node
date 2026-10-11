@@ -12,9 +12,11 @@
  *
  * Vocabulary (applies across every claim-shaped response):
  *   - claim       : string         — the framed claim text
- *   - verdict     : string         — "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error"
+ *   - verdict     : string         — "True" | "Mostly True" | "Mixed" | "Mostly False" | "False";
+ *                                    a deep check can also read "No Public Record" (see `VerificationVerdict`);
+ *                                    "Error" is only a failed /assess row's legacy placeholder
  *   - confidence  : string         — "high" | "medium" | "low" (categorical)
- *   - lenz_score  : number | null  — integer 1–10 (deep / list; /assess omits)
+ *   - lenz_score  : number | null  — integer 1–10 (deep / list; /assess omits); null on "No Public Record"
  */
 
 import type { LenzError } from "./errors.js";
@@ -202,9 +204,15 @@ export interface Verification extends RawBody, ResponseMeta {
   entities?: EntityRef[];
   presumed_intent?: string;
   // Verdict block (flat)
-  verdict?: Verdict | (string & NonNullable<unknown>);
+  /**
+   * The five labels, or `"No Public Record"`: the sources found do not
+   * settle the claim, which does not make it false. A completed check with
+   * that verdict has `lenz_score: null` and a `confidence` band; see
+   * {@link VerificationVerdict}, {@link isNoPublicRecord} and {@link hasScore}.
+   */
+  verdict?: VerificationVerdict | Verdict | (string & NonNullable<unknown>);
   confidence?: Confidence | (string & NonNullable<unknown>);
-  lenz_score?: number | null; // integer 1–10
+  lenz_score?: number | null; // integer 1–10; null on "No Public Record"
   /**
    * The analysis's key finding: one declarative sentence stating the
    * most important fact it established (2.6.0). "" on legacy claims
@@ -367,7 +375,8 @@ export interface VerificationListItem extends RawBody {
   claim?: string;
   domain?: string;
   entities?: EntityRef[];
-  verdict?: Verdict | (string & NonNullable<unknown>);
+  /** The five labels, or `"No Public Record"` (`lenz_score` is then `null`). */
+  verdict?: VerificationVerdict | Verdict | (string & NonNullable<unknown>);
   confidence?: Confidence | (string & NonNullable<unknown>);
   lenz_score?: number | null;
   /** The analysis's key finding (2.6.0). See `Verification.key_finding`. */
@@ -784,8 +793,8 @@ export interface TaskStatus extends RawBody, ResponseMeta {
    */
   similar_claims?: SimilarVerification[];
   /**
-   * On a `failed` status, why: `code` (e.g. `no_checkable_claim`,
-   * `research_empty`), `detail` (one sentence), `hint`, `failure_class`,
+   * On a `failed` status, why: `code` (`no_checkable_claim` |
+   * `upstream_unavailable` | `internal` | `cancelled`), `detail` (one sentence), `hint`, `failure_class`,
    * `retryable`, `docs_url`.
    */
   failure?: ReviewFailureBlock | null;
@@ -806,8 +815,8 @@ export interface TaskStatus extends RawBody, ResponseMeta {
    */
   failure_detail?: string;
   /**
-   * WHY it failed — closed set (`upstream_unavailable` |
-   * `insufficient_evidence` | `invalid_input` | `cancelled` | `internal`) —
+   * WHY it failed — closed set (`upstream_unavailable` | `invalid_input` |
+   * `cancelled` | `internal`; `insufficient_evidence` only in `2026-05-13`) —
    * and the derived retry signal (true iff `upstream_unavailable`). Rows
    * predating 2026-08 omit both.
    *
@@ -834,7 +843,11 @@ export interface TaskStatus extends RawBody, ResponseMeta {
 }
 
 /**
- * Closed set of failure causes on a `failed` verification. The
+ * Closed set of failure causes on a `failed` verification: in API version
+ * `2026-10-11`, `upstream_unavailable` | `invalid_input` | `cancelled` |
+ * `internal`. `insufficient_evidence` belongs to `2026-05-13` only (a run
+ * without public record now completes with `verdict: "No Public Record"`);
+ * it stays in the union so a body that still carries it reads. The
  * `string & NonNullable<unknown>` arm preserves autocomplete for the known
  * values while tolerating any future class the server adds (same trick as
  * `WebhookEventKind`).
@@ -1576,6 +1589,16 @@ export type ConfidenceBand = "low" | "medium" | "high";
  */
 export type Verdict = VerdictLabel | "Error";
 
+/**
+ * A deep check's verdict: one of the five labels, or `"No Public Record"`, a
+ * completed check whose sources do not settle the claim (that does not make
+ * it false). Such a check has `lenz_score: null` and a `confidence` band
+ * string, and is an issue in a review (with no suggested edit). `VerdictLabel` is
+ * unchanged: it
+ * stays the five labels a quick check, a filter or a review rule names.
+ */
+export type VerificationVerdict = VerdictLabel | "No Public Record";
+
 /** A confidence as read on a verification or an assess row (same as `ConfidenceBand`). */
 export type Confidence = ConfidenceBand;
 
@@ -1603,7 +1626,8 @@ export type ReviewStatus =
  *   planned deep check completed. It covers the claims the review selected,
  *   at the depth the policy chose.
  * - `issues_found` — at least one claim's final verdict is `False`,
- *   `Mostly False` or `Mixed`.
+ *   `Mostly False` or `Mixed`, or a completed deep check read
+ *   `"No Public Record"` (an issue too, with no suggested edit).
  * - `incomplete` — an assessment or a planned deep check failed.
  * - `unchecked` — the review failed before assessing anything (no claim in
  *   the draft, not enough credits, an outage, an unreadable input).
@@ -1654,9 +1678,12 @@ export interface Escalation extends RawBody {
 /** The failure block `GET /verify/status` answers a failed task with. */
 export interface ReviewFailureBlock extends RawBody {
   /**
-   * The specific cause, e.g. `no_checkable_claim`, `insufficient_credits`,
-   * `assessment_failed`, `timeout`. An open set; `null` when the API has no
-   * specific cause to name.
+   * The specific cause. On a failed `/verify` run, in API version
+   * `2026-10-11`, exactly `no_checkable_claim` | `upstream_unavailable` |
+   * `internal` | `cancelled`: no step name, the sentence in `detail` keeps
+   * the specific cause. Elsewhere (a review row, an `/assess` row) an open
+   * set, e.g. `insufficient_credits`, `assessment_failed`, `timeout`; `null`
+   * when the API has no specific cause to name.
    */
   code?: string | null;
   /** One sentence on what went wrong; `null` when the server sent none. */
@@ -1763,10 +1790,11 @@ export interface ReviewCredits extends RawBody {
 
 /** The one answer to read for a claim: a completed deep check overrides the quick one. */
 export interface ReviewResult extends RawBody {
-  verdict: VerdictLabel | "Error";
+  /** `"No Public Record"` only from a completed deep check; it is an issue. */
+  verdict: VerificationVerdict | "Error";
   confidence: ConfidenceBand | null;
   source: "assessment" | "verification";
-  /** The verdict is `False`, `Mostly False` or `Mixed`. */
+  /** The verdict is `False`, `Mostly False`, `Mixed` or `"No Public Record"`. */
   is_issue: boolean;
 }
 
@@ -1841,7 +1869,8 @@ export interface ReviewVerification extends RawBody {
   depth: string | null;
   domain: string | null;
   entities: ReviewEntity[];
-  verdict: VerdictLabel | null;
+  /** `"No Public Record"` when the deep check found no public record; `lenz_score` is then `null`. */
+  verdict: VerificationVerdict | null;
   confidence: ConfidenceBand | null;
   lenz_score: number | null;
   key_finding: string | null;
@@ -1928,7 +1957,8 @@ export interface ReviewClaim extends RawBody {
 }
 
 /**
- * A claim whose final verdict is `False`, `Mostly False` or `Mixed`. Until
+ * A claim whose final verdict is `False`, `Mostly False`, `Mixed` or (a
+ * completed deep check) `"No Public Record"`. Until
  * the review is `completed` the list can still change.
  */
 export interface ReviewIssue extends RawBody {
@@ -1936,7 +1966,8 @@ export interface ReviewIssue extends RawBody {
   claim: string | null;
   /** The deep check's reading of the claim, when it differs from `claim`. */
   verified_claim: string | null;
-  verdict: VerdictLabel;
+  /** `"No Public Record"` is an issue too; it has no `suggested_rewrite`. */
+  verdict: VerificationVerdict;
   confidence: ConfidenceBand | null;
   /** Which check the verdict comes from. */
   source: "assessment" | "verification";

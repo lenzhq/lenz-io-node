@@ -644,6 +644,13 @@ describe("contract", () => {
     ["assess_more_claims.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
     ["verify_status_failed.json", "TaskStatus"],
+    // CONSTRUCTED for the "No Public Record" outcome (same keys as the bodies
+    // around it): a completed check with a null score and a confidence band,
+    // a failed run whose `failure.code` is one of the collapsed set, and a
+    // review that holds such a check (an issue with no rewrite: `issues_found`).
+    ["verify_status_no_public_record.json", "TaskStatus"],
+    ["verify_status_failed_collapsed_code.json", "TaskStatus"],
+    ["review_completed_no_public_record.json", "ReviewFull"],
     // The `processing` body. Under the server's `exclude_unset` a completed
     // body has no `progress` key at all and this one has no `result` — the
     // fixtures are the two halves of that contract.

@@ -6,9 +6,20 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+Release only after the Lenz API deploy that enables the "No Public Record" outcome.
+
 ### Added
 
+- `VerificationVerdict`, exported from both entry points: the five `VerdictLabel` values plus `"No Public Record"`, a deep check that completed without enough public sources to settle the claim (`lenz_score: null`, a `confidence` band string; not a failure, and not a claim that it is false). `VerdictLabel` is unchanged.
+- `isNoPublicRecord(v)` and `hasScore(v)` (a type guard that narrows `lenz_score` to a number), exported from both entry points.
+- `Verification.verdict` and `VerificationListItem.verdict` name `"No Public Record"`.
 - `searched_pages` on every `assess` row (`AssessClaim`) and every review quick check (`ReviewAssessment`): the pages the reviewers looked at, as `SearchedPage` items (`title`, `url`; the type is exported). `[]` when there is nothing to show and on a failed row. On an `assess` row from a response stored before the API sent it the key is absent, so read it as `row.searched_pages ?? []`; a review body reads `[]` (with the default `legacyAliases`). What the pages say has not been checked; for sourced evidence, call `verify`. Needs the API release that sends it.
+
+### Changed
+
+- `ReviewVerification.verdict` is `VerificationVerdict | null`, and `ReviewResult.verdict` is `VerificationVerdict | "Error"`. `ReviewIssue.verdict` is `VerificationVerdict`. A deep check with `"No Public Record"` is an issue (`is_issue: true`, listed in `issues`, no suggested edit) and the review reads `outcome: "issues_found"`, never `clean`.
+- `FailureClass` documents the `2026-10-11` set as `upstream_unavailable` | `invalid_input` | `cancelled` | `internal`: `insufficient_evidence` is `2026-05-13` only. The type stays open, so a body that still carries it reads.
+- Documented: a failed `/verify` run's `failure.code` is one of `no_checkable_claim` | `upstream_unavailable` | `internal` | `cancelled` in `2026-10-11` (no step names such as `research_empty` or `framing_failed`; `failure.detail` keeps the specific sentence). Code that compared `failure.code` with a step name should branch on `failure_class` and `retryable`.
 
 ## [3.2.0] - 2026-10-10
 

@@ -1,0 +1,58 @@
+{
+  "status": "completed",
+  "task_id": "tsk_abc123",
+  "result": {
+    "verification_id": "a1b2c3d4",
+    "claim": "Acme Corp's founder gave a keynote at the 2019 Lisbon Dev Summit.",
+    "domain": "Technology",
+    "entities": [
+      {
+        "name": "Acme Corp",
+        "qid": null
+      }
+    ],
+    "presumed_intent": "Verify a factual claim",
+    "verdict": "No Public Record",
+    "confidence": "medium",
+    "lenz_score": null,
+    "key_finding": "No public record of this keynote was found.",
+    "executive_summary": "The sources found do not mention the keynote or the summit's speaker list. That does not make the claim false.",
+    "warnings": [],
+    "suggested_rewrite": null,
+    "sources": [
+      {
+        "source_name": "Lisbon Dev Summit",
+        "title": "Lisbon Dev Summit 2019 speakers",
+        "url": "https://example.org/lisbon-dev-summit-2019/speakers",
+        "snippet": "The 2019 programme lists eleven keynote speakers; Acme Corp is not among the organisations named.",
+        "date": "2019-10-02"
+      }
+    ],
+    "audit": {
+      "adjudication_summary": "The panel found no public record that settles the claim.",
+      "assessments": [
+        {
+          "panelist_name": "The Source Auditor",
+          "focus_area": "Source Reliability",
+          "score": 5.0,
+          "reasoning": "Nothing in the sources addresses the claim.",
+          "warnings": []
+        }
+      ],
+      "debate_pro": {
+        "role": "Advocate",
+        "argument": "Einstein did win in 1921.",
+        "rebuttal": "But the citation was for the photoelectric effect."
+      },
+      "debate_con": {
+        "role": "Skeptic",
+        "argument": "The Nobel citation explicitly names the photoelectric effect.",
+        "rebuttal": "Pro concedes."
+      },
+      "panel_agreement": "unanimous"
+    },
+    "created_at": "2026-05-22T12:00:00Z",
+    "modified_at": null,
+    "language": "en"
+  }
+}
