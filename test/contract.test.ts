@@ -644,7 +644,7 @@ describe("contract", () => {
     // CONSTRUCTED for the "No Public Record" outcome (same keys as the bodies
     // around it): a completed check with a null score and a confidence band,
     // a failed run whose `failure.code` is one of the collapsed set, and a
-    // review that holds such a check (not an issue, not clean: `incomplete`).
+    // review that holds such a check (an issue with no rewrite: `issues_found`).
     ["verify_status_no_public_record.json", "TaskStatus"],
     ["verify_status_failed_collapsed_code.json", "TaskStatus"],
     ["review_completed_no_public_record.json", "ReviewFull"],

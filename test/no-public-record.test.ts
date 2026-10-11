@@ -52,10 +52,10 @@ describe("No Public Record: types", () => {
     expectTypeOf<Browser.VerificationVerdict>().toEqualTypeOf<VerificationVerdict>();
   });
 
-  it("a review's deep check can read it; an issue cannot", () => {
+  it("a review's deep check, result and issue can read it", () => {
     expectTypeOf<ReviewVerification["verdict"]>().toEqualTypeOf<VerificationVerdict | null>();
     expectTypeOf<ReviewResult["verdict"]>().toEqualTypeOf<VerificationVerdict | "Error">();
-    expectTypeOf<ReviewIssue["verdict"]>().toEqualTypeOf<VerdictLabel>();
+    expectTypeOf<ReviewIssue["verdict"]>().toEqualTypeOf<VerificationVerdict>();
   });
 
   it("FailureClass still names the canonical set and tolerates the old value", () => {
@@ -126,15 +126,20 @@ describe("No Public Record: results", () => {
     expect(status.failure?.retryable).toBe(true);
   });
 
-  it("a review holding one is incomplete, with no issue and the check's own verdict", async () => {
+  it("a review holding one is issues_found, with an issue row and no rewrite", async () => {
     const review = (await clientAnswering(
       fixture("review_completed_no_public_record.json"),
     ).getReview("442b6aa9")) as ReviewFull;
-    expect(review.outcome).toBe("incomplete");
-    expect(review.issues).toEqual([]);
+    expect(review.outcome).toBe("issues_found");
+    expect(review.issues).toHaveLength(1);
+    const issue = review.issues[0]!;
+    expect(issue.verdict).toBe("No Public Record");
+    expect(issue.source).toBe("verification");
+    expect(issue.suggested_rewrite).toBeNull();
     const claim = review.claims[0]!;
     expect(claim.result?.verdict).toBe("No Public Record");
-    expect(claim.result?.is_issue).toBe(false);
+    expect(claim.result?.is_issue).toBe(true);
+    expect(claim.suggested_edits).toBeNull();
     expect(claim.verification?.verdict).toBe("No Public Record");
     expect(claim.verification?.lenz_score).toBeNull();
     expect(isNoPublicRecord(claim.verification)).toBe(true);

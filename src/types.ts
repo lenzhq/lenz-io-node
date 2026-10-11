@@ -1579,7 +1579,8 @@ export type Verdict = VerdictLabel | "Error";
  * A deep check's verdict: one of the five labels, or `"No Public Record"`, a
  * completed check whose sources do not settle the claim (that does not make
  * it false). Such a check has `lenz_score: null` and a `confidence` band
- * string, and is never an issue in a review. `VerdictLabel` is unchanged: it
+ * string, and is an issue in a review (with no suggested edit). `VerdictLabel` is
+ * unchanged: it
  * stays the five labels a quick check, a filter or a review rule names.
  */
 export type VerificationVerdict = VerdictLabel | "No Public Record";
@@ -1611,10 +1612,9 @@ export type ReviewStatus =
  *   planned deep check completed. It covers the claims the review selected,
  *   at the depth the policy chose.
  * - `issues_found` — at least one claim's final verdict is `False`,
- *   `Mostly False` or `Mixed`.
- * - `incomplete` — an assessment or a planned deep check failed, or a deep
- *   check completed with `"No Public Record"` (not an issue, but not clean
- *   either, so a gate on `clean` never passes a claim nothing confirmed).
+ *   `Mostly False` or `Mixed`, or a completed deep check read
+ *   `"No Public Record"` (an issue too, with no suggested edit).
+ * - `incomplete` — an assessment or a planned deep check failed.
  * - `unchecked` — the review failed before assessing anything (no claim in
  *   the draft, not enough credits, an outage, an unreadable input).
  *
@@ -1776,11 +1776,11 @@ export interface ReviewCredits extends RawBody {
 
 /** The one answer to read for a claim: a completed deep check overrides the quick one. */
 export interface ReviewResult extends RawBody {
-  /** `"No Public Record"` only from a completed deep check; it is not an issue. */
+  /** `"No Public Record"` only from a completed deep check; it is an issue. */
   verdict: VerificationVerdict | "Error";
   confidence: ConfidenceBand | null;
   source: "assessment" | "verification";
-  /** The verdict is `False`, `Mostly False` or `Mixed` (never `"No Public Record"`). */
+  /** The verdict is `False`, `Mostly False`, `Mixed` or `"No Public Record"`. */
   is_issue: boolean;
 }
 
@@ -1936,7 +1936,8 @@ export interface ReviewClaim extends RawBody {
 }
 
 /**
- * A claim whose final verdict is `False`, `Mostly False` or `Mixed`. Until
+ * A claim whose final verdict is `False`, `Mostly False`, `Mixed` or (a
+ * completed deep check) `"No Public Record"`. Until
  * the review is `completed` the list can still change.
  */
 export interface ReviewIssue extends RawBody {
@@ -1944,7 +1945,8 @@ export interface ReviewIssue extends RawBody {
   claim: string | null;
   /** The deep check's reading of the claim, when it differs from `claim`. */
   verified_claim: string | null;
-  verdict: VerdictLabel;
+  /** `"No Public Record"` is an issue too; it has no `suggested_rewrite`. */
+  verdict: VerificationVerdict;
   confidence: ConfidenceBand | null;
   /** Which check the verdict comes from. */
   source: "assessment" | "verification";

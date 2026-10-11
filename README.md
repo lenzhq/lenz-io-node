@@ -89,7 +89,7 @@ await client.review({
   failed before it assessed anything). `clean` covers the claims the review
   selected, at the depth its policy chose.
 - **`issues`** are the claims whose final verdict is `False`, `Mostly False`
-  or `Mixed`; a completed deep check overrides the quick verdict. A deep-checked
+  or `Mixed`, or a deep check's `"No Public Record"`; a completed deep check overrides the quick verdict. A deep-checked
   issue carries `key_finding`, `verification_id` and `suggested_rewrite`; an
   issue that stayed on its quick verdict carries `rationale` and an
   `escalation` saying why it stayed quick (`cap`, `credits`, …).
@@ -614,11 +614,11 @@ if (isNoPublicRecord(v)) {
 }
 ```
 
-In a review, such a deep check is **not an issue** (no rewrite, not in
-`issues`), but it is not clean either: a review with one and no issue ends
-`outcome: "incomplete"`, so a gate on `clean` never passes a claim nothing
-confirmed. `ReviewVerification.verdict` and `ReviewResult.verdict` can read
-`"No Public Record"`; `ReviewIssue.verdict` never does.
+In a review, such a deep check **is an issue**: it is listed in `issues` (with
+no `suggested_rewrite` and no suggested edit) and the review reads
+`outcome: "issues_found"`, so a gate on `clean` never passes a claim nothing
+confirmed. `ReviewVerification.verdict`, `ReviewResult.verdict` and
+`ReviewIssue.verdict` can read `"No Public Record"`.
 
 ### Newer field names
 

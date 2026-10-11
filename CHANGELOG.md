@@ -16,7 +16,7 @@ Release only after the Lenz API deploy that enables the "No Public Record" outco
 
 ### Changed
 
-- `ReviewVerification.verdict` is `VerificationVerdict | null` and `ReviewResult.verdict` is `VerificationVerdict | "Error"`. A deep check with `"No Public Record"` is not an issue (`is_issue: false`, nothing in `issues`, `ReviewIssue.verdict` stays a `VerdictLabel`), and a review that holds one and has no issue ends `outcome: "incomplete"`, never `clean`.
+- `ReviewVerification.verdict` is `VerificationVerdict | null`, and `ReviewResult.verdict` is `VerificationVerdict | "Error"`. `ReviewIssue.verdict` is `VerificationVerdict`. A deep check with `"No Public Record"` is an issue (`is_issue: true`, listed in `issues`, no suggested edit) and the review reads `outcome: "issues_found"`, never `clean`.
 - `FailureClass` documents the `2026-10-11` set as `upstream_unavailable` | `invalid_input` | `cancelled` | `internal`: `insufficient_evidence` is `2026-05-13` only. The type stays open, so a body that still carries it reads.
 - Documented: a failed `/verify` run's `failure.code` is one of `no_checkable_claim` | `upstream_unavailable` | `internal` | `cancelled` in `2026-10-11` (no step names such as `research_empty` or `framing_failed`; `failure.detail` keeps the specific sentence). Code that compared `failure.code` with a step name should branch on `failure_class` and `retryable`.
 
