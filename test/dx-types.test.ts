@@ -18,6 +18,7 @@ import type {
   Verdict,
   VerdictLabel,
   Verification,
+  VerificationVerdict,
   VerificationListItem,
 } from "../src/index.js";
 import type * as Browser from "../src/index.browser.js";
@@ -34,11 +35,16 @@ describe("B6: verdict and confidence name their values", () => {
   });
 
   it("the plain-string fields are the closed set plus any string", () => {
-    expectTypeOf<Verification["verdict"]>().toEqualTypeOf<Verdict | Open | undefined>();
+    // A deep check can also read "No Public Record" (VerificationVerdict).
+    expectTypeOf<Verification["verdict"]>().toEqualTypeOf<
+      VerificationVerdict | Verdict | Open | undefined
+    >();
     expectTypeOf<Verification["confidence"]>().toEqualTypeOf<Confidence | Open | undefined>();
     expectTypeOf<AssessClaim["verdict"]>().toEqualTypeOf<Verdict | Open | undefined>();
     expectTypeOf<AssessClaim["confidence"]>().toEqualTypeOf<Confidence | Open | undefined>();
-    expectTypeOf<VerificationListItem["verdict"]>().toEqualTypeOf<Verdict | Open | undefined>();
+    expectTypeOf<VerificationListItem["verdict"]>().toEqualTypeOf<
+      VerificationVerdict | Verdict | Open | undefined
+    >();
     expectTypeOf<SimilarVerification["confidence"]>().toEqualTypeOf<
       Confidence | Open | undefined
     >();

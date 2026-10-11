@@ -6,6 +6,20 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+Release only after the Lenz API deploy that enables the "No Public Record" outcome.
+
+### Added
+
+- `VerificationVerdict`, exported from both entry points: the five `VerdictLabel` values plus `"No Public Record"`, a deep check that completed without enough public sources to settle the claim (`lenz_score: null`, a `confidence` band string; not a failure, and not a claim that it is false). `VerdictLabel` is unchanged.
+- `isNoPublicRecord(v)` and `hasScore(v)` (a type guard that narrows `lenz_score` to a number), exported from both entry points.
+- `Verification.verdict` and `VerificationListItem.verdict` name `"No Public Record"`.
+
+### Changed
+
+- `ReviewVerification.verdict` is `VerificationVerdict | null` and `ReviewResult.verdict` is `VerificationVerdict | "Error"`. A deep check with `"No Public Record"` is not an issue (`is_issue: false`, nothing in `issues`, `ReviewIssue.verdict` stays a `VerdictLabel`), and a review that holds one and has no issue ends `outcome: "incomplete"`, never `clean`.
+- `FailureClass` documents the `2026-10-11` set as `upstream_unavailable` | `invalid_input` | `cancelled` | `internal`: `insufficient_evidence` is `2026-05-13` only. The type stays open, so a body that still carries it reads.
+- Documented: a failed `/verify` run's `failure.code` is one of `no_checkable_claim` | `upstream_unavailable` | `internal` | `cancelled` in `2026-10-11` (no step names such as `research_empty` or `framing_failed`; `failure.detail` keeps the specific sentence). Code that compared `failure.code` with a step name should branch on `failure_class` and `retryable`.
+
 ## [3.2.0] - 2026-10-10
 
 ### Added

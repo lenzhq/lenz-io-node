@@ -54,6 +54,7 @@ export type { UsageErrorCode } from "./errors.js";
 
 // `isEvent` and the event types live in `./events.ts`, which needs no crypto.
 export { isEvent } from "./events.js";
+export { hasScore, isNoPublicRecord } from "./verdicts.js";
 export type { LenzWebhooksOptions } from "./webhooks.js";
 export type {
   CertificateTimestamped,
@@ -129,6 +130,7 @@ export type {
   ReviewVerification,
   ReviewVerificationCounts,
   VerdictLabel,
+  VerificationVerdict,
   AskHistory,
   AskMessage,
   AskReply,

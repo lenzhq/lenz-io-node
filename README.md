@@ -583,12 +583,38 @@ export async function POST(request: Request): Promise<Response> {
 
 Every claim-shaped response shares these fields at top level:
 
-| Field        | Type             | Notes                                                                                   |
-| ------------ | ---------------- | --------------------------------------------------------------------------------------- |
-| `claim`      | `string`         | The framed claim text.                                                                  |
-| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Mixed"` \| `"Mostly False"` \| `"False"` \| `"Error"`. |
-| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                         |
-| `lenz_score` | `number \| null` | Integer 1–10 (deep verdicts and list endpoints; `assess` omits it).                     |
+| Field        | Type             | Notes                                                                                                                                            |
+| ------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `claim`      | `string`         | The framed claim text.                                                                                                                           |
+| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Mixed"` \| `"Mostly False"` \| `"False"` \| `"Error"`; a deep check can also read `"No Public Record"` (below). |
+| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                                                                                  |
+| `lenz_score` | `number \| null` | Integer 1–10 (deep verdicts and list endpoints; `assess` omits it); `null` on `"No Public Record"`.                                              |
+
+#### No Public Record
+
+A deep check can finish without a verdict on the claim's truth: the sources
+Lenz found do not settle it. It still **completes** (`status: "completed"`),
+with `verdict: "No Public Record"`, `lenz_score: null` and a `confidence` band
+string (`"high"` \| `"medium"` \| `"low"`). That does not make the claim false.
+The type `VerificationVerdict` names the six values (`VerdictLabel` stays the
+five labels a quick check, a `verdicts` filter or a review rule can name):
+
+```ts
+import { hasScore, isNoPublicRecord } from "lenz-io";
+
+const v = await client.verifyAndWait({ claim });
+if (isNoPublicRecord(v)) {
+  console.log("No public record of this:", v.key_finding); // not an error, not a score
+} else if (hasScore(v)) {
+  console.log(v.verdict, v.lenz_score); // lenz_score is a number here
+}
+```
+
+In a review, such a deep check is **not an issue** (no rewrite, not in
+`issues`), but it is not clean either: a review with one and no issue ends
+`outcome: "incomplete"`, so a gate on `clean` never passes a claim nothing
+confirmed. `ReviewVerification.verdict` and `ReviewResult.verdict` can read
+`"No Public Record"`; `ReviewIssue.verdict` never does.
 
 ### Newer field names
 
@@ -906,8 +932,10 @@ try {
 
 A failed _verification_ (as opposed to a failed HTTP call) throws
 `LenzPipelineError` from `verifyAndWait` / `wait`. Since 2.8.0 it carries
-`failureClass` (closed set: `upstream_unavailable` | `insufficient_evidence`
-| `invalid_input` | `cancelled` | `internal`) and `retryable` — `true` means
+`failureClass` (closed set: `upstream_unavailable` | `invalid_input` |
+`cancelled` | `internal`; `insufficient_evidence` only from API version
+`2026-05-13`, since a run that finds no public record now completes as
+`"No Public Record"`) and `retryable` — `true` means
 a transient provider-side exhaustion where resubmitting the same claim is the
 right move; older servers leave it `null`. A verification, review or citation
 check cancelled elsewhere (the website's Stop button, another process) ends a

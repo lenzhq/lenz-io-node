@@ -87,6 +87,7 @@ export {
   verifySignatureAsync,
   isEvent,
 } from "./webhooks.js";
+export { hasScore, isNoPublicRecord } from "./verdicts.js";
 export type {
   LenzWebhooksOptions,
   CertificateTimestamped,
@@ -162,6 +163,7 @@ export type {
   ReviewVerification,
   ReviewVerificationCounts,
   VerdictLabel,
+  VerificationVerdict,
   AskHistory,
   AskMessage,
   AskReply,
