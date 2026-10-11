@@ -10,7 +10,7 @@ Release only after the Lenz API deploy that enables the "No Public Record" outco
 
 ### Added
 
-- `VerificationVerdict`, exported from both entry points: the five `VerdictLabel` values plus `"No Public Record"`, a deep check that completed without enough public sources to settle the claim (`lenz_score: null`, a `confidence` band string; not a failure, and not a claim that it is false). `VerdictLabel` is unchanged.
+- `VerificationVerdict`, exported from both entry points: the five `VerdictLabel` values plus `"No Public Record"`, a deep check that completed without enough public sources to settle the claim (`lenz_score: null`, a `confidence` band string; no public record would show this claim; not a failure). `VerdictLabel` is unchanged.
 - `isNoPublicRecord(v)` and `hasScore(v)` (a type guard that narrows `lenz_score` to a number), exported from both entry points.
 - `Verification.verdict` and `VerificationListItem.verdict` name `"No Public Record"`.
 - `searched_pages` on every `assess` row (`AssessClaim`) and every review quick check (`ReviewAssessment`): the pages the reviewers looked at, as `SearchedPage` items (`title`, `url`; the type is exported). `[]` when there is nothing to show and on a failed row. On an `assess` row from a response stored before the API sent it the key is absent, so read it as `row.searched_pages ?? []`; a review body reads `[]` (with the default `legacyAliases`). What the pages say has not been checked; for sourced evidence, call `verify`. Needs the API release that sends it.

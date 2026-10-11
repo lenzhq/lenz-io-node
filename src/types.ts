@@ -205,8 +205,8 @@ export interface Verification extends RawBody, ResponseMeta {
   presumed_intent?: string;
   // Verdict block (flat)
   /**
-   * The five labels, or `"No Public Record"`: the sources found do not
-   * settle the claim, which does not make it false. A completed check with
+   * The five labels, or `"No Public Record"`: no public record would show
+   * this claim, so the sources found do not settle it. A completed check with
    * that verdict has `lenz_score: null` and a `confidence` band; see
    * {@link VerificationVerdict}, {@link isNoPublicRecord} and {@link hasScore}.
    */

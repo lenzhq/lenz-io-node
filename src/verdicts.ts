@@ -5,7 +5,7 @@
 
 /**
  * `true` when the deep check completed with `verdict: "No Public Record"`:
- * the sources found do not settle the claim, which does not make it false.
+ * no public record would show this claim, so the sources found do not settle it.
  * Such a check has no `lenz_score`. Accepts a verification, a list item or a
  * review row's `verification` (anything with a `verdict`).
  */
