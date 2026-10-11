@@ -59,6 +59,7 @@ const NEW_NAMES = new Set([
   "idempotencyKey", // every error of a call that sent one (3.0)
   "servedVersion", // every error (3.2): the version the error response named
   "headers", // every error from an HTTP answer (3.2): its response headers
+  "searched_pages", // assess rows and review quick checks: the pages the reviewers looked at
 ]);
 
 /**

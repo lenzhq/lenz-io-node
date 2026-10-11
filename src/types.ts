@@ -528,6 +528,12 @@ export interface ExtractedClaims extends RawBody, ResponseMeta {
   locations?: ClaimLocation[] | null;
 }
 
+/** A page looked at while assessing a claim: its title and link. */
+export interface SearchedPage extends RawBody {
+  title: string;
+  url: string;
+}
+
 /**
  * Per-claim entry in an `AssessResponse.claims` list.
  *
@@ -583,6 +589,14 @@ export interface AssessClaim extends RawBody {
   rationale?: string | null;
   /** @deprecated Always null. Kept so code that reads it keeps working. */
   dissent?: string | null;
+  /**
+   * The pages the reviewers looked at while assessing the claim, as title and
+   * link. `[]` when there is nothing to show and on a failed row; absent on a
+   * response replayed from before the API added it, so read it as
+   * `row.searched_pages ?? []`. What the pages say has not been checked: for
+   * sourced evidence, call `verify`.
+   */
+  searched_pages?: SearchedPage[];
   /**
    * The claim with its wrong part corrected, when the request set
    * `suggestRewrite: true` and the check found the claim `"False"` or
@@ -1765,6 +1779,13 @@ export interface ReviewAssessment extends RawBody {
   rationale: string | null;
   /** @deprecated Always null. Kept so code that reads it keeps working. */
   dissent: string | null;
+  /**
+   * The pages the quick check's reviewers looked at, as on an `/assess` row
+   * (`AssessClaim.searched_pages`). `[]` when there is nothing to show, and
+   * on a body from an API that predates the field (read with the default
+   * `legacyAliases`; as sent, it may be absent).
+   */
+  searched_pages?: SearchedPage[];
   /** Set when the quick check served an existing deep verdict. */
   verification_url: string | null;
   /**

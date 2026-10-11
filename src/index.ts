@@ -166,6 +166,7 @@ export type {
   AskMessage,
   AskReply,
   AssessClaim,
+  SearchedPage,
   AssessInput,
   AssessResponse,
   RawBody,

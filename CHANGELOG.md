@@ -6,6 +6,10 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `searched_pages` on every `assess` row (`AssessClaim`) and every review quick check (`ReviewAssessment`): the pages the reviewers looked at, as `SearchedPage` items (`title`, `url`; the type is exported). `[]` when there is nothing to show and on a failed row. On an `assess` row from a response stored before the API sent it the key is absent, so read it as `row.searched_pages ?? []`; a review body reads `[]` (with the default `legacyAliases`). What the pages say has not been checked; for sourced evidence, call `verify`. Needs the API release that sends it.
+
 ## [3.2.0] - 2026-10-10
 
 ### Added
