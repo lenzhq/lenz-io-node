@@ -12,8 +12,9 @@
  *
  * Vocabulary (applies across every claim-shaped response):
  *   - claim       : string         — the framed claim text
- *   - verdict     : string         — "True" | "Mostly True" | "Mixed" | "Mostly False" | "False" | "Error";
- *                                    a deep check can also read "No Public Record" (see `VerificationVerdict`)
+ *   - verdict     : string         — "True" | "Mostly True" | "Mixed" | "Mostly False" | "False";
+ *                                    a deep check can also read "No Public Record" (see `VerificationVerdict`);
+ *                                    "Error" is only a failed /assess row's legacy placeholder
  *   - confidence  : string         — "high" | "medium" | "low" (categorical)
  *   - lenz_score  : number | null  — integer 1–10 (deep / list; /assess omits); null on "No Public Record"
  */
