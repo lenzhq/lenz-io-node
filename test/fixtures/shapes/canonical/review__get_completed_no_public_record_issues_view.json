@@ -1,0 +1,79 @@
+{
+  "status": 200,
+  "body": {
+    "review_id": "12124ecd",
+    "view": "issues",
+    "status": "completed",
+    "outcome": "issues_found",
+    "created_at": "2026-03-14T09:02:02.000456Z",
+    "completed_at": "2026-03-14T09:03:03.000456Z",
+    "language": "en",
+    "policy": {
+      "verdicts": ["False", "Mostly False", "Mixed", "No Public Record"],
+      "confidence": ["low"],
+      "max_assessments": 20,
+      "max_verifications": 5,
+      "depth": "standard",
+      "max_citations": 0,
+      "suggest_edits": false
+    },
+    "summary": {
+      "claims_found": 2,
+      "claims_selected": 2,
+      "claim_limit": 20,
+      "claim_limit_exceeded": false,
+      "input_truncated": false,
+      "assessments": {
+        "completed": 2,
+        "failed": 0
+      },
+      "verifications": {
+        "planned": 1,
+        "completed": 1,
+        "failed": 0
+      },
+      "issues": 1,
+      "citations_found": null,
+      "citations_selected": null,
+      "citation_limit": null,
+      "citation_limit_exceeded": null,
+      "citation_checks": null,
+      "citation_issues": 0,
+      "citations_skipped": null
+    },
+    "credits": {
+      "charged": 12
+    },
+    "poll_after_seconds": null,
+    "issues": [
+      {
+        "claim_index": 0,
+        "claim": "The Eiffel Tower is in Berlin.",
+        "verified_claim": null,
+        "verdict": "No Public Record",
+        "confidence": "medium",
+        "source": "verification",
+        "verification_id": "984364bd",
+        "verification_status": "completed",
+        "verification_url": "https://lenz.io/api/v1/verifications/984364bd",
+        "url": "https://lenz.io/c/the-earth-is-round-984364bd",
+        "escalation": {
+          "matched_rules": ["verdict"],
+          "disposition": "planned"
+        },
+        "key_finding": "Finding for The Eiffel Tower is in Berlin.",
+        "rationale": null,
+        "suggested_rewrite": null,
+        "failure": null,
+        "suggested_edits": null
+      }
+    ],
+    "failures": [],
+    "citation_issues": [],
+    "citation_failures": [],
+    "failure": null,
+    "more_claims": [],
+    "more_claim_locations": [],
+    "more_citations": []
+  }
+}

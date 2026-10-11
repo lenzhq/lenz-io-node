@@ -66,7 +66,7 @@ describe("newer names", () => {
       null,
       "no_checkable_claim",
       "upstream_unavailable",
-      "framing_failed",
+      "internal",
     ]);
     expect(mixed.claims[2]!.failure).toMatchObject({
       failure_class: "upstream_unavailable",

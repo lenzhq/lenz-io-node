@@ -88,6 +88,7 @@ import {
   ReviewFailedError,
   ReviewTimeoutError,
   UPSTREAM_503_CODES,
+  failureWillNotSucceedAgain,
   mapResponseToError,
   type UsageErrorCode,
 } from "./errors.js";
@@ -2017,6 +2018,15 @@ function toWireNames(
   return out;
 }
 
+/** The body of an error response as JSON, read off a `clone()`; `null` when it is not JSON. */
+async function bodyJson(response: Response): Promise<unknown> {
+  try {
+    return await response.clone().json();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The server's machine-readable `code` from the response body, or `""`.
  *
@@ -2721,6 +2731,12 @@ export class Lenz {
    * fetched page when `text` is a single URL). The result's `language` is the
    * code they were written in; pass it on to `assess` or `verify` to keep a
    * chain in one language.
+   *
+   * When `text` is one URL and the page behind it cannot be read, the call
+   * throws a {@link LenzValidationError} (HTTP 422) with `code`
+   * `"page_unreadable"` and `fix` `"Paste the page's text instead."`; it is
+   * not retried. Work that failed on our side is a 502 with `code`
+   * `"internal"`.
    */
   async extract(input: ExtractInput, options?: RequestOptions): Promise<Result<ExtractedClaims>> {
     requireObject(input, "extract()", "input");
@@ -4700,6 +4716,14 @@ export class Lenz {
         let throwAtOnce = false;
         if (response.status === 429) {
           throwAtOnce = THROW_AT_ONCE_429_CODES.includes(await bodyErrorCode(response));
+          rethrowIfCallerAbort(signals);
+        } else if (response.status >= 500 && served === API_VERSION) {
+          // A 5xx of the current version whose body says sending it again
+          // cannot succeed (`retryable: false`, or the code `internal`, work
+          // that failed on our side): throw at once. A legacy-version or
+          // gateway 5xx (no version header) says nothing of the kind and keeps
+          // its ladder.
+          throwAtOnce = failureWillNotSucceedAgain(response.status, await bodyJson(response));
           rethrowIfCallerAbort(signals);
         }
         if (

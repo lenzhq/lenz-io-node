@@ -642,6 +642,9 @@ describe("contract", () => {
     // A long text: the checked rows, and the claims past them in
     // `more_claims`. Same fixture as the Python SDK.
     ["assess_more_claims.json", "AssessResponse"],
+    // CONSTRUCTED: a "No Public Record" row (medium, never high), then failed
+    // rows in the one failure vocabulary. Same fixture as the Python SDK.
+    ["assess_no_public_record.json", "AssessResponse"],
     ["verify_status_completed.json", "TaskStatus"],
     ["verify_status_failed.json", "TaskStatus"],
     // CONSTRUCTED for the "No Public Record" outcome (same keys as the bodies
@@ -651,6 +654,10 @@ describe("contract", () => {
     ["verify_status_no_public_record.json", "TaskStatus"],
     ["verify_status_failed_collapsed_code.json", "TaskStatus"],
     ["review_completed_no_public_record.json", "ReviewFull"],
+    // A quick check's "No Public Record" is an issue; a link the review could
+    // not read fails it as `page_unreadable`. Same fixtures as the Python SDK.
+    ["review_completed_quick_no_public_record.json", "ReviewFull"],
+    ["review_failed_page_unreadable.json", "ReviewFull"],
     // The `processing` body. Under the server's `exclude_unset` a completed
     // body has no `progress` key at all and this one has no `result` — the
     // fixtures are the two halves of that contract.

@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "body": {
+    "status": "error",
+    "claims": [
+      {
+        "claim": "The Halberd Ferry Company ran 61 sailings in its first winter.",
+        "language": "en",
+        "status": "failed",
+        "verdict": null,
+        "confidence": null,
+        "verification_url": null,
+        "rationale": null,
+        "dissent": null,
+        "searched_pages": [],
+        "suggested_rewrite": null,
+        "more_claims": [],
+        "failure": {
+          "code": "upstream_unavailable",
+          "detail": "The reviewers did not reach an answer.",
+          "hint": "The quick check did not settle this item; nothing was charged. Retry it, or run a deep check.",
+          "failure_class": "upstream_unavailable",
+          "retryable": true,
+          "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
+        }
+      }
+    ],
+    "failure": null,
+    "more_claims": []
+  }
+}

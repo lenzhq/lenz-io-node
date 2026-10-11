@@ -72,12 +72,12 @@
         "suggested_rewrite": null,
         "more_claims": [],
         "failure": {
-          "code": "framing_failed",
+          "code": "internal",
           "detail": "The input could not be read as a claim.",
           "hint": "This item could not be processed; retrying it as-is will not help. Send it rephrased as one factual statement; nothing was charged.",
-          "failure_class": "invalid_input",
+          "failure_class": "internal",
           "retryable": false,
-          "docs_url": "https://lenz.io/docs/errors#invalid-input"
+          "docs_url": "https://lenz.io/docs/errors#internal"
         }
       }
     ],

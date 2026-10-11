@@ -24,7 +24,8 @@ declare function value<T>(): T;
  *     events `*.cancelled`;
  *   - a completed deep check can read `verdict: "No Public Record"` (the new
  *     `VerificationVerdict`; `VerdictLabel` itself does not change, and
- *     `ReviewIssue.verdict` stays a `VerdictLabel`).
+ *     `ReviewIssue.verdict` stays a `VerdictLabel`); it also names a quick
+ *     check's `verdict` and the `verdicts` lists of a policy and a request.
  * The reading direction (a new value into an old type) is checked with
  * exactly those taken out: the literal `"cancelled"` from every property
  * named `status`, `"<noun>.cancelled"` from every property named `event`, and
@@ -33,6 +34,11 @@ declare function value<T>(): T;
  * Functions are left as they are (overloads stay intact): methods are checked
  * through real call forms below, where the returned value goes through it.
  */
+/** A list of verdict labels without the new one (a policy's or a request's `verdicts`). */
+type WithoutNoPublicRecord<V> = V extends readonly (infer E)[]
+  ? Exclude<E, "No Public Record">[]
+  : V;
+
 type WithoutNewValues<T> = T extends string | number | boolean | bigint | null | undefined
   ? T
   : T extends readonly unknown[]
@@ -47,7 +53,9 @@ type WithoutNewValues<T> = T extends string | number | boolean | bigint | null |
                 ? Exclude<T[K], `${string}.cancelled`>
                 : K extends "verdict"
                   ? Exclude<T[K], "No Public Record">
-                  : WithoutNewValues<T[K]>;
+                  : K extends "verdicts"
+                    ? WithoutNoPublicRecord<T[K]>
+                    : WithoutNewValues<T[K]>;
           }
         : T;
 
@@ -111,7 +119,8 @@ export const new_EscalationDisposition: New.EscalationDisposition =
 export const old_EscalationDisposition: Old.EscalationDisposition =
   value<New.EscalationDisposition>();
 export const new_EscalationPolicy: New.EscalationPolicy = value<Old.EscalationPolicy>();
-export const old_EscalationPolicy: Old.EscalationPolicy = value<New.EscalationPolicy>();
+export const old_EscalationPolicy: Old.EscalationPolicy =
+  value<WithoutNewValues<New.EscalationPolicy>>();
 export const new_CitationPair: New.CitationPair = value<Old.CitationPair>();
 export const old_CitationPair: Old.CitationPair = value<New.CitationPair>();
 export const new_Citecheck: New.Citecheck = value<Old.Citecheck>();
@@ -139,7 +148,8 @@ export const new_ReviewAndWaitOptions: New.ReviewAndWaitOptions =
   value<Omit<Old.ReviewAndWaitOptions, "onUpdate">>();
 export const old_ReviewAndWaitOptions: Old.ReviewAndWaitOptions = value<New.ReviewAndWaitOptions>();
 export const new_ReviewAssessment: New.ReviewAssessment = value<Old.ReviewAssessment>();
-export const old_ReviewAssessment: Old.ReviewAssessment = value<New.ReviewAssessment>();
+export const old_ReviewAssessment: Old.ReviewAssessment =
+  value<WithoutNewValues<New.ReviewAssessment>>();
 export const new_ReviewAssessmentCounts: New.ReviewAssessmentCounts =
   value<Old.ReviewAssessmentCounts>();
 export const old_ReviewAssessmentCounts: Old.ReviewAssessmentCounts =
@@ -193,7 +203,7 @@ export const old_ReviewFailureBlock: Old.ReviewFailureBlock = value<New.ReviewFa
 export const new_ReviewFull: New.ReviewFull = value<Old.ReviewFull>();
 export const old_ReviewFull: Old.ReviewFull = value<WithoutNewValues<New.ReviewFull>>();
 export const new_ReviewInput: New.ReviewInput = value<Old.ReviewInput>();
-export const old_ReviewInput: Old.ReviewInput = value<New.ReviewInput>();
+export const old_ReviewInput: Old.ReviewInput = value<WithoutNewValues<New.ReviewInput>>();
 export const new_ReviewIssue: New.ReviewIssue = value<Old.ReviewIssue>();
 export const old_ReviewIssue: Old.ReviewIssue = value<WithoutNewValues<New.ReviewIssue>>();
 export const new_ReviewIssues: New.ReviewIssues = value<Old.ReviewIssues>();

@@ -30,7 +30,9 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name.startsWith("account__oauth_") || name === "account__api_root") return "skip";
   if (name.startsWith("account__webhook_secret_")) return "skip"; // no SDK method reads it
   if (name === "verify__delete_200" || name === "account__ask_reset") return "skip"; // boolean
-  if (name.startsWith("assess__")) return [["AssessResponse", (c) => c.assess({ claim: "x" })]];
+  if (name.startsWith("assess__") || name.startsWith("failure_codes__assess_")) {
+    return [["AssessResponse", (c) => c.assess({ claim: "x" })]];
+  }
   if (name.startsWith("extract__")) {
     return [["ExtractedClaims", (c) => c.extract({ text: "x", locate: name.includes("locate") })]];
   }
@@ -89,7 +91,7 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name.startsWith("review__cancel_200")) {
     return [["ReviewFull", (c) => c.cancelReview(String(body["review_id"]))]];
   }
-  if (name.startsWith("review__get_")) {
+  if (name.startsWith("review__get_") || name.startsWith("failure_codes__review_")) {
     return body["view"] === "issues"
       ? [["ReviewIssues", (c) => c.getReview("r", { view: "issues" })]]
       : [["ReviewFull", (c) => c.getReview("r")]];
@@ -100,7 +102,9 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name.startsWith("citecheck__cancel_200")) {
     return [["Citecheck", (c) => c.cancelCitecheck(String(body["citecheck_id"]))]];
   }
-  if (name.startsWith("citecheck__get_")) return [["Citecheck", (c) => c.getCitecheck("c")]];
+  if (name.startsWith("citecheck__get_") || name.startsWith("failure_codes__citecheck_")) {
+    return [["Citecheck", (c) => c.getCitecheck("c")]];
+  }
   return undefined;
 }
 

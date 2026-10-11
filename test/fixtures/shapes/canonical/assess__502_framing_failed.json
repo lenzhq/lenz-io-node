@@ -2,6 +2,6 @@
   "status": 502,
   "body": {
     "detail": "Framing failed",
-    "code": "framing_failed"
+    "code": "internal"
   }
 }
