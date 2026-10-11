@@ -69,6 +69,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
   ExtractedEntity: new Set(["name", "type"]),
   ClaimLocation: new Set(["claim", "positions"]),
   Position: new Set(["start", "end", "text"]),
+  SearchedPage: new Set(["title", "url"]),
   AssessResponse: new Set([
     "status",
     "claims",
@@ -88,6 +89,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "verification_url",
     "rationale",
     "dissent",
+    "searched_pages",
     "language",
     "error_code",
     "candidate_claims",
@@ -424,6 +426,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "confidence",
     "rationale",
     "dissent",
+    "searched_pages",
     "verification_url",
     "error_code",
     "more_claims",
@@ -537,7 +540,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
     suggested_edits: "SuggestedEdits",
   },
   SuggestedEdits: { edits: "SuggestedEdit" },
-  ReviewAssessment: { failure: "ReviewFailureBlock" },
+  ReviewAssessment: { failure: "ReviewFailureBlock", searched_pages: "SearchedPage" },
   ReviewVerification: { entities: "ReviewEntity", failure: "ReviewFailureBlock" },
   ReviewWebhookPayload: { review: "ReviewFull" },
   ExtractedClaims: {
@@ -547,7 +550,7 @@ const NESTED: Record<string, Record<string, string | null>> = {
   },
   ClaimLocation: { positions: "Position" },
   AssessResponse: { claims: "AssessClaim", failure: "ReviewFailureBlock" },
-  AssessClaim: { failure: "ReviewFailureBlock" },
+  AssessClaim: { failure: "ReviewFailureBlock", searched_pages: "SearchedPage" },
   TaskStatus: {
     result: "Verification",
     claims: "CandidateClaim",
@@ -850,6 +853,23 @@ describe("contract", () => {
     // A response without the key (an older server) reads as none.
     const old = loadFixture("assess_single_claim.json") as unknown as AssessResponse;
     expect(old.more_claims ?? []).toEqual([]);
+  });
+
+  it("assess rows carry searched_pages, and rows from before it read as none", () => {
+    const rows = loadFixture("assess_claims_list.json")["claims"] as AssessClaim[];
+    expect(rows[0]!.searched_pages).toEqual([
+      { title: "Boiling point", url: "https://en.wikipedia.org/wiki/Boiling_point" },
+      {
+        title: "Phase transitions",
+        url: "https://openstax.org/books/chemistry-2e/pages/10-3-phase-transitions",
+      },
+    ]);
+    expect(rows[1]!.searched_pages).toHaveLength(1);
+    // A failed row carries an empty list.
+    for (const row of rows.slice(2)) expect(row.searched_pages).toEqual([]);
+    // A response stored before the API added the key reads as none.
+    const old = loadFixture("assess_single_claim.json") as unknown as AssessResponse;
+    for (const row of old.claims) expect(row.searched_pages ?? []).toEqual([]);
   });
 
   it("assess rows carry the reviewers' notes, and rows without them still fit", () => {

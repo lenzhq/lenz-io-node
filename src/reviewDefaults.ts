@@ -32,7 +32,8 @@ function withNull(v: unknown, key: string): unknown {
  * (`more_claim_locations`, each claim row's `positions`) read as `null`, and
  * so do the suggested edits (each claim row's and issue's `suggested_edits`;
  * `policy.suggest_edits` reads as `false`) and the quick check's rewrite
- * (each claim row's `assessment.suggested_rewrite`).
+ * (each claim row's `assessment.suggested_rewrite`); the quick check's pages
+ * (`assessment.searched_pages`) read as `[]`.
  * Keys the server sent are never touched. Returns a copy.
  */
 export function withReviewDefaults<T>(body: T, legacyAliases = true): T {
@@ -54,7 +55,11 @@ export function withReviewDefaults<T>(body: T, legacyAliases = true): T {
     b["claims"] = (b["claims"] as unknown[]).map((c) => {
       const row = withNull(withNull(c, "positions"), "suggested_edits");
       if (!isObject(row) || !isObject(row["assessment"])) return row;
-      return { ...row, assessment: withNull(row["assessment"], "suggested_rewrite") };
+      const assessment = {
+        ...(withNull(row["assessment"], "suggested_rewrite") as Record<string, unknown>),
+      };
+      assessment["searched_pages"] ??= [];
+      return { ...row, assessment };
     });
   }
   if (Array.isArray(b["issues"])) {
