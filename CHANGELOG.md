@@ -6,7 +6,7 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
-Release only after the Lenz API deploy that enables the "No Public Record" outcome.
+## [3.3.0] - 2026-10-11
 
 ### Added
 
