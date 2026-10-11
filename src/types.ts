@@ -564,8 +564,11 @@ export interface AssessClaim extends RawBody {
    */
   status?: "completed" | "failed" | (string & NonNullable<unknown>);
   /**
-   * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False", and
-   * `"Error"` on a failed row (kept for existing code: read `status`).
+   * "True" | "Mostly True" | "Mixed" | "Mostly False" | "False",
+   * `"No Public Record"` when the reviewers found no public record that
+   * would show the claim (`confidence` `"medium"` or `"low"`, no
+   * `suggested_rewrite`), and `"Error"` on a failed row (kept for existing
+   * code: read `status`).
    * On a client made with `legacyAliases: false`, a failed row's verdict is
    * `null`, as the API sends it (not in this type, so that code reading it
    * as a string keeps compiling: check `status` first).
@@ -582,9 +585,12 @@ export interface AssessClaim extends RawBody {
   confidence?: Confidence | (string & NonNullable<unknown>);
   /**
    * Why a failed row has no verdict: `code` (`no_checkable_claim`,
-   * `framing_failed`, `upstream_unavailable`, `timeout`, an open set),
-   * `detail`, `hint`, `failure_class`, `retryable`, `docs_url`. `null` on a
-   * row with a verdict. Fields the server did not send read `null`.
+   * `upstream_unavailable`, `internal`, an open set; resend a row when
+   * `retryable` is true), `detail`, `hint`, `failure_class`, `retryable`,
+   * `docs_url`. `null` on a row with a verdict. Fields the server did not
+   * send read `null`. A quick check whose reviewers did not reach an answer
+   * is a failed row (free, `upstream_unavailable`, retryable), never a
+   * `"No Public Record"` row.
    */
   failure?: ReviewFailureBlock | null;
   /**
@@ -1586,12 +1592,14 @@ export type VerdictLabel = "True" | "Mostly True" | "Mixed" | "Mostly False" | "
 export type ConfidenceBand = "low" | "medium" | "high";
 
 /**
- * A verdict as read on a verification or an assess row: one of the five
- * labels, or `"Error"` on a failed assess row. Fields typed with it also take
- * any other string (`Verdict | (string & {})`), so a value a later API adds
- * still reads.
+ * A verdict as read on an assess row or a review's quick check: one of the
+ * five labels, `"No Public Record"` (a completed quick check that found no
+ * public record that would show the claim: a `confidence` of `"medium"` or
+ * `"low"`, never `"high"`, and no score), or `"Error"` on a failed assess row
+ * (deprecated: read `status`). Fields typed with it also take any other string
+ * (`Verdict | (string & {})`), so a value a later API adds still reads.
  */
-export type Verdict = VerdictLabel | "Error";
+export type Verdict = VerificationVerdict | "Error";
 
 /**
  * A deep check's verdict: one of the five labels, or `"No Public Record"`, a
@@ -1658,7 +1666,8 @@ export type EscalationDisposition =
 
 /** The escalation policy as the review resolved it (defaults filled in). */
 export interface EscalationPolicy extends RawBody {
-  verdicts: VerdictLabel[];
+  /** Quick verdicts that get a deep check. The default list includes `"No Public Record"`. */
+  verdicts: VerificationVerdict[];
   confidence: ConfidenceBand[];
   max_verifications: number;
   max_assessments: number;
@@ -1805,7 +1814,8 @@ export interface ReviewResult extends RawBody {
 /** The quick check (`/assess`) on one claim. */
 export interface ReviewAssessment extends RawBody {
   status: "pending" | "running" | "completed" | "failed";
-  verdict: VerdictLabel | "Error" | null;
+  /** `"No Public Record"`: no score, `confidence` `"medium"` or `"low"`. */
+  verdict: VerificationVerdict | "Error" | null;
   confidence: ConfidenceBand | null;
   /** A reviewer's reasoning for the verdict, not sourced evidence. */
   rationale: string | null;
@@ -2249,9 +2259,10 @@ export interface ReviewInput {
   text: string;
   /**
    * Quick-check labels that get a deep check. Default
-   * `["False", "Mostly False", "Mixed"]`; `[]` means no label rule.
+   * `["False", "Mostly False", "Mixed", "No Public Record"]`; `[]` means no
+   * label rule.
    */
-  verdicts?: VerdictLabel[];
+  verdicts?: VerificationVerdict[];
   /** Quick-check confidence bands that get a deep check. Default `["low"]`; `[]` means no band rule. */
   confidence?: ConfidenceBand[];
   /**

@@ -140,6 +140,28 @@ const SERVER_DIFFERS: Record<string, string[]> = {
     "getReviewIssues.value.claims.*.assessment.hint",
     "reviewAndWait.value.claims.*.assessment.hint",
   ],
+  // One failure vocabulary (2026-10-11): work that failed on our side is
+  // `internal` where the original said `framing_failed` / `extraction_failed`.
+  // Its advice says so too, and the SDK no longer retries it.
+  assess__502_framing_failed: ["error.code", "error.fix"],
+  extract__502_extraction_failed: ["error.code", "error.fix"],
+  assess__list_mixed_rows: ["value.claims.3.error_code"],
+  // ... and /extract answers a link whose page cannot be read with a 422
+  // `page_unreadable` (a different error class) where the original said 502.
+  extract__url_fetch_502_unreadable: [
+    "error.class",
+    "error.name",
+    "error.message",
+    "error.cause_",
+    "error.fix",
+    "error.docUrl",
+    "error.statusCode",
+    "error.code",
+    "error.retryAfter",
+    "error.errors",
+  ],
+  // The label list in the sentence now names "No Public Record".
+  review__422_invalid_verdict_label: ["error.message", "error.cause_", "error.errors.0.msg"],
   // An extraction the server first read as not a claim, then found one in:
   // the original kept `not_a_claim`, the newer shape says `ready`.
   extract__not_a_claim_beside_claims: ["value.status"],

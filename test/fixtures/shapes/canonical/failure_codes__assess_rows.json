@@ -1,0 +1,66 @@
+{
+  "status": 200,
+  "body": {
+    "status": "ok",
+    "claims": [
+      {
+        "claim": "The EU AI Act took effect in March 2024.",
+        "language": "en",
+        "status": "completed",
+        "verdict": "True",
+        "confidence": "high",
+        "verification_url": null,
+        "rationale": null,
+        "dissent": null,
+        "searched_pages": [],
+        "suggested_rewrite": null,
+        "more_claims": [],
+        "failure": null
+      },
+      {
+        "claim": "Water boils at 100 C at sea level.",
+        "language": "en",
+        "status": "failed",
+        "verdict": null,
+        "confidence": null,
+        "verification_url": null,
+        "rationale": null,
+        "dissent": null,
+        "searched_pages": [],
+        "suggested_rewrite": null,
+        "more_claims": [],
+        "failure": {
+          "code": "upstream_unavailable",
+          "detail": "The check did not finish inside its time budget.",
+          "hint": "This item was not processed inside the call's time budget; nothing was charged. Send fewer items in one call, or send it again in a new call.",
+          "failure_class": "upstream_unavailable",
+          "retryable": true,
+          "docs_url": "https://lenz.io/docs/errors#upstream-unavailable"
+        }
+      },
+      {
+        "claim": "cannot frame",
+        "language": "en",
+        "status": "failed",
+        "verdict": null,
+        "confidence": null,
+        "verification_url": null,
+        "rationale": null,
+        "dissent": null,
+        "searched_pages": [],
+        "suggested_rewrite": null,
+        "more_claims": [],
+        "failure": {
+          "code": "internal",
+          "detail": "The input could not be read as a claim.",
+          "hint": "This item could not be processed; retrying it as-is will not help. Send it rephrased as one factual statement; nothing was charged.",
+          "failure_class": "internal",
+          "retryable": false,
+          "docs_url": "https://lenz.io/docs/errors#internal"
+        }
+      }
+    ],
+    "failure": null,
+    "more_claims": []
+  }
+}

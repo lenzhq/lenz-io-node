@@ -44,6 +44,43 @@ export interface LenzErrorContext {
  */
 const RETRYABLE_409_CODES: readonly string[] = ["verification_not_ready", "idempotency_conflict"];
 
+/** The boolean `retryable` a body states: its `failure` block's first, else its own. */
+function statedRetryable(body: Record<string, unknown> | null | undefined): boolean | null {
+  const failure = body?.["failure"];
+  if (failure && typeof failure === "object" && !Array.isArray(failure)) {
+    const stated = (failure as Record<string, unknown>)["retryable"];
+    if (typeof stated === "boolean") return stated;
+  }
+  const stated = body?.["retryable"];
+  return typeof stated === "boolean" ? stated : null;
+}
+
+/**
+ * A 5xx body for work that failed on our side (`code` `internal`). The generic
+ * 500 (`internal_error`) is another code and stays retryable.
+ */
+function isInternalFailure(
+  statusCode: number,
+  body: Record<string, unknown> | null | undefined,
+): boolean {
+  return statusCode >= 500 && statusCode < 600 && body?.["code"] === "internal";
+}
+
+/**
+ * Whether a 5xx answer says that sending the same request again cannot
+ * succeed: a body stating `retryable: false` (top level or in its `failure`
+ * block), or the code `internal`. The transport asks this of answers that
+ * name the current API version only; a legacy-version or gateway 5xx keeps
+ * being retried.
+ */
+export function failureWillNotSucceedAgain(statusCode: number, body: unknown): boolean {
+  if (statusCode < 500 || statusCode >= 600) return false;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  const stated = statedRetryable(b);
+  return stated !== null ? !stated : isInternalFailure(statusCode, b);
+}
+
 /**
  * `retryable` for an error built from a status and a body: a boolean the
  * body states (in its `failure` block, else at the top level) wins; else 429,
@@ -55,13 +92,11 @@ function deriveRetryable(
   body: Record<string, unknown> | null | undefined,
   code: string,
 ): boolean | null {
-  const failure = body?.["failure"];
-  if (failure && typeof failure === "object" && !Array.isArray(failure)) {
-    const stated = (failure as Record<string, unknown>)["retryable"];
-    if (typeof stated === "boolean") return stated;
-  }
-  const stated = body?.["retryable"];
-  if (typeof stated === "boolean") return stated;
+  const stated = statedRetryable(body);
+  if (stated !== null) return stated;
+  // Work that failed on our side (`internal`): the API's own description of
+  // that code is that sending the same request again will not help.
+  if (isInternalFailure(statusCode, body)) return false;
   if (statusCode === 429 || (statusCode >= 500 && statusCode < 600)) return true;
   // The code as sent too: on some endpoints the 2.x `code` reads "" here.
   const sentCode = typeof body?.["code"] === "string" ? (body["code"] as string) : "";
@@ -1051,6 +1086,19 @@ export function mapResponseToError(
           optNumber(parsed["retry_after_seconds"]) ??
           optNumber(parsed["retry_after"]),
       ) ?? 0;
+  }
+
+  if (statusCode === 422 && code === "page_unreadable") {
+    // /extract on a link whose page could not be read: the same link gives
+    // the same answer, and the body says what to send instead.
+    err.fix = optString(parsed["hint"]) || "Paste the page's text instead.";
+  } else if (statusCode >= 500 && statusCode < 600 && err.retryable === false) {
+    // The server said sending this again will not help (a 502 `internal`, or
+    // a body with `retryable: false`): not the generic "retry" advice.
+    err.fix =
+      optString(parsed["hint"]) ||
+      "This failed on our side and sending the same request again will not help. " +
+        "If it keeps happening, contact support (https://lenz.io/contact) with the request id.";
   }
 
   return err;

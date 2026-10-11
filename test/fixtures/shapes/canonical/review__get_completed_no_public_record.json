@@ -1,0 +1,163 @@
+{
+  "status": 200,
+  "body": {
+    "review_id": "6ee44e98",
+    "view": "full",
+    "status": "completed",
+    "outcome": "issues_found",
+    "created_at": "2026-03-14T09:02:02.000456Z",
+    "completed_at": "2026-03-14T09:03:03.000456Z",
+    "language": "en",
+    "policy": {
+      "verdicts": ["False", "Mostly False", "Mixed", "No Public Record"],
+      "confidence": ["low"],
+      "max_assessments": 20,
+      "max_verifications": 5,
+      "depth": "standard",
+      "max_citations": 0,
+      "suggest_edits": false
+    },
+    "summary": {
+      "claims_found": 2,
+      "claims_selected": 2,
+      "claim_limit": 20,
+      "claim_limit_exceeded": false,
+      "input_truncated": false,
+      "assessments": {
+        "completed": 2,
+        "failed": 0
+      },
+      "verifications": {
+        "planned": 1,
+        "completed": 1,
+        "failed": 0
+      },
+      "issues": 1,
+      "citations_found": null,
+      "citations_selected": null,
+      "citation_limit": null,
+      "citation_limit_exceeded": null,
+      "citation_checks": null,
+      "citation_issues": 0,
+      "citations_skipped": null
+    },
+    "credits": {
+      "charged": 12
+    },
+    "poll_after_seconds": null,
+    "issues": [
+      {
+        "claim_index": 0,
+        "claim": "The Eiffel Tower is in Berlin.",
+        "verified_claim": null,
+        "verdict": "No Public Record",
+        "confidence": "medium",
+        "source": "verification",
+        "verification_id": "2a9d4643",
+        "verification_status": "completed",
+        "verification_url": "https://lenz.io/api/v1/verifications/2a9d4643",
+        "url": "https://lenz.io/c/the-earth-is-round-2a9d4643",
+        "escalation": {
+          "matched_rules": ["verdict"],
+          "disposition": "planned"
+        },
+        "key_finding": "Finding for The Eiffel Tower is in Berlin.",
+        "rationale": null,
+        "suggested_rewrite": null,
+        "failure": null,
+        "suggested_edits": null
+      }
+    ],
+    "failures": [],
+    "citation_issues": [],
+    "citation_failures": [],
+    "claims": [
+      {
+        "index": 0,
+        "claim": "The Eiffel Tower is in Berlin.",
+        "positions": null,
+        "result": {
+          "verdict": "No Public Record",
+          "confidence": "medium",
+          "source": "verification",
+          "is_issue": true
+        },
+        "assessment": {
+          "status": "completed",
+          "verdict": "Mostly False",
+          "confidence": "medium",
+          "verification_url": null,
+          "rationale": null,
+          "dissent": null,
+          "searched_pages": [],
+          "suggested_rewrite": null,
+          "more_claims": [],
+          "failure": null
+        },
+        "escalation": {
+          "matched_rules": ["verdict"],
+          "disposition": "planned"
+        },
+        "verification": {
+          "status": "completed",
+          "content_status": "available",
+          "task_id": "ea06252e47d101c1226eba5de5890800",
+          "verification_id": "2a9d4643",
+          "claim": "The Eiffel Tower is in Berlin.",
+          "language": "en",
+          "visibility": "private",
+          "depth": "standard",
+          "domain": "",
+          "entities": [],
+          "verdict": "No Public Record",
+          "confidence": "medium",
+          "lenz_score": null,
+          "key_finding": "Finding for The Eiffel Tower is in Berlin.",
+          "executive_summary": "Summary for The Eiffel Tower is in Berlin.",
+          "suggested_rewrite": null,
+          "warnings": [],
+          "created_at": "2026-03-14T10:02:02.000456+00:00",
+          "completed_at": "2026-03-14T10:02:02.000456+00:00",
+          "verification_url": "https://lenz.io/api/v1/verifications/2a9d4643",
+          "url": "https://lenz.io/c/the-earth-is-round-2a9d4643",
+          "failure": null
+        },
+        "suggested_edits": null
+      },
+      {
+        "index": 1,
+        "claim": "Water boils at 100 C at sea level.",
+        "positions": null,
+        "result": {
+          "verdict": "True",
+          "confidence": "high",
+          "source": "assessment",
+          "is_issue": false
+        },
+        "assessment": {
+          "status": "completed",
+          "verdict": "True",
+          "confidence": "high",
+          "verification_url": null,
+          "rationale": null,
+          "dissent": null,
+          "searched_pages": [],
+          "suggested_rewrite": null,
+          "more_claims": [],
+          "failure": null
+        },
+        "escalation": {
+          "matched_rules": [],
+          "disposition": "not_selected"
+        },
+        "verification": null,
+        "suggested_edits": null
+      }
+    ],
+    "citations": [],
+    "failure": null,
+    "more_claims": [],
+    "more_claim_locations": [],
+    "more_citations": []
+  }
+}

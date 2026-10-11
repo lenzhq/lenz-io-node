@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "status": "ok",
+    "claims": [
+      {
+        "claim": "The Halberd Ferry Company ran 61 sailings in its first winter.",
+        "language": "en",
+        "status": "completed",
+        "verdict": "No Public Record",
+        "confidence": "medium",
+        "verification_url": null,
+        "rationale": "Nothing found records this.",
+        "dissent": null,
+        "searched_pages": [],
+        "suggested_rewrite": null,
+        "more_claims": [],
+        "failure": null
+      }
+    ],
+    "failure": null,
+    "more_claims": []
+  }
+}

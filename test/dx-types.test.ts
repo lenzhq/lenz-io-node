@@ -27,11 +27,19 @@ type Open = string & NonNullable<unknown>;
 
 describe("B6: verdict and confidence name their values", () => {
   it("Verdict, Confidence and Depth are the closed sets", () => {
-    expectTypeOf<Verdict>().toEqualTypeOf<VerdictLabel | "Error">();
+    expectTypeOf<Verdict>().toEqualTypeOf<VerdictLabel | "No Public Record" | "Error">();
     expectTypeOf<Confidence>().toEqualTypeOf<ConfidenceBand>();
     expectTypeOf<Depth>().toEqualTypeOf<"standard" | "low">();
-    const all: Verdict[] = ["True", "Mostly True", "Mixed", "Mostly False", "False", "Error"];
-    expect(all).toHaveLength(6);
+    const all: Verdict[] = [
+      "True",
+      "Mostly True",
+      "Mixed",
+      "Mostly False",
+      "False",
+      "No Public Record",
+      "Error",
+    ];
+    expect(all).toHaveLength(7);
   });
 
   it("the plain-string fields are the closed set plus any string", () => {
