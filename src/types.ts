@@ -205,8 +205,8 @@ export interface Verification extends RawBody, ResponseMeta {
   presumed_intent?: string;
   // Verdict block (flat)
   /**
-   * The five labels, or `"No Public Record"`: the sources found do not
-   * settle the claim, which does not make it false. A completed check with
+   * The five labels, or `"No Public Record"`: no public record would show
+   * this claim, so the sources found do not settle it. A completed check with
    * that verdict has `lenz_score: null` and a `confidence` band; see
    * {@link VerificationVerdict}, {@link isNoPublicRecord} and {@link hasScore}.
    */
@@ -569,6 +569,10 @@ export interface AssessClaim extends RawBody {
    * On a client made with `legacyAliases: false`, a failed row's verdict is
    * `null`, as the API sends it (not in this type, so that code reading it
    * as a string keeps compiling: check `status` first).
+   *
+   * @deprecated The `"Error"` value will be removed in a future major release
+   * (4.0). Read a failed row from `status === "failed"` and its `failure`
+   * block (`code`, `retryable`).
    */
   verdict?: Verdict | (string & NonNullable<unknown>);
   /**
