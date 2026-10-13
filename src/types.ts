@@ -2334,7 +2334,7 @@ export interface GetReviewOptions {
  * One statement and the source it cites, for `citecheck({ pairs })`:
  * `statement` (1 to 1,000 characters) and exactly one of `url` (http or
  * https), `doi` (the DOI alone, like `10.1038/nature12373`) and `cite` (a
- * legal authority by its citation).
+ * source named by its citation).
  *
  * Fields are camelCase (`citedTitle`, `citedAuthors`, `citedYear`,
  * `citedJournal`); the 2.x snake_case names still work and are deprecated.
@@ -2348,10 +2348,11 @@ export interface CitationPair {
   url?: string;
   doi?: string;
   /**
-   * A legal authority by its citation, alone: a US case (`372 U.S. 335`, a
-   * caption may precede it), a statute (`42 U.S.C. § 1983`), a regulation
-   * (`17 C.F.R. § 240.10b-5`) or an EU act (`Regulation (EU) 2016/679`). One
-   * authority per pair, else a 422 `invalid_cite`; a 422
+   * A source named by its citation, alone: a legal authority such as a US
+   * case (`372 U.S. 335`, a caption may precede it), a statute
+   * (`42 U.S.C. § 1983`), a regulation (`17 C.F.R. § 240.10b-5`) or an EU act
+   * (`Regulation (EU) 2016/679`), or a DOI, which is the same as `doi`. One
+   * citation per pair, else a 422 `invalid_cite`; a legal cite is a 422
    * `legal_citations_unavailable` while legal citations are not available.
    */
   cite?: string;
