@@ -2352,8 +2352,7 @@ export interface CitationPair {
    * case (`372 U.S. 335`, a caption may precede it), a statute
    * (`42 U.S.C. § 1983`), a regulation (`17 C.F.R. § 240.10b-5`) or an EU act
    * (`Regulation (EU) 2016/679`), or a DOI, which is the same as `doi`. One
-   * citation per pair, else a 422 `invalid_cite`; a legal cite is a 422
-   * `legal_citations_unavailable` while legal citations are not available.
+   * citation per pair, else a 422 `invalid_cite`.
    */
   cite?: string;
   /** Up to 3 excerpts the statement quotes from the source, each 15 to 500 characters and words of the statement. */
