@@ -115,6 +115,17 @@ describe("citecheck()", () => {
     expect(await sent({ pairs })).toEqual({ pairs });
   });
 
+  it("sends a legal cite pair as it is", async () => {
+    const pairs = [
+      {
+        statement: "A state must give a poor defendant a lawyer.",
+        cite: "Gideon v. Wainwright, 372 U.S. 335 (1963)",
+      },
+      { statement: "The statute gives a cause of action.", cite: "42 U.S.C. § 1983" },
+    ];
+    expect(await sent({ pairs })).toEqual({ pairs });
+  });
+
   it("a pair carries no language of its own", () => {
     // `language` is request-level only: the output language of the reasoning.
     // @ts-expect-error: CitationPair has no `language`.
