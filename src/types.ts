@@ -21,6 +21,23 @@
 
 import type { LenzError } from "./errors.js";
 
+export interface SuppliedSource {
+  /** Full text content of the source document. */
+  text: string;
+  /** Canonical source URL. */
+  url?: string;
+  /** DOI identifier (e.g. 10.1038/s41586-020-2649-2). */
+  doi?: string;
+  /** Legal citation string (case, statute, regulation). */
+  cite?: string;
+  /** Document title if known. */
+  title?: string;
+  /** Publication date (YYYY-MM-DD) if known. */
+  published_date?: string;
+  /** Alias for `published_date`. */
+  publishedDate?: string;
+}
+
 export interface Source extends RawBody {
   source_name?: string;
   title?: string;
@@ -38,7 +55,15 @@ export interface Source extends RawBody {
    */
   snippet_language?: string | null;
   date?: string;
+  /** Origin of the source: `"web"` (default) or `"supplied"`. */
+  origin?: "web" | "supplied";
 }
+
+/**
+ * An evidence item supporting or refuting a claim.
+ * Alias for {@link Source}.
+ */
+export interface Evidence extends Source {}
 
 export interface DebateSide extends RawBody {
   role?: string;
@@ -1183,6 +1208,10 @@ export interface VerifyInput {
    * for a "low" request served from cache.
    */
   depth?: "standard" | "low";
+  /** Caller-supplied source documents. */
+  supplied_sources?: SuppliedSource[];
+  /** Alias for `supplied_sources`. */
+  suppliedSources?: SuppliedSource[];
   /**
    * Send an `Idempotency-Key` so a retry after a network drop or a client
    * timeout replays the first response instead of running the call twice.
@@ -1196,6 +1225,8 @@ export interface VerifyInput {
    */
   idempotencyKey?: string;
 }
+
+export type VerifyOptions = VerifyInput;
 
 /**
  * Per-item shape for `verifyBatch`. All fields optional; the SDK accepts
@@ -1242,7 +1273,13 @@ export interface VerifyBatchItem {
   visibility?: "private" | "unlisted";
   /** Per-item "standard" | "low"; overrides the batch-wide default. */
   depth?: "standard" | "low";
+  /** Caller-supplied source documents for this claim item. */
+  supplied_sources?: SuppliedSource[];
+  /** Alias for `supplied_sources`. */
+  suppliedSources?: SuppliedSource[];
 }
+
+export type BatchClaimItem = VerifyBatchItem;
 
 export interface VerifyBatchInput {
   claims: VerifyBatchItem[];
@@ -1254,6 +1291,10 @@ export interface VerifyBatchInput {
   visibility?: "private" | "unlisted";
   /** Batch-wide "standard" | "low" default; per-item `depth` overrides. */
   depth?: "standard" | "low";
+  /** Batch-wide caller-supplied source documents. */
+  supplied_sources?: SuppliedSource[];
+  /** Alias for `supplied_sources`. */
+  suppliedSources?: SuppliedSource[];
   /**
    * Send an `Idempotency-Key` for the whole batch, so a retry after a network
    * drop or a client timeout replays the first receipt instead of starting
@@ -1268,6 +1309,8 @@ export interface VerifyBatchInput {
    */
   idempotencyKey?: string;
 }
+
+export type VerifyBatchOptions = VerifyBatchInput;
 
 export interface ExtractInput {
   text: string;
@@ -2321,7 +2364,13 @@ export interface ReviewInput {
    * reused across this client's own retries. Wins over `idempotency`.
    */
   idempotencyKey?: string;
+  /** Full-text source documents supplied by the caller. */
+  supplied_sources?: SuppliedSource[];
+  /** Alias for `supplied_sources`. */
+  suppliedSources?: SuppliedSource[];
 }
+
+export type ReviewOptions = ReviewInput;
 
 export interface GetReviewOptions {
   /** `"issues"` drops `claims[]`. Default `"full"`. */
@@ -2373,7 +2422,17 @@ export interface CitationPair {
   cited_year?: string;
   /** @deprecated Use `citedJournal`. Still sent as before; must equal `citedJournal` if both are given. */
   cited_journal?: string;
+  /** Full text content of the cited source. */
+  source_text?: string;
+  /** Publication date (YYYY-MM-DD) of the source, if known. */
+  published_date?: string;
+  /** Alias for `source_text`. */
+  sourceText?: string;
+  /** Alias for `published_date`. */
+  publishedDate?: string;
 }
+
+export type CitecheckPairInput = CitationPair;
 
 /** Send exactly one of `text` and `pairs`. */
 export interface CitecheckInput {
@@ -2411,7 +2470,13 @@ export interface CitecheckInput {
    * omitted, a random key is generated per call. Wins over `idempotency`.
    */
   idempotencyKey?: string;
+  /** Full-text source documents supplied by the caller. */
+  supplied_sources?: SuppliedSource[];
+  /** Alias for `supplied_sources`. */
+  suppliedSources?: SuppliedSource[];
 }
+
+export type CitecheckOptions = CitecheckInput;
 
 /** The `POST /citecheck` receipt. `status` is always `queued`. */
 export interface CitecheckStarted extends RawBody, ResponseMeta {
