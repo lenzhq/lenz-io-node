@@ -1900,15 +1900,76 @@ const CITATION_PAIR_ALIASES: Readonly<Record<string, string>> = {
   citedAuthors: "cited_authors",
   citedYear: "cited_year",
   citedJournal: "cited_journal",
+  sourceText: "source_text",
+  publishedDate: "published_date",
+};
+
+const SUPPLIED_SOURCE_ALIASES: Readonly<Record<string, string>> = {
+  publishedDate: "published_date",
+};
+
+const INPUT_SUPPLIED_SOURCES_ALIASES: Readonly<Record<string, string>> = {
+  suppliedSources: "supplied_sources",
 };
 
 /**
+ * Normalizes supplied_sources array for wire transmission, mapping camelCase
+ * publishedDate to published_date if present.
+ */
+function normalizeSuppliedSources(
+  sources: unknown,
+  where = "suppliedSources",
+  param = "suppliedSources",
+): unknown {
+  if (!Array.isArray(sources)) return sources;
+  return sources.map((s, i) => {
+    if (s === null || typeof s !== "object" || Array.isArray(s)) return s;
+    const item = s as Record<string, unknown>;
+    checkAliases(
+      item,
+      SUPPLIED_SOURCE_ALIASES,
+      `${where} suppliedSources[${i}]`,
+      undefinedIsAbsent,
+      `${param}[${i}]`,
+    );
+    return toWireNames(item, SUPPLIED_SOURCE_ALIASES);
+  });
+}
+
+function resolveSuppliedSources(
+  input: Record<string, unknown>,
+  where: string,
+  param = "suppliedSources",
+  itemParamPrefix = param,
+): unknown {
+  checkAliases(input, INPUT_SUPPLIED_SOURCES_ALIASES, where, undefinedIsAbsent, param);
+  const sources =
+    input["supplied_sources"] !== undefined ? input["supplied_sources"] : input["suppliedSources"];
+  if (sources === undefined || sources === null) return undefined;
+  return normalizeSuppliedSources(sources, where, itemParamPrefix);
+}
+
+/**
  * Equal for an alias pair: `Object.is` (so `NaN` equals `NaN`), with arrays
- * equal element by element, in order, at any depth.
+ * equal element by element, in order, and plain objects compared by their
+ * wire-normalized keys and values at any depth.
  */
 function sameAliasValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((v, i) => sameAliasValue(v, b[i]));
+  }
+  if (
+    Object.prototype.toString.call(a) === "[object Object]" &&
+    Object.prototype.toString.call(b) === "[object Object]"
+  ) {
+    const wa = toWireNames(a as Record<string, unknown>, SUPPLIED_SOURCE_ALIASES);
+    const wb = toWireNames(b as Record<string, unknown>, SUPPLIED_SOURCE_ALIASES);
+    const ka = Object.keys(wa).filter((k) => wa[k] !== undefined);
+    const kb = Object.keys(wb).filter((k) => wb[k] !== undefined);
+    return (
+      ka.length === kb.length &&
+      ka.every((k) => Object.hasOwn(wb, k) && sameAliasValue(wa[k], wb[k]))
+    );
   }
   return Object.is(a, b);
 }
@@ -2465,6 +2526,13 @@ function citecheckBody(input: CitecheckInput): Record<string, unknown> {
   if (input.language) body.language = input.language;
   if (input.webhookUrl !== undefined && input.webhookUrl !== null)
     body.webhook_url = input.webhookUrl;
+  const suppliedSources = resolveSuppliedSources(
+    input as unknown as Record<string, unknown>,
+    "citecheck()",
+  );
+  if (suppliedSources !== undefined) {
+    body.supplied_sources = suppliedSources;
+  }
   return body;
 }
 
@@ -2679,6 +2747,12 @@ export class Lenz {
         );
         const sourceUrl = batchItemValue(fields, "sourceUrl", "source_url");
         const webhookUrl = batchItemValue(fields, "webhookUrl", "webhook_url");
+        const suppliedSources = resolveSuppliedSources(
+          fields,
+          `verifyBatch() claims[${i}]`,
+          `claims[${i}]`,
+          `claims[${i}].suppliedSources`,
+        );
         const item: Record<string, unknown> = { text: c.claim || c.text };
         // Omitted when unset or empty, as on `verify`.
         if (sourceUrl) item.source_url = sourceUrl;
@@ -2688,6 +2762,9 @@ export class Lenz {
         if (c.language) item.language = c.language;
         if (c.visibility) item.visibility = c.visibility;
         if (c.depth) item.depth = c.depth;
+        if (suppliedSources !== undefined) {
+          item.supplied_sources = suppliedSources;
+        }
         return item;
       }),
     };
@@ -2697,6 +2774,13 @@ export class Lenz {
     if (input.language) body["language"] = input.language;
     if (input.visibility) body["visibility"] = input.visibility;
     if (input.depth) body["depth"] = input.depth;
+    const batchSuppliedSources = resolveSuppliedSources(
+      input as unknown as Record<string, unknown>,
+      "verifyBatch()",
+    );
+    if (batchSuppliedSources !== undefined) {
+      body["supplied_sources"] = batchSuppliedSources;
+    }
     // One key per call, reused across its own retries, so a retried batch
     // does not start (and charge for) its claims twice.
     const headers: Record<string, string> = {};
@@ -3122,6 +3206,13 @@ export class Lenz {
     // Sent only when asked, for the same reason.
     if (input.suggestEdits) escalate.suggest_edits = true;
     if (Object.keys(escalate).length > 0) body.escalate = escalate;
+    const suppliedSources = resolveSuppliedSources(
+      input as unknown as Record<string, unknown>,
+      "review()",
+    );
+    if (suppliedSources !== undefined) {
+      body.supplied_sources = suppliedSources;
+    }
     try {
       return settled(
         await this.request<ReviewStarted>({
@@ -4267,6 +4358,13 @@ export class Lenz {
     if (input.visibility) body.visibility = input.visibility;
     // Omit-when-empty: the server defaults to "standard".
     if (input.depth) body.depth = input.depth;
+    const suppliedSources = resolveSuppliedSources(
+      input as unknown as Record<string, unknown>,
+      "verify()",
+    );
+    if (suppliedSources !== undefined) {
+      body.supplied_sources = suppliedSources;
+    }
     // One key per call, reused across its own retries, so a network retry
     // does not start (and charge for) a second verification.
     const headers: Record<string, string> = {};
