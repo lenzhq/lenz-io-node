@@ -6,6 +6,12 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `reviewFile(file, options?)` and `reviewFileAndWait(file, options?)`: upload a `.docx` or `.pdf` document (`POST /api/v1/review/file`) as a `Blob`, `ArrayBuffer`, or `Uint8Array` (runtime-neutral, no `node:fs` dependency), with the same review escalation options as `review`. `ReviewStarted.kept` (`boolean | undefined`) reports whether the uploaded `.docx` was retained so an annotated `.docx` export preserves the original document's formatting.
+- `exportReview(reviewId, options?) -> Promise<Result<ReviewExport>>`: export an annotated document (`GET /api/v1/reviews/{reviewId}/export?format=docx`, defaulting `format` to `"docx"`) with Lenz's findings as Word comments and suggested edits as tracked changes. Exports `ReviewExport`, `ReviewExportFormat`, `ExportReviewOptions`, `ReviewFileOptions`, and `ReviewFileAndWaitOptions` from both entry points.
+- Upload and export error codes (`unsupported_file_type`, `invalid_file`, `encrypted_file`, `empty_file`, `no_readable_text`, `file_too_large`, `text_too_long`, `upload_limit`, `unsupported_format`, `nothing_to_mark`, `not_exportable`, `export_limit`, `export_failed`) mapped to their corresponding `LenzAPIError` subclasses and hints.
+
 ## [3.4.0] - 2026-10-13
 
 ### Added
