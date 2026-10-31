@@ -521,10 +521,11 @@ export interface RequestContext {
   legacyAliases?: boolean;
 }
 
-/** `/review`, `/citecheck` and their reads keep their own error envelope. */
+/** `/review`, `/review/file`, `/citecheck` and their reads keep their own error envelope. */
 function isReviewFamily(path: string): boolean {
   return (
     path === "/review" ||
+    path === "/review/file" ||
     path.startsWith("/reviews/") ||
     path === "/citecheck" ||
     path.startsWith("/citechecks/")

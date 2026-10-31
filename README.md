@@ -4,7 +4,7 @@ Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://
 
 **Six API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
 
-- `extract` — pull verifiable claims out of any text, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
+- `extract` — pull verifiable claims out of any text or a public web page, Google Doc, or YouTube URL, optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~15s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
 - `citecheck` — the citation check on its own: does each source a draft cites say what the draft says? Async.
@@ -180,6 +180,28 @@ default); the review keeps running, so read it later with
 `client.getReview(reviewId)`. Without waiting: `client.review(...)` returns
 `{ review_id }`, and `client.getReview(reviewId, { view: "issues" })` returns
 the review without its `claims`.
+
+**Reviewing document files (.docx, .pdf).** Instead of raw text, you can upload Word documents or PDFs directly using `reviewFile` and `reviewFileAndWait`. Pass a `Uint8Array`, `ArrayBuffer`, or `Blob`:
+
+```ts
+import { readFile, writeFile } from "node:fs/promises";
+
+// Submit and wait for a Word document or PDF:
+const docxBytes = await readFile("report.docx");
+const review = await client.reviewFileAndWait(docxBytes, { filename: "report.docx" });
+
+// Or submit without waiting and poll later:
+const pdfBytes = await readFile("report.pdf");
+const started = await client.reviewFile(pdfBytes, { filename: "report.pdf" });
+const completed = await client.waitForReview(started.review_id);
+```
+
+**Exporting annotated documents (.docx).** For reviews completed from a Word document (or text reviews where Word output is generated), export the annotated document (defaults to `.docx`) with Word comments and track changes for every flagged issue:
+
+```ts
+const doc = await client.exportReview(review.review_id);
+await writeFile(doc.filename ?? "annotated.docx", doc.data);
+```
 
 Credits: 1 per claim assessed, plus 10 (5 at `depth: "low"`) per deep check,
 plus 1 per checked citation;
@@ -362,7 +384,7 @@ work and are deprecated. A citation pair's own enumerable keys are read, as
 when it is serialized. Giving both spellings of a field with different values
 throws the local argument error (`LenzValidationError`) naming both before anything is sent.)
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. `text` can be prose or a single public `http(s)` URL (web page, Google Doc, or YouTube video). Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` in the options argument (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.

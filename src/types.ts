@@ -1313,6 +1313,10 @@ export interface VerifyBatchInput {
 export type VerifyBatchOptions = VerifyBatchInput;
 
 export interface ExtractInput {
+  /**
+   * The text to pull verifiable claims out of, or a single public `http(s)`
+   * URL to a web page, Google Doc, or YouTube video.
+   */
   text: string;
   /**
    * Language the claims are written in (ISO 639-1). Omit for English
@@ -2290,6 +2294,12 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
   review_id: string;
   status: "queued";
   /**
+   * For document reviews (`reviewFile`), `true` when the original `.docx`
+   * was stored and will be annotated in place on download, `false` for PDFs,
+   * zero-retention reviews, or text reviews.
+   */
+  kept?: boolean;
+  /**
    * `true` when a 409 `idempotency_conflict` that names the review settled
    * the call (the first submit with this key created it; `httpStatus` 409),
    * `false` on the 202 that accepted it. Non-enumerable, like `raw`.
@@ -2298,7 +2308,10 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
 }
 
 export interface ReviewInput {
-  /** The draft, up to 50,000 characters (longer text is cut), or one public http(s) URL. */
+  /**
+   * The draft, up to 50,000 characters (longer text is cut), or one public
+   * http(s) URL (web page, Google Doc, or YouTube video).
+   */
   text: string;
   /**
    * Quick-check labels that get a deep check. Default
@@ -2613,4 +2626,102 @@ export interface ReviewAndWaitOptions {
    * an abort. Per call only: `withOptions` does not take it.
    */
   cancelOnAbort?: boolean;
+}
+
+/** Options configuring how claims and citations are escalated for deep checks in `reviewFile`. */
+export interface ReviewEscalateOption {
+  verdicts?: VerificationVerdict[];
+  confidence?: ConfidenceBand[];
+  maxAssessments?: number;
+  maxVerifications?: number;
+  depth?: "standard" | "low";
+  maxCitations?: number;
+  suggestEdits?: boolean;
+}
+
+/** Options for submitting a document for review via `POST /api/v1/review/file`. */
+export interface ReviewFileOptions extends RequestOptions {
+  /**
+   * The filename of the document (e.g. `"report.docx"` or `"paper.pdf"`).
+   * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
+   * defaults to `(blob as File).name` if present.
+   */
+  filename?: string;
+  /** Output language of claims and rewrites (ISO 639-1, or `"auto"`). */
+  language?: string;
+  /** Escalation rules controlling quick-check and deep-check limits. */
+  escalate?: ReviewEscalateOption;
+  /** Quick-check labels that get a deep check. */
+  verdicts?: VerificationVerdict[];
+  /** Quick-check confidence bands that get a deep check. */
+  confidence?: ConfidenceBand[];
+  /** How many of the document's claims get a quick verdict (0-20). */
+  maxAssessments?: number;
+  /** The deep-check cap (0-20). */
+  maxVerifications?: number;
+  /** Depth of every deep check. Default `"standard"`. */
+  depth?: "standard" | "low";
+  /** Also check the document's first N citations (1-20). */
+  maxCitations?: number;
+  /** Return suggested edits for claims with rewrites. */
+  suggestEdits?: boolean;
+  /** Full-text source documents supplied by the caller. */
+  suppliedSources?: SuppliedSource[];
+  /** Alias for `suppliedSources`. */
+  supplied_sources?: SuppliedSource[];
+  /** Webhook URL for `review.completed` / `review.failed` notifications. */
+  webhookUrl?: string;
+  /** Applied to every deep check. Default `"private"`. */
+  visibility?: "private" | "unlisted";
+  /**
+   * Send an `Idempotency-Key` so a retry returns the first review instead
+   * of starting a second one. Defaults to `true`.
+   */
+  idempotency?: boolean;
+  /** Optional idempotency key to prevent duplicate processing on retries. */
+  idempotencyKey?: string;
+}
+
+/** Options for `reviewFileAndWait`. */
+export interface ReviewFileAndWaitOptions extends Omit<ReviewFileOptions, "webhookUrl"> {
+  /**
+   * Deadline for the wait in milliseconds. Default 600,000 ms (10 min).
+   */
+  timeoutMs?: number;
+  /**
+   * Progress callback called on intermediate updates.
+   */
+  onProgress?: (review: ReviewFull) => void;
+  /**
+   * Callback called with the full review on every poll whose body changed.
+   */
+  onUpdate?: (review: ReviewFull) => void;
+  /**
+   * Whether to cancel the review on the server if the wait times out.
+   */
+  cancelOnTimeout?: boolean;
+  /**
+   * Whether to cancel the review on the server when `signal` fires.
+   */
+  cancelOnAbort?: boolean;
+}
+
+export type ReviewExportFormat = "docx" | (string & Record<never, never>);
+
+export interface ExportReviewOptions extends RequestOptions {
+  /** Export file format. Default `"docx"`. */
+  format?: ReviewExportFormat;
+}
+
+export interface ReviewExport {
+  /** Raw binary bytes of the exported document. */
+  data: Uint8Array;
+  /** Suggested filename from Content-Disposition (e.g. `"report (checked by Lenz).docx"`). */
+  filename: string;
+  /** MIME type from Content-Type header. */
+  content_type: string;
+  /** Export format requested (e.g. `"docx"`). */
+  format: string;
+  /** `"original"` if the uploaded file was annotated in-place, `"rebuilt"` if synthesized from text, or `null`. */
+  source: string | null;
 }

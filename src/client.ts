@@ -114,6 +114,7 @@ import type {
   CitecheckAndWaitOptions,
   CitecheckInput,
   CitecheckStarted,
+  ExportReviewOptions,
   GetReviewOptions,
   GetStatusOptions,
   RelatedVerifications,
@@ -123,6 +124,9 @@ import type {
   ReviewInput,
   ReviewIssues,
   ReviewStarted,
+  ReviewExport,
+  ReviewFileOptions,
+  ReviewFileAndWaitOptions,
   SelectInput,
   TaskAccepted,
   TaskStatus,
@@ -442,6 +446,8 @@ interface SendOptions {
   method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
   path: string;
   json?: unknown;
+  body?: unknown;
+  responseType?: "json" | "bytes";
   query?: Record<string, string | number | boolean | undefined>;
   headers?: Record<string, string>;
   authRequired?: boolean;
@@ -674,7 +680,7 @@ function checkOptions(options: unknown, where: string, kind: CallKind): RequestO
     if (kind === "request") {
       throw argumentError(
         `${where}: cancelOnAbort is an option of one wait (wait, verifyAndWait, ` +
-          "verifyBatchAndWait, reviewAndWait, citecheckAndWait); pass it to the call.",
+          "verifyBatchAndWait, reviewAndWait, reviewFileAndWait, waitForReview, citecheckAndWait); pass it to the call.",
         "invalid_option",
         "cancelOnAbort",
       );
@@ -991,6 +997,62 @@ function startPage(page: number | undefined): number {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function hasControlChars(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function sanitizeContentDispositionFilename(filename: string, fallback: string): string {
+  // Reject NUL bytes, control characters (\x00-\x1f, \x7f)
+  if (hasControlChars(filename)) return fallback;
+  // Strip directory paths (/ and \)
+  const parts = filename.split(/[/\\]/);
+  const base = parts[parts.length - 1]?.trim() ?? "";
+  // Reject empty, '.', '..'
+  if (!base || base === "." || base === "..") return fallback;
+  return base;
+}
+
+function parseContentDispositionFilename(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  let parsed: string | null = null;
+  const matchRfc5987 = header.match(/filename\*=UTF-8''([^;\s]+)/i);
+  if (matchRfc5987 && matchRfc5987[1]) {
+    try {
+      parsed = decodeURIComponent(matchRfc5987[1]);
+    } catch {
+      // ignore decode failure and continue to other patterns
+    }
+  }
+  if (!parsed) {
+    const matchQuoted = header.match(/filename="([^"]+)"/i);
+    if (matchQuoted && matchQuoted[1]) {
+      parsed = matchQuoted[1];
+    }
+  }
+  if (!parsed) {
+    const matchBare = header.match(/filename=([^;\s]+)/i);
+    if (matchBare && matchBare[1]) {
+      parsed = matchBare[1];
+    }
+  }
+  if (parsed) {
+    return sanitizeContentDispositionFilename(parsed, fallback);
+  }
+  return fallback;
+}
+
+function isBinaryFileSource(val: unknown): val is Blob | ArrayBuffer | Uint8Array {
+  if (typeof SharedArrayBuffer !== "undefined" && val instanceof SharedArrayBuffer) return false;
+  if (typeof Blob !== "undefined" && val instanceof Blob) return true;
+  if (typeof ArrayBuffer !== "undefined" && val instanceof ArrayBuffer) return true;
+  if (typeof Uint8Array !== "undefined" && val instanceof Uint8Array) return true;
+  return false;
 }
 
 /** THIS citation check: its id, a known status, its three lists, its summary and credits. */
@@ -1470,7 +1532,7 @@ function bodyLost(
 const BODY_TEXT_MAX = 1000;
 
 /** Why an answer below 400 is not a Lenz answer. */
-type InvalidKind = "not_json" | "not_object" | "empty" | "redirect";
+type InvalidKind = "not_json" | "not_object" | "empty" | "redirect" | "not_docx";
 
 /** An answer below 400 that is not a Lenz answer: a redirect, or a 2xx that is not a JSON object. */
 function invalidResponse(
@@ -1500,6 +1562,10 @@ function invalidResponse(
       `The Lenz API never redirects; something between you and it did${
         response.headers.get("location") ? ` (to ${response.headers.get("location")})` : ""
       }. The redirect was not followed.`,
+    ],
+    not_docx: [
+      `${method} ${path} answered HTTP ${status} with an invalid .docx payload.`,
+      "Expected a .docx ZIP payload starting with PK\\x03\\x04 signature.",
     ],
   };
   const err = new LenzInvalidResponseError(
@@ -2796,8 +2862,9 @@ export class Lenz {
   }
 
   /**
-   * Pull the verifiable claims out of any text. Sync, free, capped at
-   * 1000 calls/account/day (shared across your API keys).
+   * Pull the verifiable claims out of any text, or out of a public web page,
+   * Google Doc, or YouTube video given its URL. Sync, free, capped at 1000
+   * calls/account/day (shared across your API keys).
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
    * `"market size and competitors"`. A focus can only SELECT from the claims
@@ -3159,8 +3226,9 @@ export class Lenz {
   // ── Review: the whole recipe in one call ──
 
   /**
-   * Start a review of a draft: Lenz reads its claims, gives each a quick
-   * verdict, and deep-checks the ones that look wrong or uncertain.
+   * Start a review of a draft (text or one public http(s) URL to a web page,
+   * Google Doc, YouTube video, or image): Lenz reads its claims, gives each a
+   * quick verdict, and deep-checks the ones that look wrong or uncertain.
    * Returns the receipt at once; read the review with `getReview`, wait with
    * `reviewAndWait`, or receive `review.completed` at your webhook.
    *
@@ -3579,6 +3647,331 @@ export class Lenz {
         );
       }),
     );
+  }
+
+  /**
+   * Upload a `.docx` or `.pdf` file to review.
+   *
+   * Takes a `Blob`, `ArrayBuffer`, or `Uint8Array`.
+   * When passing an `ArrayBuffer` or `Uint8Array` (or a `Blob` without a `name` property),
+   * provide `options.filename` (e.g. `{ filename: 'draft.docx' }`).
+   */
+  async reviewFile(
+    file: Blob | ArrayBuffer | Uint8Array,
+    options: ReviewFileOptions = {},
+  ): Promise<Result<ReviewStarted>> {
+    if (!isBinaryFileSource(file)) {
+      throw argumentError(
+        "file must be a Blob, ArrayBuffer, or Uint8Array.",
+        "invalid_argument",
+        "file",
+      );
+    }
+    const byteLength =
+      typeof Blob !== "undefined" && file instanceof Blob
+        ? file.size
+        : (file as ArrayBuffer | Uint8Array).byteLength;
+    if (byteLength === 0) {
+      throw argumentError("file must not be empty.", "invalid_option", "file");
+    }
+    requireObject(options, "reviewFile()", "options");
+    const namedFile =
+      typeof file === "object" && file !== null && "name" in file
+        ? (file as { name?: unknown }).name
+        : undefined;
+    const filename =
+      options.filename?.trim() || (typeof namedFile === "string" ? namedFile.trim() : "");
+    if (!filename) {
+      throw argumentError(
+        "filename is required when passing a Blob, Uint8Array, or ArrayBuffer without a name (e.g. { filename: 'draft.docx' }).",
+        "invalid_argument",
+        "filename",
+      );
+    }
+    const lower = filename.toLowerCase();
+    if (!lower.endsWith(".docx") && !lower.endsWith(".pdf")) {
+      throw argumentError(
+        "Only .docx and .pdf files are supported for file review.",
+        "invalid_argument",
+        "filename",
+      );
+    }
+
+    const form = new FormData();
+    let blob: Blob;
+    if (typeof Blob !== "undefined" && file instanceof Blob) {
+      blob = file;
+    } else {
+      const mime = filename.toLowerCase().endsWith(".pdf")
+        ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      blob = new Blob([file as any], { type: mime });
+    }
+    form.append("file", blob, filename);
+
+    if (options.language) {
+      form.append("language", options.language);
+    }
+    if (options.visibility) {
+      form.append("visibility", options.visibility);
+    }
+    if (options.webhookUrl !== undefined && options.webhookUrl !== null) {
+      form.append("webhook_url", options.webhookUrl);
+    }
+
+    const wireEsc: Record<string, unknown> = {};
+    if (options.escalate) {
+      requireObject(options.escalate, "reviewFile()", "options.escalate");
+      const esc = options.escalate;
+      if (esc.verdicts !== undefined) wireEsc.verdicts = esc.verdicts;
+      if (esc.confidence !== undefined) wireEsc.confidence = esc.confidence;
+      if (esc.maxAssessments !== undefined) wireEsc.max_assessments = esc.maxAssessments;
+      if (esc.maxVerifications !== undefined) wireEsc.max_verifications = esc.maxVerifications;
+      if (esc.depth !== undefined) wireEsc.depth = esc.depth;
+      if (esc.maxCitations !== undefined) wireEsc.max_citations = esc.maxCitations;
+      if (esc.suggestEdits !== undefined) wireEsc.suggest_edits = esc.suggestEdits;
+    }
+    // Flat convenience escalation options merge over or initialize wireEsc
+    if (options.verdicts !== undefined) wireEsc.verdicts = options.verdicts;
+    if (options.confidence !== undefined) wireEsc.confidence = options.confidence;
+    if (options.maxAssessments !== undefined) wireEsc.max_assessments = options.maxAssessments;
+    if (options.maxVerifications !== undefined)
+      wireEsc.max_verifications = options.maxVerifications;
+    if (options.depth !== undefined) wireEsc.depth = options.depth;
+    if (options.maxCitations !== undefined) {
+      wireEsc.max_citations = options.maxCitations;
+    }
+    if (options.suggestEdits !== undefined) {
+      wireEsc.suggest_edits = options.suggestEdits;
+    }
+    if (Object.keys(wireEsc).length > 0) {
+      form.append("escalate", JSON.stringify(wireEsc));
+    }
+    const suppliedSources = resolveSuppliedSources(
+      options as unknown as Record<string, unknown>,
+      "reviewFile()",
+    );
+    if (suppliedSources !== undefined) {
+      form.append("supplied_sources", JSON.stringify(suppliedSources));
+    }
+
+    const call = resolveCall(this, options, "reviewFile()");
+    const idempotencyKey = await jobIdempotencyKey(options);
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+
+    try {
+      const receipt = await this.request<ReviewStarted>({
+        method: "POST",
+        path: "/review/file",
+        body: form,
+        headers,
+        conflictReceipt: "review_id",
+        ...transportOf(call),
+      });
+      return asResult(settled(receipt, false));
+    } catch (exc) {
+      const reviewId = exc instanceof LenzError ? exc.body?.["review_id"] : undefined;
+      if (
+        exc instanceof LenzError &&
+        exc.statusCode === 409 &&
+        exc.code === "idempotency_conflict" &&
+        typeof reviewId === "string" &&
+        reviewId !== ""
+      ) {
+        return asResult(conflictReceipt({ review_id: reviewId, status: "queued" }, exc));
+      }
+      throw exc;
+    }
+  }
+
+  /**
+   * Upload a `.docx` or `.pdf` file to review and wait for completion.
+   */
+  async reviewFileAndWait(
+    file: Blob | ArrayBuffer | Uint8Array,
+    options: ReviewFileAndWaitOptions = {},
+  ): Promise<Result<ReviewFull>> {
+    requireObject(options, "reviewFileAndWait()", "options");
+    checkWaitBudget(options.timeoutMs, "reviewFileAndWait()");
+    const timeoutMs = options.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const onUpdate = options.onUpdate ?? options.onProgress;
+    const call = resolveCall(this, options, "reviewFileAndWait()", "submitWait");
+    const cancelOnAbort = options.cancelOnAbort === true;
+    const cancelOnTimeout = options.cancelOnTimeout === true;
+    const idempotencyKey = await jobIdempotencyKey(options);
+
+    return asResult(
+      await withIdempotencyKey(idempotencyKey, async () => {
+        const submitOptions: ReviewFileOptions = {
+          filename: options.filename,
+          language: options.language,
+          visibility: options.visibility,
+          escalate: options.escalate,
+          verdicts: options.verdicts,
+          confidence: options.confidence,
+          maxAssessments: options.maxAssessments,
+          maxVerifications: options.maxVerifications,
+          depth: options.depth,
+          maxCitations: options.maxCitations,
+          suggestEdits: options.suggestEdits,
+          suppliedSources: options.suppliedSources,
+          supplied_sources: options.supplied_sources,
+          idempotency: options.idempotency,
+          idempotencyKey,
+          signal: options.signal,
+          headers: options.headers,
+          maxRetries: options.maxRetries,
+        };
+        const started = await this.reviewFile(file, submitOptions);
+        const reviewId = acceptedId("review_id", started.review_id, started);
+        const deadline = Date.now() + timeoutMs;
+        const ended = { value: false };
+        try {
+          return await this._cancellingOnAbort(
+            cancelOnAbort,
+            call,
+            "review",
+            () => (ended.value ? [] : [reviewId]),
+            () =>
+              withAbortContext({ reviewId }, () =>
+                this._waitJob<ReviewFull>({
+                  deadline,
+                  path: `/reviews/${reviewId}`,
+                  id: ["review_id", reviewId],
+                  call,
+                  read: (transport) => this._getReview(reviewId, {}, transport),
+                  isBody: (body) => isReviewBody(body, reviewId),
+                  failed: (review) => new ReviewFailedError(withReviewDefaults(review)),
+                  timedOut: (last) => new ReviewTimeoutError(reviewId, last, timeoutMs),
+                  onUpdate,
+                  ended,
+                }),
+              ),
+          );
+        } catch (exc) {
+          if (cancelOnTimeout && exc instanceof ReviewTimeoutError && !ended.value) {
+            try {
+              await this.cancelReview(reviewId);
+            } catch {
+              // Best-effort cancel on timeout
+            }
+          }
+          throw exc;
+        }
+      }),
+    );
+  }
+
+  /**
+   * Poll an existing review until it reaches a terminal state.
+   *
+   * Useful when submitting a review via `review()` or `reviewFile()` without
+   * waiting, to poll to completion later.
+   *
+   * @param reviewId The id of the review to wait on.
+   * @param options Wait options controlling timeout, callbacks, and abort behavior.
+   */
+  async waitForReview(
+    reviewId: string,
+    options: WaitOptions & { onUpdate?: (review: ReviewFull) => void } = {},
+  ): Promise<Result<ReviewFull>> {
+    const id = requirePathId("waitForReview", "review_id", reviewId);
+    requireObject(options, "waitForReview()", "options");
+    checkWaitBudget(options.timeoutMs, "waitForReview()");
+    const timeoutMs = options.timeoutMs ?? REVIEW_DEFAULT_TIMEOUT_MS;
+    const onUpdate =
+      options.onUpdate ??
+      (options.onProgress
+        ? (review: ReviewFull) => {
+            (options.onProgress as (task: string, state: unknown) => void)(id, review);
+          }
+        : undefined);
+    const call = resolveCall(this, options, "waitForReview()", "wait");
+    const cancelOnAbort = options.cancelOnAbort === true;
+    const deadline = Date.now() + timeoutMs;
+    const ended = { value: false };
+
+    return asResult(
+      await this._cancellingOnAbort(
+        cancelOnAbort,
+        call,
+        "review",
+        () => (ended.value ? [] : [id]),
+        () =>
+          withAbortContext({ reviewId: id }, () =>
+            this._waitJob<ReviewFull>({
+              deadline,
+              path: `/reviews/${id}`,
+              id: ["review_id", id],
+              call,
+              read: (transport) => this._getReview(id, {}, transport),
+              isBody: (body) => isReviewBody(body, id),
+              failed: (review) => new ReviewFailedError(withReviewDefaults(review)),
+              timedOut: (last) => new ReviewTimeoutError(id, last, timeoutMs),
+              onUpdate,
+              ended,
+            }),
+          ),
+      ),
+    );
+  }
+
+  /**
+   * Export the annotated document for a completed review.
+   *
+   * Returns a {@link ReviewExport} containing `data` (bytes), `filename`, `content_type`,
+   * `format`, and optional `source`.
+   *
+   * Throws {@link LenzNotFoundError} (404) if review does not exist,
+   * {@link LenzAPIError} (409) if the review is not ready or has nothing to mark,
+   * {@link LenzGoneError} (410) if the review has expired.
+   */
+  async exportReview(
+    reviewId: string,
+    options: ExportReviewOptions = {},
+  ): Promise<Result<ReviewExport>> {
+    const id = requirePathId("exportReview", "review_id", reviewId);
+    requireObject(options, "exportReview()", "options");
+    const { format = "docx", ...reqOpts } = options;
+    if (typeof format !== "string" || !format.trim()) {
+      throw argumentError("format must be a non-empty string.", "invalid_argument", "format");
+    }
+    const fmt = format.trim().toLowerCase();
+    const call = resolveCall(this, reqOpts, "exportReview()");
+    const res = await this.request<{
+      data: Uint8Array;
+      response: Response;
+      headers: Headers;
+    }>({
+      method: "GET",
+      path: `/reviews/${id}/export`,
+      query: { format: fmt },
+      responseType: "bytes",
+      ...transportOf(call),
+    });
+
+    const fallbackFilename = `lenz-check-${id}.${fmt}`;
+    const cd = res.headers?.get?.("content-disposition") ?? null;
+    const filename = parseContentDispositionFilename(cd, fallbackFilename);
+    const content_type = (res.headers?.get?.("content-type") || "application/octet-stream")
+      .split(";")[0]!
+      .trim();
+    const rawSource = res.headers?.get?.("x-lenz-export-source")?.trim().toLowerCase() || null;
+    const source = rawSource || null;
+
+    const out: ReviewExport = {
+      data: res.data,
+      filename,
+      content_type,
+      format: fmt,
+      source,
+    };
+    defineMeta(out, {
+      status: res.response.status,
+      headers: headersOf(res.response),
+    });
+    return asResult(out);
   }
 
   /**
@@ -4549,7 +4942,12 @@ export class Lenz {
     const optionNames = new Set(optionHeaders.map(([name]) => name.toLowerCase()));
     const defaults: Record<string, string> = {};
     if (!optionNames.has("user-agent")) defaults["User-Agent"] = `lenz-io-node/${SDK_VERSION}`;
-    if (!optionNames.has("accept")) defaults["Accept"] = "application/json";
+    if (!optionNames.has("accept")) {
+      defaults["Accept"] =
+        opts.responseType === "bytes"
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document, */*"
+          : "application/json";
+    }
     for (const [name, value] of optionHeaders) defaults[name] = value;
     const headers: Record<string, string> = {
       ...defaults,
@@ -4593,7 +4991,11 @@ export class Lenz {
           response = await this.fetchImpl(url.toString(), {
             method: opts.method,
             headers,
-            body: opts.json !== undefined ? jsonBody(opts.json) : undefined,
+            body: (opts.body !== undefined
+              ? opts.body
+              : opts.json !== undefined
+                ? jsonBody(opts.json)
+                : undefined) as any,
             signal: controller.signal,
             // The API never redirects: a redirect is something in between,
             // reported (below), never followed with the key on it.
@@ -4711,6 +5113,56 @@ export class Lenz {
           // The attempt's timer stays armed until the body is read: headers
           // arriving is not the response arriving, and a body that stalls
           // after them must not hang the call.
+          if (opts.responseType === "bytes") {
+            if (response.status !== 200) {
+              clearTimeout(timer);
+              throw invalidResponse(opts.method, opts.path, response, "", undefined, "empty");
+            }
+            let buffer: ArrayBuffer;
+            try {
+              buffer = await response.arrayBuffer();
+            } catch (exc) {
+              rethrowIfCallerAbort(signals);
+              if (controller.signal.aborted) {
+                throw new LenzRequestTimeoutError(
+                  {
+                    message: `${opts.method} ${opts.path} timed out reading the response body`,
+                    cause: String(exc),
+                    fix: "Retry; if it persists, check the network between you and baseUrl.",
+                    docUrl: "https://lenz.io/docs/errors",
+                  },
+                  { cause: exc },
+                );
+              }
+              throw bodyLost(opts.method, opts.path, response, exc);
+            } finally {
+              clearTimeout(timer);
+            }
+            const bytes = new Uint8Array(buffer);
+            const fmt =
+              typeof opts.query?.format === "string"
+                ? opts.query.format.trim().toLowerCase()
+                : "docx";
+            if (
+              fmt === "docx" &&
+              (bytes.byteLength < 4 ||
+                bytes[0] !== 0x50 ||
+                bytes[1] !== 0x4b ||
+                bytes[2] !== 0x03 ||
+                bytes[3] !== 0x04)
+            ) {
+              throw invalidResponse(opts.method, opts.path, response, "", undefined, "not_docx");
+            }
+            return {
+              done: true,
+              value: {
+                data: bytes,
+                response,
+                headers: response.headers,
+              } as unknown as T,
+            };
+          }
+
           let text: string;
           try {
             text = await response.text();

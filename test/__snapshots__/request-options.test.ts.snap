@@ -64,6 +64,13 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
     "maxRetries",
     "headers",
   ],
+  "exportReview": [
+    "export_review",
+    "signal",
+    "timeoutMs",
+    "maxRetries",
+    "headers",
+  ],
   "extract": [
     "extract",
     "signal",
@@ -115,6 +122,19 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
   ],
   "reviewAndWait": [
     "review_and_wait",
+    "signal",
+    "maxRetries",
+    "headers",
+  ],
+  "reviewFile": [
+    "review_file",
+    "signal",
+    "timeoutMs",
+    "maxRetries",
+    "headers",
+  ],
+  "reviewFileAndWait": [
+    "review_file_and_wait",
     "signal",
     "maxRetries",
     "headers",
@@ -203,6 +223,11 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
   ],
   "wait": [
     "wait",
+    "signal",
+    "headers",
+  ],
+  "waitForReview": [
+    "wait_for_review",
     "signal",
     "headers",
   ],

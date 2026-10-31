@@ -153,11 +153,33 @@ const METHODS: Method[] = [
     run: (c, o) => c.review({ text: "draft", maxCitations: 2 }, o),
   },
   {
+    name: "reviewFile",
+    python: "review_file",
+    takes: "all",
+    replies: [{ status: 202, body: REVIEW_ACCEPTED }],
+    run: (c, o) => c.reviewFile(new Uint8Array([1, 2, 3]), { filename: "test.docx", ...o }),
+  },
+  {
     name: "getReview",
     python: "get_review",
     takes: "all",
     replies: [{ body: fixture("review_completed_issues.json") }],
     run: (c, o) => c.getReview(REVIEW_ID, { view: "issues", ...o }),
+  },
+  {
+    name: "exportReview",
+    python: "export_review",
+    takes: "all",
+    replies: [
+      {
+        bytes: new Uint8Array([80, 75, 3, 4]),
+        headers: {
+          "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "content-disposition": 'attachment; filename="report.docx"',
+        },
+      },
+    ],
+    run: (c, o) => c.exportReview(REVIEW_ID, o),
   },
   {
     name: "cancelReview",
@@ -300,6 +322,24 @@ const METHODS: Method[] = [
       { body: REVIEW_COMPLETED },
     ],
     run: (c, o) => c.reviewAndWait({ text: "draft", idempotencyKey: "k-r" }, { ...o }),
+  },
+  {
+    name: "reviewFileAndWait",
+    python: "review_file_and_wait",
+    takes: "submitWait",
+    replies: [
+      { status: 202, body: REVIEW_ACCEPTED },
+      { body: { ...REVIEW_VERIFYING, poll_after_seconds: 5 } },
+      { body: REVIEW_COMPLETED },
+    ],
+    run: (c, o) => c.reviewFileAndWait(new Uint8Array([1, 2, 3]), { filename: "test.docx", ...o }),
+  },
+  {
+    name: "waitForReview",
+    python: "wait_for_review",
+    takes: "wait",
+    replies: [{ body: { ...REVIEW_VERIFYING, poll_after_seconds: 5 } }, { body: REVIEW_COMPLETED }],
+    run: (c, o) => c.waitForReview(REVIEW_ID, { timeoutMs: 60_000, ...o }),
   },
   {
     name: "citecheckAndWait",

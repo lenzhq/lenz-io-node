@@ -12,6 +12,7 @@ import { VERSION } from "../../src/index.js";
 export interface Reply {
   status?: number;
   body?: unknown;
+  bytes?: Uint8Array | ArrayBuffer | Blob;
   headers?: Record<string, string>;
   /** Never answer: the request hangs until its signal aborts. */
   hang?: true;
@@ -70,6 +71,14 @@ export function recorder(replies: Iterable<Reply>, fallback?: Reply) {
         },
       });
       return Promise.resolve(new Response(body, { status: next.status ?? 200, headers }));
+    }
+    if (next.bytes !== undefined) {
+      return Promise.resolve(
+        new Response(next.bytes, {
+          status: next.status ?? 200,
+          headers,
+        }),
+      );
     }
     return Promise.resolve(
       new Response(next.body === undefined ? null : JSON.stringify(next.body), {
