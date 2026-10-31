@@ -1315,7 +1315,7 @@ export type VerifyBatchOptions = VerifyBatchInput;
 export interface ExtractInput {
   /**
    * The text to pull verifiable claims out of, or a single public `http(s)`
-   * URL to a web page, Google Doc, or YouTube video.
+   * URL to a web page, Google Doc, YouTube video, or direct image (.png, .jpg, .webp).
    */
   text: string;
   /**
@@ -2296,7 +2296,7 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
   /**
    * For document reviews (`reviewFile`), `true` when the original `.docx`
    * was stored and will be annotated in place on download, `false` for PDFs,
-   * zero-retention reviews, or text reviews.
+   * images, zero-retention reviews, or text reviews.
    */
   kept?: boolean;
   /**
@@ -2310,7 +2310,7 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
 export interface ReviewInput {
   /**
    * The draft, up to 50,000 characters (longer text is cut), or one public
-   * http(s) URL (web page, Google Doc, or YouTube video).
+   * http(s) URL (web page, Google Doc, YouTube video, or direct image (.png, .jpg, .webp)).
    */
   text: string;
   /**
@@ -2639,10 +2639,10 @@ export interface ReviewEscalateOption {
   suggestEdits?: boolean;
 }
 
-/** Options for submitting a document for review via `POST /api/v1/review/file`. */
+/** Options for submitting a document or image for review via `POST /api/v1/review/file`. */
 export interface ReviewFileOptions extends RequestOptions {
   /**
-   * The filename of the document (e.g. `"report.docx"` or `"paper.pdf"`).
+   * The filename of the document or image (e.g. `"report.docx"`, `"paper.pdf"`, or `"chart.png"`).
    * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
    * defaults to `(blob as File).name` if present.
    */

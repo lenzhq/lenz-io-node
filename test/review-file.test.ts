@@ -101,6 +101,48 @@ describe("reviewFile()", () => {
     await expect(client.reviewFile(new Uint8Array([1, 2, 3]))).rejects.toThrow(LenzValidationError);
   });
 
+  it("rejects unsupported file extensions with the updated error message", async () => {
+    const { fetch } = makeFetch([]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const err = await client
+      .reviewFile(new Uint8Array([1, 2, 3]), { filename: "notes.txt" })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(LenzValidationError);
+    expect(err.code).toBe("invalid_argument");
+    expect(err.param).toBe("filename");
+    expect(err.message).toBe(
+      "Unsupported file format for review: notes.txt. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.",
+    );
+  });
+
+  it("accepts supported image formats (.png, .jpg, .jpeg, .webp) with correct mime types", async () => {
+    const cases = [
+      { filename: "chart.png", mime: "image/png" },
+      { filename: "photo.jpg", mime: "image/jpeg" },
+      { filename: "photo.jpeg", mime: "image/jpeg" },
+      { filename: "graphic.webp", mime: "image/webp" },
+      { filename: "DOCUMENT.PDF", mime: "application/pdf" },
+      {
+        filename: "REPORT.DOCX",
+        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      },
+    ];
+
+    for (const { filename, mime } of cases) {
+      const { fetch, calls } = makeFetch([
+        { status: 202, body: { review_id: "r-img", status: "queued" } },
+      ]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const res = await client.reviewFile(new Uint8Array([1, 2, 3]), { filename });
+      expect(res).toEqual({ review_id: "r-img", status: "queued" });
+      expect(calls).toHaveLength(1);
+      const body = calls[0]!.init.body as FormData;
+      const file = body.get("file") as Blob;
+      expect(file).toBeDefined();
+      expect(file.type).toBe(mime);
+    }
+  });
+
   it("submits multipart/form-data with file and filename", async () => {
     const { fetch, calls } = makeFetch([
       { status: 202, body: { review_id: "r123", status: "queued" } },
@@ -401,6 +443,7 @@ describe("exportReview()", () => {
       { status: 422, code: "encrypted_file" },
       { status: 422, code: "empty_file" },
       { status: 422, code: "no_readable_text" },
+      { status: 422, code: "image_animated" },
       { status: 413, code: "file_too_large" },
       { status: 400, code: "unsupported_format" },
       { status: 409, code: "not_exportable" },

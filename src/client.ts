@@ -2863,7 +2863,7 @@ export class Lenz {
 
   /**
    * Pull the verifiable claims out of any text, or out of a public web page,
-   * Google Doc, or YouTube video given its URL. Sync, free, capped at 1000
+   * Google Doc, YouTube video, or direct image (.png, .jpg, .webp) given its URL. Sync, free, capped at 1000
    * calls/account/day (shared across your API keys).
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
@@ -3227,7 +3227,7 @@ export class Lenz {
 
   /**
    * Start a review of a draft (text or one public http(s) URL to a web page,
-   * Google Doc, YouTube video, or image): Lenz reads its claims, gives each a
+   * Google Doc, YouTube video, or direct image (.png, .jpg, .webp)): Lenz reads its claims, gives each a
    * quick verdict, and deep-checks the ones that look wrong or uncertain.
    * Returns the receipt at once; read the review with `getReview`, wait with
    * `reviewAndWait`, or receive `review.completed` at your webhook.
@@ -3650,7 +3650,7 @@ export class Lenz {
   }
 
   /**
-   * Upload a `.docx` or `.pdf` file to review.
+   * Upload a `.docx`, `.pdf`, or image (`.png`, `.jpg`, `.webp`) file to review.
    *
    * Takes a `Blob`, `ArrayBuffer`, or `Uint8Array`.
    * When passing an `ArrayBuffer` or `Uint8Array` (or a `Blob` without a `name` property),
@@ -3689,9 +3689,14 @@ export class Lenz {
       );
     }
     const lower = filename.toLowerCase();
-    if (!lower.endsWith(".docx") && !lower.endsWith(".pdf")) {
+    const isDocx = lower.endsWith(".docx");
+    const isPdf = lower.endsWith(".pdf");
+    const isPng = lower.endsWith(".png");
+    const isJpg = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+    const isWebp = lower.endsWith(".webp");
+    if (!isDocx && !isPdf && !isPng && !isJpg && !isWebp) {
       throw argumentError(
-        "Only .docx and .pdf files are supported for file review.",
+        `Unsupported file format for review: ${filename}. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.`,
         "invalid_argument",
         "filename",
       );
@@ -3702,9 +3707,16 @@ export class Lenz {
     if (typeof Blob !== "undefined" && file instanceof Blob) {
       blob = file;
     } else {
-      const mime = filename.toLowerCase().endsWith(".pdf")
-        ? "application/pdf"
-        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      let mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      if (isPdf) {
+        mime = "application/pdf";
+      } else if (isPng) {
+        mime = "image/png";
+      } else if (isJpg) {
+        mime = "image/jpeg";
+      } else if (isWebp) {
+        mime = "image/webp";
+      }
       blob = new Blob([file as any], { type: mime });
     }
     form.append("file", blob, filename);
@@ -3786,7 +3798,7 @@ export class Lenz {
   }
 
   /**
-   * Upload a `.docx` or `.pdf` file to review and wait for completion.
+   * Upload a `.docx`, `.pdf`, or image (`.png`, `.jpg`, `.webp`) file to review and wait for completion.
    */
   async reviewFileAndWait(
     file: Blob | ArrayBuffer | Uint8Array,
