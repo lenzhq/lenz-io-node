@@ -42,7 +42,11 @@ export interface LenzErrorContext {
  * the run is still going (`verification_not_ready`) or the first request
  * with this `Idempotency-Key` is still in flight (`idempotency_conflict`).
  */
-const RETRYABLE_409_CODES: readonly string[] = ["verification_not_ready", "idempotency_conflict"];
+const RETRYABLE_409_CODES: readonly string[] = [
+  "verification_not_ready",
+  "idempotency_conflict",
+  "not_ready",
+];
 
 /** The boolean `retryable` a body states: its `failure` block's first, else its own. */
 function statedRetryable(body: Record<string, unknown> | null | undefined): boolean | null {
@@ -929,7 +933,10 @@ export function mapResponseToError(
     Object.prototype.hasOwnProperty.call(VERIFICATION_409_CODES, codeForClass)
   ) {
     entry = VERIFICATION_409_CODES[codeForClass]!;
-  } else if (statusCode === 410 && codeForClass === "purged") {
+  } else if (
+    statusCode === 410 &&
+    (codeForClass === "purged" || codeForClass === "gone" || codeForClass === "review_expired")
+  ) {
     entry = GONE_410;
   } else if (statusCode === 503 && UPSTREAM_503_CODES.includes(codeForClass)) {
     entry = {
