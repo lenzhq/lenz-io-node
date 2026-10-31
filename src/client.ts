@@ -2863,7 +2863,7 @@ export class Lenz {
 
   /**
    * Pull the verifiable claims out of any text, or out of a public web page,
-   * Google Doc, YouTube video, or direct image (.png, .jpg, .webp) given its URL. Sync, free, capped at 1000
+   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp) given its URL. Sync, free, capped at 1000
    * calls/account/day (shared across your API keys).
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
@@ -3227,7 +3227,7 @@ export class Lenz {
 
   /**
    * Start a review of a draft (text or one public http(s) URL to a web page,
-   * Google Doc, YouTube video, or direct image (.png, .jpg, .webp)): Lenz reads its claims, gives each a
+   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)): Lenz reads its claims, gives each a
    * quick verdict, and deep-checks the ones that look wrong or uncertain.
    * Returns the receipt at once; read the review with `getReview`, wait with
    * `reviewAndWait`, or receive `review.completed` at your webhook.

@@ -1315,7 +1315,7 @@ export type VerifyBatchOptions = VerifyBatchInput;
 export interface ExtractInput {
   /**
    * The text to pull verifiable claims out of, or a single public `http(s)`
-   * URL to a web page, Google Doc, YouTube video, or direct image (.png, .jpg, .webp).
+   * URL to a web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp).
    */
   text: string;
   /**
@@ -2310,7 +2310,7 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
 export interface ReviewInput {
   /**
    * The draft, up to 50,000 characters (longer text is cut), or one public
-   * http(s) URL (web page, Google Doc, YouTube video, or direct image (.png, .jpg, .webp)).
+   * http(s) URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)).
    */
   text: string;
   /**
