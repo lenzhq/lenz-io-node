@@ -1379,6 +1379,39 @@ export interface ExtractInput {
   idempotencyKey?: string;
 }
 
+/** Options for extracting claims from a document or image via `POST /api/v1/extract/file`. */
+export interface ExtractFileOptions extends RequestOptions {
+  /**
+   * The filename of the document or image (e.g. `"report.docx"`, `"paper.pdf"`, or `"chart.png"`).
+   * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
+   * defaults to `(blob as File).name` if present.
+   */
+  filename?: string;
+  /**
+   * Return extracted claims in the target language (ISO 639-1, e.g. `"de"`, or `"auto"`).
+   * Omit for `"auto"` (the document's own language).
+   */
+  language?: string;
+  /**
+   * Narrow the result to the claims this focus describes (at most 300 characters).
+   */
+  focus?: string;
+  /**
+   * When `true`, return only claims traced back to the document with passage text
+   * (`positions[i].text`, with `start`/`end` as `null`).
+   */
+  locate?: boolean;
+  /**
+   * Send an `Idempotency-Key` so a retry after a timeout or network drop replays
+   * the first response instead of consuming another unit of the daily cap. Defaults to `true`.
+   */
+  idempotency?: boolean;
+  /**
+   * Pin your own `Idempotency-Key` header. Wins over `idempotency`.
+   */
+  idempotencyKey?: string;
+}
+
 export interface AssessInput {
   /**
    * The claim to check. If it contains several atomic claims, each is

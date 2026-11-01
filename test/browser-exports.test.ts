@@ -10,6 +10,7 @@ import type {
   CancelResult,
   CertificateTimestamped,
   CitecheckCancelled,
+  ExtractFileOptions,
   ReviewCancelled,
   ReviewCompleted,
   ReviewEvent,
@@ -46,6 +47,11 @@ describe("index.browser type re-exports", () => {
   it("names VerifyBatchItem", () => {
     const item: VerifyBatchItem = { claim: "a", sourceUrl: "https://s.example/p" };
     expect(item.claim).toBe("a");
+  });
+
+  it("names ExtractFileOptions", () => {
+    const opts: ExtractFileOptions = { filename: "doc.pdf", focus: "sales", locate: true };
+    expect(opts.filename).toBe("doc.pdf");
   });
 });
 

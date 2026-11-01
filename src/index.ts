@@ -199,6 +199,7 @@ export type {
   CoverageStatus,
   DebateSide,
   EntityRef,
+  ExtractFileOptions,
   ExtractInput,
   ExtractStatus,
   ExtractedClaim,
