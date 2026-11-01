@@ -1389,7 +1389,7 @@ export interface ExtractFileOptions extends RequestOptions {
   filename?: string;
   /**
    * Return extracted claims in the target language (ISO 639-1, e.g. `"de"`, or `"auto"`).
-   * Omit for English.
+   * Omit for `"auto"` (the document's own language).
    */
   language?: string;
   /**

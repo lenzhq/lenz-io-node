@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { Lenz, LenzValidationError } from "../src/index.js";
+import { Lenz, LenzRateLimitError, LenzValidationError } from "../src/index.js";
 
 interface FetchCall {
   url: string;
@@ -85,17 +85,6 @@ describe("extractFile()", () => {
       expect(err.code).toBe("invalid_option");
       expect(err.param).toBe("file");
       expect(err.message).toBe("extractFile(): file is empty (0 bytes).");
-    });
-
-    it("rejects files larger than 20 MB with LenzValidationError", async () => {
-      const { fetch } = makeFetch([]);
-      const client = new Lenz({ apiKey: "lenz_t", fetch });
-      const huge = new Uint8Array(20 * 1024 * 1024 + 1);
-      const err = await client.extractFile(huge, { filename: "test.pdf" }).catch((e) => e);
-      expect(err).toBeInstanceOf(LenzValidationError);
-      expect(err.code).toBe("invalid_option");
-      expect(err.param).toBe("file");
-      expect(err.message).toContain("20 MB");
     });
 
     it("rejects missing filename for Uint8Array with LenzValidationError", async () => {
@@ -303,15 +292,28 @@ describe("extractFile()", () => {
       expect(body.get("locate")).toBe("false");
     });
 
-    it("omits locate when locate is undefined", async () => {
-      const { fetch, calls } = makeFetch([{ status: 200, body: SAMPLE_CLAIMS }]);
+    it("omits locate when locate is undefined or non-boolean", async () => {
+      const { fetch, calls } = makeFetch([
+        { status: 200, body: SAMPLE_CLAIMS },
+        { status: 200, body: SAMPLE_CLAIMS },
+      ]);
       const client = new Lenz({ apiKey: "lenz_t", fetch });
       await client.extractFile(new Uint8Array([1, 2, 3]), {
         filename: "test.pdf",
       });
-      expect(calls).toHaveLength(1);
-      const body = calls[0]!.init.body as FormData;
-      expect(body.get("locate")).toBeNull();
+      await client.extractFile(new Uint8Array([1, 2, 3]), {
+        filename: "test.pdf",
+        language: null as unknown as string,
+        focus: null as unknown as string,
+        locate: null as unknown as boolean,
+      });
+      expect(calls).toHaveLength(2);
+      const body0 = calls[0]!.init.body as FormData;
+      expect(body0.get("locate")).toBeNull();
+      const body1 = calls[1]!.init.body as FormData;
+      expect(body1.get("language")).toBeNull();
+      expect(body1.get("focus")).toBeNull();
+      expect(body1.get("locate")).toBeNull();
     });
   });
 
@@ -351,7 +353,7 @@ describe("extractFile()", () => {
   });
 
   describe("response normalization and locate", () => {
-    it("normalizes locations when locate is true", async () => {
+    it("normalizes locations with start/end null when locate is true", async () => {
       const responseWithLocations = {
         status: "ready",
         claim: "Revenue grew 20%.",
@@ -359,6 +361,7 @@ describe("extractFile()", () => {
           {
             claim: "Revenue grew 20%.",
             text: "Revenue grew 20%.",
+            positions: [{ start: null, end: null, text: "Revenue grew 20%." }],
           },
         ],
         identified_claims: ["Revenue grew 20%."],
@@ -366,7 +369,7 @@ describe("extractFile()", () => {
         locations: [
           {
             claim: "Revenue grew 20%.",
-            positions: [{ start: 10, end: 27, text: "Revenue grew 20%." }],
+            positions: [{ start: null, end: null, text: "Revenue grew 20%." }],
           },
         ],
       };
@@ -377,8 +380,9 @@ describe("extractFile()", () => {
         locate: true,
       });
       expect(res.locations).toBeDefined();
-      expect(res.locations?.[0]?.positions?.[0]?.start).toBe(10);
-      expect(res.locations?.[0]?.positions?.[0]?.end).toBe(27);
+      expect(res.locations?.[0]?.positions?.[0]?.start).toBeNull();
+      expect(res.locations?.[0]?.positions?.[0]?.end).toBeNull();
+      expect(res.locations?.[0]?.positions?.[0]?.text).toBe("Revenue grew 20%.");
     });
   });
 
@@ -389,7 +393,14 @@ describe("extractFile()", () => {
           status: 422,
           body: {
             code: "invalid_file",
-            message: "The uploaded file could not be parsed.",
+            detail: "The uploaded file could not be parsed.",
+            errors: [
+              {
+                loc: ["file"],
+                msg: "The uploaded file could not be parsed.",
+                type: "invalid_file",
+              },
+            ],
           },
         },
       ]);
@@ -402,13 +413,54 @@ describe("extractFile()", () => {
       expect(err.statusCode).toBe(422);
     });
 
-    it("maps 422 upload_limit error to LenzValidationError", async () => {
+    it("preserves validation_error and unsupported_language codes on 422", async () => {
       const { fetch } = makeFetch([
         {
           status: 422,
           body: {
+            code: "validation_error",
+            detail: "focus is at most 300 characters.",
+            errors: [
+              { loc: ["focus"], msg: "focus is at most 300 characters.", type: "value_error" },
+            ],
+          },
+        },
+        {
+          status: 422,
+          body: {
+            code: "unsupported_language",
+            detail: "Unsupported language 'xx'.",
+            errors: [
+              {
+                loc: ["language"],
+                msg: "Unsupported language 'xx'.",
+                type: "unsupported_language",
+              },
+            ],
+          },
+        },
+      ]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
+      const err1 = await client
+        .extractFile(new Uint8Array([1, 2, 3]), { filename: "test.pdf", focus: "x".repeat(301) })
+        .catch((e) => e);
+      expect(err1).toBeInstanceOf(LenzValidationError);
+      expect(err1.code).toBe("validation_error");
+
+      const err2 = await client
+        .extractFile(new Uint8Array([1, 2, 3]), { filename: "test.pdf", language: "xx" })
+        .catch((e) => e);
+      expect(err2).toBeInstanceOf(LenzValidationError);
+      expect(err2.code).toBe("unsupported_language");
+    });
+
+    it("maps 429 upload_limit error to LenzRateLimitError", async () => {
+      const { fetch } = makeFetch([
+        {
+          status: 429,
+          body: {
             code: "upload_limit",
-            message: "Daily upload limit reached.",
+            detail: "Daily upload limit reached.",
           },
         },
       ]);
@@ -416,9 +468,9 @@ describe("extractFile()", () => {
       const err = await client
         .extractFile(new Uint8Array([1, 2, 3]), { filename: "test.pdf" })
         .catch((e) => e);
-      expect(err).toBeInstanceOf(LenzValidationError);
+      expect(err).toBeInstanceOf(LenzRateLimitError);
       expect(err.code).toBe("upload_limit");
-      expect(err.statusCode).toBe(422);
+      expect(err.statusCode).toBe(429);
     });
   });
 });

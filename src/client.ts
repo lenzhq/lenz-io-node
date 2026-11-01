@@ -1056,12 +1056,10 @@ function isBinaryFileSource(val: unknown): val is Blob | ArrayBuffer | Uint8Arra
   return false;
 }
 
-const MAX_UPLOAD_FILE_SIZE_BYTES = 20 * 1024 * 1024;
-
 /**
  * Validates a binary upload source (`Blob | ArrayBuffer | Uint8Array`), checks
- * size limits (non-empty, <= 20 MB), resolves filename and MIME type, and returns
- * the `uploadBlob` and `filename`.
+ * that it is non-empty, resolves filename and MIME type, and returns the
+ * `uploadBlob` and `filename`.
  */
 function resolveUpload(
   file: Blob | ArrayBuffer | Uint8Array,
@@ -1084,13 +1082,6 @@ function resolveUpload(
       methodName === "reviewFile()"
         ? "file must not be empty."
         : `${methodName}: file is empty (0 bytes).`,
-      "invalid_option",
-      "file",
-    );
-  }
-  if (byteLength > MAX_UPLOAD_FILE_SIZE_BYTES) {
-    throw argumentError(
-      `${methodName}: file size (${byteLength} bytes) exceeds the 20 MB limit.`,
       "invalid_option",
       "file",
     );
@@ -3015,14 +3006,15 @@ export class Lenz {
 
   /**
    * Pull the verifiable claims out of a `.docx`, `.pdf`, or image (`.png`,
-   * `.jpg`, `.webp`) file. Sync, free, capped at 1000 calls/account/day.
+   * `.jpg`, `.webp`) file (up to 10 MB). Sync, free, capped at 1000 calls/account/day.
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
    * `"market size and competitors"`. A focus can only SELECT from the claims
    * the extractor found — see {@link ExtractFileOptions.focus}.
    *
    * Pass `locate: true` to keep only the claims traced back to the document,
-   * with where the document makes each one in `locations`.
+   * with where the document makes each one in `locations` (`positions[i].text`
+   * carries the passage; `start` and `end` are `null`).
    */
   async extractFile(
     file: Blob | ArrayBuffer | Uint8Array,
@@ -3034,13 +3026,13 @@ export class Lenz {
 
     const form = new FormData();
     form.append("file", uploadBlob, filename);
-    if (options.language !== undefined && options.language !== "") {
+    if (options.language) {
       form.append("language", options.language);
     }
-    if (options.focus !== undefined && options.focus !== "") {
+    if (options.focus) {
       form.append("focus", options.focus);
     }
-    if (options.locate !== undefined) {
+    if (typeof options.locate === "boolean") {
       form.append("locate", options.locate ? "true" : "false");
     }
 
