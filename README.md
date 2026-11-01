@@ -387,6 +387,7 @@ when it is serialized. Giving both spellings of a field with different values
 throws the local argument error (`LenzValidationError`) naming both before anything is sent.)
 
 - **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. `text` can be prose or a single public `http(s)` URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)). Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
+- **`client.extractFile(file, options)`** → `ExtractedClaims`. Free, capped at 1000/account/day. Upload a Word document (`.docx`), PDF (`.pdf`), or standalone image (`.png`, `.jpg`, `.webp`) as a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File`. Accepts `filename` (required when passing a raw buffer or nameless Blob), `language`, `focus`, and `locate`. Shares the same 150s default timeout floor and options as `extract`.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` in the options argument (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
@@ -1422,6 +1423,27 @@ statement (where `text` is `null`: the row carries the statement).
 `"not_a_claim"`). Each claim's `positions` is `null` when `locate` was not set
 or when the claims could not be located, in which case the list is returned
 unfiltered. `locate` defaults to `false`.
+
+### Extracting from document files (.docx, .pdf) and standalone images (.png, .jpg, .webp)
+
+Instead of raw text or a URL, you can extract verifiable claims directly from Word documents, PDFs, or standalone images using `extractFile`:
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const pdfBytes = await readFile("quarterly-report.pdf");
+const out = await client.extractFile(pdfBytes, {
+  filename: "quarterly-report.pdf",
+  focus: "financial highlights and margins",
+  locate: true,
+});
+
+for (const c of out.claims ?? []) {
+  console.log(c.claim);
+}
+```
+
+Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File`. `filename` is required unless passing a `File` with a name. Supported formats are `.docx`, `.pdf`, `.png`, `.jpg`, `.jpeg`, and `.webp`.
 
 ## Multi-language output
 

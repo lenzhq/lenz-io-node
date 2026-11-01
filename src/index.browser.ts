@@ -161,6 +161,7 @@ export type {
   SuggestedEdits,
   DebateSide,
   EntityRef,
+  ExtractFileOptions,
   ExtractInput,
   ExtractStatus,
   ExtractedClaim,

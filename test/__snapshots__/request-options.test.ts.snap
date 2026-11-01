@@ -78,6 +78,13 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
     "maxRetries",
     "headers",
   ],
+  "extractFile": [
+    "extract_file",
+    "signal",
+    "timeoutMs",
+    "maxRetries",
+    "headers",
+  ],
   "getCitecheck": [
     "get_citecheck",
     "signal",

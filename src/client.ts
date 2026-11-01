@@ -103,6 +103,7 @@ import type {
   CancelResult,
   BatchItemResult,
   Certificate,
+  ExtractFileOptions,
   ExtractInput,
   ExtractedClaims,
   LibraryItem,
@@ -1053,6 +1054,93 @@ function isBinaryFileSource(val: unknown): val is Blob | ArrayBuffer | Uint8Arra
   if (typeof ArrayBuffer !== "undefined" && val instanceof ArrayBuffer) return true;
   if (typeof Uint8Array !== "undefined" && val instanceof Uint8Array) return true;
   return false;
+}
+
+const MAX_UPLOAD_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Validates a binary upload source (`Blob | ArrayBuffer | Uint8Array`), checks
+ * size limits (non-empty, <= 20 MB), resolves filename and MIME type, and returns
+ * the `uploadBlob` and `filename`.
+ */
+function resolveUpload(
+  file: Blob | ArrayBuffer | Uint8Array,
+  filenameOption: string | undefined,
+  methodName: string,
+): { uploadBlob: Blob; filename: string } {
+  if (!isBinaryFileSource(file)) {
+    throw argumentError(
+      "file must be a Blob, ArrayBuffer, or Uint8Array.",
+      "invalid_argument",
+      "file",
+    );
+  }
+  const byteLength =
+    typeof Blob !== "undefined" && file instanceof Blob
+      ? file.size
+      : (file as ArrayBuffer | Uint8Array).byteLength;
+  if (byteLength === 0) {
+    throw argumentError(
+      methodName === "reviewFile()"
+        ? "file must not be empty."
+        : `${methodName}: file is empty (0 bytes).`,
+      "invalid_option",
+      "file",
+    );
+  }
+  if (byteLength > MAX_UPLOAD_FILE_SIZE_BYTES) {
+    throw argumentError(
+      `${methodName}: file size (${byteLength} bytes) exceeds the 20 MB limit.`,
+      "invalid_option",
+      "file",
+    );
+  }
+  const namedFile =
+    typeof file === "object" && file !== null && "name" in file
+      ? (file as { name?: unknown }).name
+      : undefined;
+  const filename =
+    filenameOption?.trim() || (typeof namedFile === "string" ? namedFile.trim() : "");
+  if (!filename) {
+    throw argumentError(
+      "filename is required when passing a Blob, Uint8Array, or ArrayBuffer without a name (e.g. { filename: 'draft.docx' }).",
+      "invalid_argument",
+      "filename",
+    );
+  }
+  const lower = filename.toLowerCase();
+  const isDocx = lower.endsWith(".docx");
+  const isPdf = lower.endsWith(".pdf");
+  const isPng = lower.endsWith(".png");
+  const isJpg = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+  const isWebp = lower.endsWith(".webp");
+  if (!isDocx && !isPdf && !isPng && !isJpg && !isWebp) {
+    const action = methodName === "extractFile()" ? "extraction" : "review";
+    throw argumentError(
+      `Unsupported file format for ${action}: ${filename}. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.`,
+      "invalid_argument",
+      "filename",
+    );
+  }
+
+  let uploadBlob: Blob;
+  if (typeof Blob !== "undefined" && file instanceof Blob) {
+    uploadBlob = file;
+  } else {
+    let mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (isPdf) {
+      mime = "application/pdf";
+    } else if (isPng) {
+      mime = "image/png";
+    } else if (isJpg) {
+      mime = "image/jpeg";
+    } else if (isWebp) {
+      mime = "image/webp";
+    }
+    uploadBlob = new Blob([file as any], { type: mime });
+  }
+
+  return { uploadBlob, filename };
 }
 
 /** THIS citation check: its id, a known status, its three lists, its summary and credits. */
@@ -2926,6 +3014,53 @@ export class Lenz {
   }
 
   /**
+   * Pull the verifiable claims out of a `.docx`, `.pdf`, or image (`.png`,
+   * `.jpg`, `.webp`) file. Sync, free, capped at 1000 calls/account/day.
+   *
+   * Pass `focus` to narrow the result to the claims you care about, e.g.
+   * `"market size and competitors"`. A focus can only SELECT from the claims
+   * the extractor found — see {@link ExtractFileOptions.focus}.
+   *
+   * Pass `locate: true` to keep only the claims traced back to the document,
+   * with where the document makes each one in `locations`.
+   */
+  async extractFile(
+    file: Blob | ArrayBuffer | Uint8Array,
+    options: ExtractFileOptions = {},
+  ): Promise<Result<ExtractedClaims>> {
+    requireObject(options, "extractFile()", "options");
+    const call = resolveCall(this, options, "extractFile()");
+    const { uploadBlob, filename } = resolveUpload(file, options.filename, "extractFile()");
+
+    const form = new FormData();
+    form.append("file", uploadBlob, filename);
+    if (options.language !== undefined && options.language !== "") {
+      form.append("language", options.language);
+    }
+    if (options.focus !== undefined && options.focus !== "") {
+      form.append("focus", options.focus);
+    }
+    if (options.locate !== undefined) {
+      form.append("locate", options.locate ? "true" : "false");
+    }
+
+    const idempotencyKey = await callIdempotencyKey(options);
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+
+    const out = await this.request<ExtractedClaims>({
+      method: "POST",
+      path: "/extract/file",
+      body: form,
+      headers,
+      ...transportOf(call),
+      timeoutMs:
+        call.timeoutMs ?? this.copyTimeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
+    });
+    return asResult(aliased(this, (b) => normalizeExtract(b, options.locate), out));
+  }
+
+  /**
    * Fast 3-model panel verdict. Sync, ~15s for one claim. Two forms:
    *
    * - `assess({ claim })` — one text; returns one entry per claim found in
@@ -3660,66 +3795,11 @@ export class Lenz {
     file: Blob | ArrayBuffer | Uint8Array,
     options: ReviewFileOptions = {},
   ): Promise<Result<ReviewStarted>> {
-    if (!isBinaryFileSource(file)) {
-      throw argumentError(
-        "file must be a Blob, ArrayBuffer, or Uint8Array.",
-        "invalid_argument",
-        "file",
-      );
-    }
-    const byteLength =
-      typeof Blob !== "undefined" && file instanceof Blob
-        ? file.size
-        : (file as ArrayBuffer | Uint8Array).byteLength;
-    if (byteLength === 0) {
-      throw argumentError("file must not be empty.", "invalid_option", "file");
-    }
     requireObject(options, "reviewFile()", "options");
-    const namedFile =
-      typeof file === "object" && file !== null && "name" in file
-        ? (file as { name?: unknown }).name
-        : undefined;
-    const filename =
-      options.filename?.trim() || (typeof namedFile === "string" ? namedFile.trim() : "");
-    if (!filename) {
-      throw argumentError(
-        "filename is required when passing a Blob, Uint8Array, or ArrayBuffer without a name (e.g. { filename: 'draft.docx' }).",
-        "invalid_argument",
-        "filename",
-      );
-    }
-    const lower = filename.toLowerCase();
-    const isDocx = lower.endsWith(".docx");
-    const isPdf = lower.endsWith(".pdf");
-    const isPng = lower.endsWith(".png");
-    const isJpg = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
-    const isWebp = lower.endsWith(".webp");
-    if (!isDocx && !isPdf && !isPng && !isJpg && !isWebp) {
-      throw argumentError(
-        `Unsupported file format for review: ${filename}. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.`,
-        "invalid_argument",
-        "filename",
-      );
-    }
+    const { uploadBlob, filename } = resolveUpload(file, options.filename, "reviewFile()");
 
     const form = new FormData();
-    let blob: Blob;
-    if (typeof Blob !== "undefined" && file instanceof Blob) {
-      blob = file;
-    } else {
-      let mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      if (isPdf) {
-        mime = "application/pdf";
-      } else if (isPng) {
-        mime = "image/png";
-      } else if (isJpg) {
-        mime = "image/jpeg";
-      } else if (isWebp) {
-        mime = "image/webp";
-      }
-      blob = new Blob([file as any], { type: mime });
-    }
-    form.append("file", blob, filename);
+    form.append("file", uploadBlob, filename);
 
     if (options.language) {
       form.append("language", options.language);

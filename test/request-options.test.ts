@@ -111,6 +111,13 @@ const METHODS: Method[] = [
     run: (c, o) => c.extract({ text: "x", focus: "f" }, o),
   },
   {
+    name: "extractFile",
+    python: "extract_file",
+    takes: "all",
+    replies: [{ body: { claims: [], status: "not_a_claim" } }],
+    run: (c, o) => c.extractFile(new Uint8Array([1, 2, 3]), { filename: "report.pdf", ...o }),
+  },
+  {
     name: "assess",
     python: "assess",
     takes: "all",
