@@ -1448,9 +1448,9 @@ Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File` (up to 1
 ## Multi-language output
 
 The Lenz API returns prose fields (atomic claim, executive summary, debate, panel
-reasoning) in any of 12 languages. Pass `language:` on `verify`, `verifyAndWait`,
+reasoning) in any of 13 languages. Pass `language:` on `verify`, `verifyAndWait`,
 `verifyBatch`, `assess`, `extract`, or `ask.send`. Verdict labels stay English
-regardless of language. On `extract`, `language` and `focus` are independent —
+regardless of language. Serbian (`sr`) is answered in the Latin script. On `extract`, `language` and `focus` are independent —
 a focus written in any language selects claims emitted in `language`.
 
 ```ts
