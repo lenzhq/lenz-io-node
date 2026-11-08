@@ -1,12 +1,12 @@
 /**
  * Public Lenz client — the ergonomic top-level surface.
  *
- * Multi-language SDK convention (12 languages):
+ * Multi-language SDK convention (13 languages):
  * - Request methods (verify, assess, extract, ask.send, …) take
  *   `language?: string`. Omit the field (or pass empty string) for
  *   English (default) — the SDK then omits the key from the request
  *   body, preserving byte-identical wire format for existing English
- *   callers. Set `language: "es"` (or any of the 12 supported codes)
+ *   callers. Set `language: "es"` (or any of the 13 supported codes)
  *   to receive prose fields in that language. `assess`, `verify`,
  *   `verifyAndWait`, `review`, `reviewAndWait`, `extract` and `ask.send` also take
  *   `language: "auto"`: the answer comes back in the language of the submitted
@@ -3086,7 +3086,7 @@ export class Lenz {
    * escalate low-confidence rows to `verifyBatchAndWait`; the endpoints
    * share a result cache server-side.
    *
-   * Pass `language: "es"` (or any of the 12 supported codes) to receive
+   * Pass `language: "es"` (or any of the 13 supported codes) to receive
    * the claim text in that language. Verdict labels stay English. Pass
    * `language: "auto"` to receive the answer in the language of the
    * submitted text; with a `claims` list, one language is chosen for the
