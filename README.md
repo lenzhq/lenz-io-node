@@ -1,6 +1,6 @@
 # lenz-io
 
-Official Node SDK for the [Lenz Fact Checking API for AI Product Teams](https://lenz.io/developers).
+Official Node SDK for the [Lenz Fact-Checking API](https://lenz.io/developers) — check the facts, figures, and citations in your work.
 
 **Six API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
 
