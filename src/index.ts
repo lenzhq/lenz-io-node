@@ -3,10 +3,10 @@
  *
  *     npm install lenz-io
  *
- * Check the facts, figures, and citations in your work. Six API calls: `extract`, `assess`,
- * `verify` and `ask` form a research-depth ladder (find claims, judge them
- * fast, prove them deep, follow up); `review` runs it on a whole draft and
- * `citecheck` checks a draft's citations on their own.
+ * Check the facts, figures, and citations in your work. Six API calls:
+ * `extract`, `assess`, `verify` and `ask` form a research-depth ladder (find
+ * claims, judge them fast, prove them deep, follow up); `review` runs it on a
+ * whole draft and `citecheck` checks a draft's citations on their own.
  *
  * ```ts
  * import { Lenz, type AssessClaim } from 'lenz-io';
