@@ -1,12 +1,12 @@
 /**
- * Official Node SDK for the Lenz Fact Checking API for AI Product Teams.
+ * Official Node SDK for the Lenz Fact-Checking API.
  *
  *     npm install lenz-io
  *
- * The fact-check API for AI products. Six API calls: `extract`, `assess`,
- * `verify` and `ask` form a research-depth ladder (find claims, judge them
- * fast, prove them deep, follow up); `review` runs it on a whole draft and
- * `citecheck` checks a draft's citations on their own.
+ * Check the facts, figures, and citations in your work. Six API calls:
+ * `extract`, `assess`, `verify` and `ask` form a research-depth ladder (find
+ * claims, judge them fast, prove them deep, follow up); `review` runs it on a
+ * whole draft and `citecheck` checks a draft's citations on their own.
  *
  * ```ts
  * import { Lenz, type AssessClaim } from 'lenz-io';
