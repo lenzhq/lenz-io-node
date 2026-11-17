@@ -1,5 +1,5 @@
 /**
- * Official Node SDK for the Lenz Fact-Checking API.
+ * Official Node SDK for the Lenz Accuracy Verification API.
  *
  *     npm install lenz-io
  *
