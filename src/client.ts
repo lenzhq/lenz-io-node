@@ -179,8 +179,9 @@ const ASSESS_TIMEOUT_MS = 100_000;
  * the call. 150s leaves room above the slowest.
  */
 const EXTRACT_TIMEOUT_MS = 150_000;
+const AUDIO_EXTRACT_TIMEOUT_MS = 240_000;
 /**
- * Floor on the per-call timeout for media uploads (image and audio files) and document URL inputs.
+ * Floor on the per-call timeout for media uploads (image files) and document URL inputs.
  */
 const URL_TIMEOUT_FLOOR_MS = 90_000;
 /** Default deadline for `wait`, `verifyAndWait` and `verifyBatchAndWait`. */
@@ -3070,14 +3071,23 @@ export class Lenz {
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
+    const lowerFn = filename.toLowerCase();
+    const isAudio =
+      uploadBlob.type.startsWith("audio/") ||
+      lowerFn.endsWith(".mp3") ||
+      lowerFn.endsWith(".m4a") ||
+      lowerFn.endsWith(".wav") ||
+      lowerFn.endsWith(".ogg") ||
+      lowerFn.endsWith(".webm");
+    const extractFloorMs = isAudio ? AUDIO_EXTRACT_TIMEOUT_MS : EXTRACT_TIMEOUT_MS;
+
     const out = await this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract/file",
       body: form,
       headers,
       ...transportOf(call),
-      timeoutMs:
-        call.timeoutMs ?? this.copyTimeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
+      timeoutMs: call.timeoutMs ?? this.copyTimeoutMs ?? Math.max(this.timeoutMs, extractFloorMs),
     });
     return asResult(aliased(this, (b) => normalizeExtract(b, options.locate), out));
   }
@@ -3875,19 +3885,20 @@ export class Lenz {
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
     const lowerFn = filename.toLowerCase();
-    const isMedia =
-      uploadBlob.type.startsWith("image/") ||
+    const isAudio =
       uploadBlob.type.startsWith("audio/") ||
-      lowerFn.endsWith(".png") ||
-      lowerFn.endsWith(".jpg") ||
-      lowerFn.endsWith(".jpeg") ||
-      lowerFn.endsWith(".webp") ||
       lowerFn.endsWith(".mp3") ||
       lowerFn.endsWith(".m4a") ||
       lowerFn.endsWith(".wav") ||
       lowerFn.endsWith(".ogg") ||
       lowerFn.endsWith(".webm");
-    const timeoutFloor = isMedia ? URL_TIMEOUT_FLOOR_MS : undefined;
+    const isImage =
+      uploadBlob.type.startsWith("image/") ||
+      lowerFn.endsWith(".png") ||
+      lowerFn.endsWith(".jpg") ||
+      lowerFn.endsWith(".jpeg") ||
+      lowerFn.endsWith(".webp");
+    const timeoutFloor = isAudio ? EXTRACT_TIMEOUT_MS : isImage ? URL_TIMEOUT_FLOOR_MS : undefined;
     const timeoutMs =
       call.timeoutMs ??
       this.copyTimeoutMs ??
