@@ -8,7 +8,7 @@
     "The client reads `LENZ_API_KEY` (`lenz_...`) from the environment by default (`new Lenz()`).",
     "Use `await client.assess({ claim })` or `await client.assess({ claims })` for fast (~15s) multi-model triage returning `claims` with `verdict`, `confidence`, `rationale`, `searched_pages`, and `suggested_rewrite`.",
     "Use `await client.verifyAndWait({ claim })` for deep sourced verification (takes about a minute or two, returning `verdict`, `lenz_score` 1-10 or `null` on 'No Public Record', `confidence`, `key_finding`, `executive_summary`, and `sources`).",
-    "Use `await client.reviewAndWait({ text, maxCitations: 20 })` (text or URL) or `await client.reviewFileAndWait(bytes, { filename: \"report.docx\" })` to verify claims and citations in a document (`review.outcome`, `review.issues`, `review.citation_issues`).",
+    "Use `await client.reviewAndWait({ text, maxCitations: 20 })` or `await client.reviewFileAndWait(bytes, { filename })` (.docx, .pdf, image, audio) to verify claims and citations in a document (`review.outcome`, `review.issues`, `review.citation_issues`).",
     "Use `await client.citecheckAndWait({ text, maxCitations: 10 })` or `await client.citecheckAndWait({ pairs: [{ statement, url }] })` to verify URLs, DOIs, and legal citations (`cite`) against their sources.",
     "When `verdict === \"No Public Record\"`, `lenz_score` is `null` — no public record in the evidence settles the claim, which does not make it false."
   ]

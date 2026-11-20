@@ -179,6 +179,10 @@ const ASSESS_TIMEOUT_MS = 100_000;
  * the call. 150s leaves room above the slowest.
  */
 const EXTRACT_TIMEOUT_MS = 150_000;
+/**
+ * Floor on the per-call timeout for media uploads (image and audio files) and document URL inputs.
+ */
+const URL_TIMEOUT_FLOOR_MS = 90_000;
 /** Default deadline for `wait`, `verifyAndWait` and `verifyBatchAndWait`. */
 const WAIT_DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_MAX_RETRIES = 3;
@@ -1105,10 +1109,26 @@ function resolveUpload(
   const isPng = lower.endsWith(".png");
   const isJpg = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
   const isWebp = lower.endsWith(".webp");
-  if (!isDocx && !isPdf && !isPng && !isJpg && !isWebp) {
+  const isMp3 = lower.endsWith(".mp3");
+  const isM4a = lower.endsWith(".m4a");
+  const isWav = lower.endsWith(".wav");
+  const isOgg = lower.endsWith(".ogg");
+  const isWebm = lower.endsWith(".webm");
+  if (
+    !isDocx &&
+    !isPdf &&
+    !isPng &&
+    !isJpg &&
+    !isWebp &&
+    !isMp3 &&
+    !isM4a &&
+    !isWav &&
+    !isOgg &&
+    !isWebm
+  ) {
     const action = methodName === "extractFile()" ? "extraction" : "review";
     throw argumentError(
-      `Unsupported file format for ${action}: ${filename}. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.`,
+      `Unsupported file format for ${action}: ${filename}. Only Word (.docx), PDF (.pdf), image (.png, .jpg, .webp), and audio (.mp3, .m4a, .wav, .ogg, .webm) files are supported.`,
       "invalid_argument",
       "filename",
     );
@@ -1127,6 +1147,16 @@ function resolveUpload(
       mime = "image/jpeg";
     } else if (isWebp) {
       mime = "image/webp";
+    } else if (isMp3) {
+      mime = "audio/mpeg";
+    } else if (isM4a) {
+      mime = "audio/mp4";
+    } else if (isWav) {
+      mime = "audio/wav";
+    } else if (isOgg) {
+      mime = "audio/ogg";
+    } else if (isWebm) {
+      mime = "audio/webm";
     }
     uploadBlob = new Blob([file as any], { type: mime });
   }
@@ -2942,7 +2972,7 @@ export class Lenz {
 
   /**
    * Pull the verifiable claims out of any text, or out of a public web page,
-   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp) given its URL. Sync, free, capped at 1000
+   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm) given its URL. Sync, free, capped at 1000
    * calls/account/day (shared across your API keys).
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
@@ -3005,8 +3035,8 @@ export class Lenz {
   }
 
   /**
-   * Pull the verifiable claims out of a `.docx`, `.pdf`, or image (`.png`,
-   * `.jpg`, `.webp`) file (up to 10 MB). Sync, free, capped at 1000 calls/account/day.
+   * Pull the verifiable claims out of a Word (.docx), PDF (.pdf),
+   * image (.png, .jpg, .webp), or audio (.mp3, .m4a, .wav, .ogg, .webm) file (up to 10 MB). Sync, free, capped at 1000 calls/account/day.
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
    * `"market size and competitors"`. A focus can only SELECT from the claims
@@ -3354,7 +3384,7 @@ export class Lenz {
 
   /**
    * Start a review of a draft (text or one public http(s) URL to a web page,
-   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)): Lenz reads its claims, gives each a
+   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm)): Lenz reads its claims, gives each a
    * quick verdict, and deep-checks the ones that look wrong or uncertain.
    * Returns the receipt at once; read the review with `getReview`, wait with
    * `reviewAndWait`, or receive `review.completed` at your webhook.
@@ -3777,7 +3807,7 @@ export class Lenz {
   }
 
   /**
-   * Upload a `.docx`, `.pdf`, or image (`.png`, `.jpg`, `.webp`) file to review.
+   * Upload a `.docx`, `.pdf`, image (`.png`, `.jpg`, `.webp`), or audio (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) file to review.
    *
    * Takes a `Blob`, `ArrayBuffer`, or `Uint8Array`.
    * When passing an `ArrayBuffer` or `Uint8Array` (or a `Blob` without a `name` property),
@@ -3844,6 +3874,25 @@ export class Lenz {
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
+    const lowerFn = filename.toLowerCase();
+    const isMedia =
+      uploadBlob.type.startsWith("image/") ||
+      uploadBlob.type.startsWith("audio/") ||
+      lowerFn.endsWith(".png") ||
+      lowerFn.endsWith(".jpg") ||
+      lowerFn.endsWith(".jpeg") ||
+      lowerFn.endsWith(".webp") ||
+      lowerFn.endsWith(".mp3") ||
+      lowerFn.endsWith(".m4a") ||
+      lowerFn.endsWith(".wav") ||
+      lowerFn.endsWith(".ogg") ||
+      lowerFn.endsWith(".webm");
+    const timeoutFloor = isMedia ? URL_TIMEOUT_FLOOR_MS : undefined;
+    const timeoutMs =
+      call.timeoutMs ??
+      this.copyTimeoutMs ??
+      (timeoutFloor ? Math.max(this.timeoutMs, timeoutFloor) : undefined);
+
     try {
       const receipt = await this.request<ReviewStarted>({
         method: "POST",
@@ -3852,6 +3901,7 @@ export class Lenz {
         headers,
         conflictReceipt: "review_id",
         ...transportOf(call),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
       return asResult(settled(receipt, false));
     } catch (exc) {
@@ -3870,7 +3920,7 @@ export class Lenz {
   }
 
   /**
-   * Upload a `.docx`, `.pdf`, or image (`.png`, `.jpg`, `.webp`) file to review and wait for completion.
+   * Upload a `.docx`, `.pdf`, image (`.png`, `.jpg`, `.webp`), or audio (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) file to review and wait for completion.
    */
   async reviewFileAndWait(
     file: Blob | ArrayBuffer | Uint8Array,

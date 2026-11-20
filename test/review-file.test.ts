@@ -111,7 +111,7 @@ describe("reviewFile()", () => {
     expect(err.code).toBe("invalid_argument");
     expect(err.param).toBe("filename");
     expect(err.message).toBe(
-      "Unsupported file format for review: notes.txt. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.",
+      "Unsupported file format for review: notes.txt. Only Word (.docx), PDF (.pdf), image (.png, .jpg, .webp), and audio (.mp3, .m4a, .wav, .ogg, .webm) files are supported.",
     );
   });
 
@@ -135,6 +135,35 @@ describe("reviewFile()", () => {
       const client = new Lenz({ apiKey: "lenz_t", fetch });
       const res = await client.reviewFile(new Uint8Array([1, 2, 3]), { filename });
       expect(res).toEqual({ review_id: "r-img", status: "queued" });
+      expect(calls).toHaveLength(1);
+      const body = calls[0]!.init.body as FormData;
+      const file = body.get("file") as Blob;
+      expect(file).toBeDefined();
+      expect(file.type).toBe(mime);
+    }
+  });
+
+  it("accepts supported audio formats (.mp3, .m4a, .wav, .ogg, .webm) with correct mime types", async () => {
+    const cases = [
+      { filename: "podcast.mp3", mime: "audio/mpeg" },
+      { filename: "PODCAST.MP3", mime: "audio/mpeg" },
+      { filename: "voice.m4a", mime: "audio/mp4" },
+      { filename: "VOICE.M4A", mime: "audio/mp4" },
+      { filename: "audio.wav", mime: "audio/wav" },
+      { filename: "AUDIO.WAV", mime: "audio/wav" },
+      { filename: "recording.ogg", mime: "audio/ogg" },
+      { filename: "RECORDING.OGG", mime: "audio/ogg" },
+      { filename: "clip.webm", mime: "audio/webm" },
+      { filename: "CLIP.WEBM", mime: "audio/webm" },
+    ];
+
+    for (const { filename, mime } of cases) {
+      const { fetch, calls } = makeFetch([
+        { status: 202, body: { review_id: "r-audio", status: "queued" } },
+      ]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      const res = await client.reviewFile(new Uint8Array([1, 2, 3]), { filename });
+      expect(res).toEqual({ review_id: "r-audio", status: "queued" });
       expect(calls).toHaveLength(1);
       const body = calls[0]!.init.body as FormData;
       const file = body.get("file") as Blob;
