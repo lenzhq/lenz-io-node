@@ -1315,7 +1315,7 @@ export type VerifyBatchOptions = VerifyBatchInput;
 export interface ExtractInput {
   /**
    * The text to pull verifiable claims out of, or a single public `http(s)`
-   * URL to a web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp).
+   * URL to a web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm).
    */
   text: string;
   /**
@@ -1379,10 +1379,10 @@ export interface ExtractInput {
   idempotencyKey?: string;
 }
 
-/** Options for extracting claims from a document or image via `POST /api/v1/extract/file`. */
+/** Options for extracting claims from a document, image, or audio file via `POST /api/v1/extract/file`. */
 export interface ExtractFileOptions extends RequestOptions {
   /**
-   * The filename of the document or image (e.g. `"report.docx"`, `"paper.pdf"`, or `"chart.png"`).
+   * The filename of the document, image, or audio file (e.g. `"report.docx"`, `"paper.pdf"`, `"chart.png"`, or `"recording.mp3"`).
    * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
    * defaults to `(blob as File).name` if present.
    */
@@ -2343,7 +2343,7 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
 export interface ReviewInput {
   /**
    * The draft, up to 50,000 characters (longer text is cut), or one public
-   * http(s) URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)).
+   * http(s) URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm)).
    */
   text: string;
   /**
@@ -2672,10 +2672,10 @@ export interface ReviewEscalateOption {
   suggestEdits?: boolean;
 }
 
-/** Options for submitting a document or image for review via `POST /api/v1/review/file`. */
+/** Options for submitting a document, image, or audio file for review via `POST /api/v1/review/file`. */
 export interface ReviewFileOptions extends RequestOptions {
   /**
-   * The filename of the document or image (e.g. `"report.docx"`, `"paper.pdf"`, or `"chart.png"`).
+   * The filename of the document, image, or audio file (e.g. `"report.docx"`, `"paper.pdf"`, `"chart.png"`, or `"recording.mp3"`).
    * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
    * defaults to `(blob as File).name` if present.
    */

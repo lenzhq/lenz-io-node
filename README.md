@@ -183,16 +183,16 @@ default); the review keeps running, so read it later with
 `{ review_id }`, and `client.getReview(reviewId, { view: "issues" })` returns
 the review without its `claims`.
 
-**Reviewing document files (.docx, .pdf) and standalone images (.png, .jpg, .webp).** Instead of raw text, you can upload Word documents, PDFs, or standalone images directly using `reviewFile` and `reviewFileAndWait`. Pass a `Uint8Array`, `ArrayBuffer`, or `Blob`:
+**Reviewing document files (.docx, .pdf), images (.png, .jpg, .webp), and audio recordings (.mp3, .m4a, .wav, .ogg, .webm).** Instead of raw text, you can upload Word documents, PDFs, standalone images, or audio files directly using `reviewFile` and `reviewFileAndWait`. Pass a `Uint8Array`, `ArrayBuffer`, or `Blob`:
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises";
 
-// Submit and wait for a Word document, PDF, or image:
+// Submit and wait for a Word document, PDF, image, or audio recording:
 const docxBytes = await readFile("report.docx");
 const review = await client.reviewFileAndWait(docxBytes, { filename: "report.docx" });
 
-// Or submit without waiting and poll later (works for .pdf, .png, .jpg, .webp too):
+// Or submit without waiting and poll later (works for .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm too):
 const imgBytes = await readFile("chart.png");
 const started = await client.reviewFile(imgBytes, { filename: "chart.png" });
 const completed = await client.waitForReview(started.review_id);
@@ -386,8 +386,8 @@ work and are deprecated. A citation pair's own enumerable keys are read, as
 when it is serialized. Giving both spellings of a field with different values
 throws the local argument error (`LenzValidationError`) naming both before anything is sent.)
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. `text` can be prose or a single public `http(s)` URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)). Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
-- **`client.extractFile(file, options)`** → `ExtractedClaims`. Free, capped at 1000/account/day. Upload a Word document (`.docx`), PDF (`.pdf`), or standalone image (`.png`, `.jpg`, `.webp`) up to 10 MB as a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File`. Accepts `filename` (required when passing a raw buffer or nameless Blob), `language` (defaults to `"auto"`, the document's own language), `focus`, and `locate` (returns passage text in `positions[i].text` with `start`/`end: null`). Shares the same 150s default timeout floor and options as `extract`.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. `text` can be prose or a single public `http(s)` URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm)). Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
+- **`client.extractFile(file, options)`** → `ExtractedClaims`. Free, capped at 1000/account/day. Upload a Word document (`.docx`), PDF (`.pdf`), standalone image (`.png`, `.jpg`, `.webp`), or audio recording (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) up to 10 MB as a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File`. Accepts `filename` (required when passing a raw buffer or nameless Blob), `language` (defaults to `"auto"`, the document's own language), `focus`, and `locate` (returns passage text in `positions[i].text` with `start`/`end: null`). Shares the same 150s default timeout floor and options as `extract`.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` in the options argument (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
@@ -1424,9 +1424,9 @@ statement (where `text` is `null`: the row carries the statement).
 or when the claims could not be located, in which case the list is returned
 unfiltered. `locate` defaults to `false`.
 
-### Extracting from document files (.docx, .pdf) and standalone images (.png, .jpg, .webp)
+### Extracting from document files (.docx, .pdf), standalone images (.png, .jpg, .webp), and audio recordings (.mp3, .m4a, .wav, .ogg, .webm)
 
-Instead of raw text or a URL, you can extract verifiable claims directly from Word documents, PDFs, or standalone images using `extractFile`:
+Instead of raw text or a URL, you can extract verifiable claims directly from Word documents, PDFs, standalone images, or audio recordings using `extractFile`:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -1443,7 +1443,7 @@ for (const c of out.claims ?? []) {
 }
 ```
 
-Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File` (up to 10 MB). `filename` is required unless passing a `File` with a name. Supported formats are `.docx`, `.pdf`, `.png`, `.jpg`, `.jpeg`, and `.webp`. With `locate: true`, each position carries the matched passage in `text` (`start` and `end` are `null`, as with URL extraction).
+Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File` (up to 10 MB). `filename` is required unless passing a `File` with a name. Supported formats are `.docx`, `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.mp3`, `.m4a`, `.wav`, `.ogg`, and `.webm`. With `locate: true`, each position carries the matched passage in `text` (`start` and `end` are `null`, as with URL extraction).
 
 ## Multi-language output
 
