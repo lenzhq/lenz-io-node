@@ -111,7 +111,7 @@ describe("withOptions({ apiKey })", () => {
     const copy = client.withOptions({ apiKey });
     await expect(copy.usage()).rejects.toBeInstanceOf(LenzAuthError);
     expect(sent).toHaveLength(0);
-    await copy.library.list();
+    await copy.verifications.get("vid_1");
     expect(sent[0]!.headers.has("Authorization")).toBe(false);
   });
 

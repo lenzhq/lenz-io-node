@@ -79,9 +79,6 @@ function extraCalls(name: string, body: Record<string, unknown>): Call[] {
   if (name.startsWith("verify__list_")) {
     out.push(["walk", (c) => drainAll(c.verifications.listAll())]);
   }
-  if (name.startsWith("account__library_")) {
-    out.push(["walk", (c) => drainAll(c.library.listAll())]);
-  }
   if (name.startsWith("verify__batch_")) {
     out.push([
       "wait",

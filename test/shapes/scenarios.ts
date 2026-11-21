@@ -37,6 +37,8 @@ export function hasScenario(name: string): boolean {
     name.startsWith("account__oauth_") ||
     name.startsWith("errors__oauth_") ||
     name.startsWith("errors__web_") ||
+    name.startsWith("account__library_") ||
+    name.startsWith("errors__http_error_library_") ||
     name === "account__api_root" ||
     name === "account__webhook_secret_oauth" ||
     // Routes no method calls, answered in HTML by the original shape.
@@ -163,7 +165,6 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
   if (name.startsWith("account__me_usage_") || name.startsWith("account__api_version_header_")) {
     return outcome(() => client.usage());
   }
-  if (name.startsWith("account__library_")) return outcome(() => client.library.list());
   if (name.startsWith("account__ask_history_")) return outcome(() => client.ask.history("v"));
   if (name.startsWith("account__ask_send")) {
     return outcome(() => client.ask.send("v", { message: "x" }));
@@ -221,7 +222,6 @@ function errorCall(client: any, name: string): Promise<unknown> {
   if (name.startsWith("verify__delete_")) return client.verifications.delete("v");
   if (name === "errors__not_found_verification") return client.verifications.get("v");
   if (name === "errors__not_found_verify_status") return client.getStatus("t");
-  if (name.startsWith("errors__http_error_library_")) return client.library.list();
   if (name.startsWith("review__") || /^errors__older_(review|invalid_verdict)/.test(name)) {
     return client.review({ text: "x" });
   }

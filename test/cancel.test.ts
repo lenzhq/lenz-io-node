@@ -488,12 +488,6 @@ describe("every id that goes into a path", () => {
       "/verifications/ID/certificate",
     ],
     ["verifications.delete", (c, id) => c.verifications.delete(id), "DELETE", "/verifications/ID"],
-    [
-      "verifications.related",
-      (c, id) => c.verifications.related(id),
-      "GET",
-      "/verifications/ID/related",
-    ],
     ["ask.history", (c, id) => c.ask.history(id), "GET", "/ask/ID"],
     ["ask.send", (c, id) => c.ask.send(id, { message: "x" }), "POST", "/ask/ID"],
     ["ask.reset", (c, id) => c.ask.reset(id), "DELETE", "/ask/ID"],
@@ -518,7 +512,7 @@ describe("every id that goes into a path", () => {
       await call(make(fetch), id).catch(() => undefined);
       expect(calls).toHaveLength(1);
       expect(calls[0]!.init.method).toBe(method);
-      expect(calls[0]!.url.search).toBe(name === "verifications.related" ? "?limit=5" : "");
+      expect(calls[0]!.url.search).toBe("");
       expect(calls[0]!.url.hash).toBe("");
       expect(calls[0]!.url.pathname).toBe(`/api/v1${tpl.replace("ID", encoded)}`);
     }

@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import * as sdk from "../src/index.js";
-import { runScenario, type Recorded, type SdkUnderTest } from "./shapes/scenarios.js";
+import { hasScenario, runScenario, type Recorded, type SdkUnderTest } from "./shapes/scenarios.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "shapes");
 
@@ -355,6 +355,7 @@ function differences(
 const NAMES = readdirSync(join(ROOT, "oracle"))
   .filter((f) => f.endsWith(".json"))
   .map((f) => f.replace(/\.json$/, ""))
+  .filter(hasScenario)
   .sort();
 
 /** Webhook recordings of older servers (sparser bodies), original shape only. */

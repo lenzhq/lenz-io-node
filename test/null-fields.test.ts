@@ -60,7 +60,12 @@ it("every recorded answer reads without a foreign error, and its nulls are typed
   const paths = new Map<string, string[]>(); // `${type}:${path}` -> path
   for (const file of readdirSync(DIR).sort()) {
     const name = file.replace(/\.json$/, "");
-    if (name.startsWith("webhook__")) continue;
+    if (
+      name.startsWith("webhook__") ||
+      name.startsWith("account__library_") ||
+      name.startsWith("errors__http_error_library_")
+    )
+      continue;
     const r = JSON.parse(readFileSync(join(DIR, file), "utf8")) as Recorded;
     const body = (r.body ?? {}) as Record<string, unknown>;
     const calls = (r.status ?? 200) < 400 ? callsFor(name, body) : undefined;
@@ -160,7 +165,6 @@ function errorCall(client: Lenz, name: string): Promise<unknown> {
   if (name.startsWith("verify__verification_")) return client.verifications.get("v");
   if (name.startsWith("verify__status_")) return client.getStatus("t");
   if (name.startsWith("account__ask_")) return client.ask.history("v");
-  if (name.startsWith("account__library_")) return client.library.list();
   if (name.startsWith("account__")) return client.usage();
   return client.verify({ claim: "a" });
 }

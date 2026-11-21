@@ -344,7 +344,7 @@ export function webhookResultDefaults(result: unknown): unknown {
   return out;
 }
 
-/** A page of verifications (`verifications.list`, `library.list`). */
+/** A page of verifications (`verifications.list`). */
 export function normalizeVerificationList(body: unknown, unsent = false): unknown {
   if (!isObj(body) || !Array.isArray(body["items"])) return body;
   const items = body["items"] as unknown[];
