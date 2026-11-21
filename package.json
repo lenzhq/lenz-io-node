@@ -91,7 +91,7 @@
     "@vitest/coverage-v8": "5.0.3",
     "esbuild": "^0.28.1",
     "eslint": "^8.57.0",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "miniflare": "4.20260730.0",
     "nock": "^13.5.0",
     "prettier": "^3.2.0",
