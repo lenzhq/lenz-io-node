@@ -127,7 +127,10 @@ import type {
   ReviewStarted,
   ReviewExport,
   ReviewFileOptions,
+  ListReviewsOptions,
   ReviewFileAndWaitOptions,
+  ReviewList,
+  ReviewListItem,
   SelectInput,
   TaskAccepted,
   TaskStatus,
@@ -217,7 +220,11 @@ const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
 // published package.
 import { VERSION as SDK_VERSION } from "./_version.js";
-import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
+import {
+  normalizeReviewList,
+  withCitecheckDefaults,
+  withReviewDefaults,
+} from "./reviewDefaults.js";
 import {
   normalizeAssess,
   normalizeCitecheck,
@@ -989,11 +996,12 @@ function shown(value: unknown): string {
 }
 
 /** The start page of a `listAll`: a whole number from 1, checked when it is called. */
-function startPage(page: number | undefined): number {
+function startPage(page: number | undefined, method = "listAll"): number {
   const first = page ?? 1;
   if (!Number.isInteger(first) || first < 1) {
+    const name = method.replace(/\(\)$/, "");
     throw argumentError(
-      `listAll needs a whole start page of 1 or more (got ${String(page)}).`,
+      `${name} needs a whole start page of 1 or more (got ${String(page)}).`,
       "invalid_page",
       "page",
     );
@@ -3750,6 +3758,62 @@ export class Lenz {
       throw unexpectedAnswer("POST", `/reviews/${id}/cancel`, body);
     }
     return keepRaw(body, withReviewDefaults(body, aliasesOn(this)) as ReviewFull);
+  }
+
+  /**
+   * List reviews of the account, newest first, paginated:
+   *
+   * ```ts
+   * const page = await client.listReviews({ page: 1, pageSize: 20 });
+   * console.log(page.items.length, page.total);
+   * ```
+   *
+   * Default query sends `page=1`. `pageSize` (1-100) is sent only when set.
+   * Throws {@link LenzValidationError} when `page` or `pageSize` is invalid
+   * before any network request.
+   */
+  async listReviews(options: ListReviewsOptions = {}): Promise<Result<ReviewList>> {
+    requireObject(options, "listReviews", "options");
+    const { page = 1, pageSize, ...opts } = options;
+    checkPageSize(pageSize, "listReviews");
+    const call = resolveCall(this, opts, "listReviews");
+    const body = await this.request<ReviewList>({
+      method: "GET",
+      path: "/reviews",
+      query: { page, page_size: pageSize },
+      ...transportOf(call),
+    });
+    return asResult(aliased(this, (b) => normalizeReviewList(b, true), body));
+  }
+
+  /**
+   * Every review of the account, newest first, across pages:
+   *
+   * ```ts
+   * for await (const r of client.listAllReviews()) console.log(r.review_id);
+   * ```
+   *
+   * One `listReviews` request per page, made when the previous page has been read;
+   * starts at `page` (default 1; a page below 1 throws when called) and stops
+   * on a short or empty page, or one that reaches `total`. `pageSize` (1-100,
+   * checked when called) is asked of every page; without it the server's
+   * default applies.
+   *
+   * The request options apply to every page request; they are checked when
+   * `listAllReviews` is called. A `signal` also stops the items of a page already
+   * read: once it fires, the next item throws `LenzAbortError`.
+   */
+  listAllReviews(options: ListReviewsOptions = {}): AsyncIterable<ReviewListItem> {
+    requireObject(options, "listAllReviews", "options");
+    const { page, pageSize, ...opts } = options;
+    const first = startPage(page, "listAllReviews()");
+    checkPageSize(pageSize, "listAllReviews");
+    const call = resolveCall(this, opts, "listAllReviews", "request", false);
+    return walkPages(
+      (p) => this.listReviews({ ...call.own, page: p, pageSize }),
+      first,
+      call.signals,
+    );
   }
 
   /**

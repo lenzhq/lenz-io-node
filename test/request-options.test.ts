@@ -57,6 +57,12 @@ const LIST = (page: number, n: number, total: number) => ({
   page,
   page_size: 2,
 });
+const REVIEW_LIST = (page: number, n: number, total: number) => ({
+  items: Array.from({ length: n }, (_, i) => ({ review_id: `r${page}${i}`, status: "completed" })),
+  total,
+  page,
+  page_size: 2,
+});
 
 /** Which request options a method takes (its row in the parity map). */
 type Takes = "all" | "wait" | "submitWait";
@@ -194,6 +200,20 @@ const METHODS: Method[] = [
     takes: "all",
     replies: [{ body: REVIEW_COMPLETED }],
     run: (c, o) => c.cancelReview(REVIEW_ID, o),
+  },
+  {
+    name: "listReviews",
+    python: "list_reviews",
+    takes: "all",
+    replies: [{ body: REVIEW_LIST(3, 1, 5) }],
+    run: (c, o) => c.listReviews({ page: 3, ...o }),
+  },
+  {
+    name: "listAllReviews",
+    python: "iter_reviews",
+    takes: "all",
+    replies: [{ body: REVIEW_LIST(2, 2, 6) }, { body: REVIEW_LIST(3, 1, 6) }],
+    run: (c, o) => drain(c.listAllReviews({ page: 2, ...o })),
   },
   {
     name: "citecheck",

@@ -120,6 +120,20 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
     "maxRetries",
     "headers",
   ],
+  "listAllReviews": [
+    "iter_reviews",
+    "signal",
+    "timeoutMs",
+    "maxRetries",
+    "headers",
+  ],
+  "listReviews": [
+    "list_reviews",
+    "signal",
+    "timeoutMs",
+    "maxRetries",
+    "headers",
+  ],
   "review": [
     "review",
     "signal",
