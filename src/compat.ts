@@ -831,6 +831,19 @@ function normalizeReviewAssessment(a: unknown): unknown {
 }
 
 /**
+ * A review list item: normalizes failure (withFailure) and summary
+ * (claims_found and citation_limit_*; claims_found stays null when
+ * more_claims is absent).
+ */
+export function normalizeReviewListItem(body: unknown): unknown {
+  if (!isObj(body)) return body;
+  const b: Obj = { ...body };
+  update(b, "summary", (s) => normalizeReviewSummary(s, b["more_claims"]));
+  update(b, "failure", (f) => normalizeFailureBlock(f));
+  return b;
+}
+
+/**
  * A review body (either view): a newer-shape part gains the original names;
  * an original-shape part only the newer names. Run before the defaults.
  */

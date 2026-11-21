@@ -2322,6 +2322,36 @@ export interface ReviewIssues extends ReviewEnvelope {
   view: "issues";
 }
 
+/** One item in `GET /reviews` (`listReviews` / `listAllReviews`). */
+export interface ReviewListItem extends RawBody {
+  review_id: string;
+  status: ReviewStatus;
+  outcome: ReviewOutcome | null;
+  created_at: string;
+  completed_at: string | null;
+  language: string;
+  policy: EscalationPolicy;
+  summary: ReviewSummary;
+  credits: ReviewCredits;
+  failure: ReviewFailureBlock | null;
+}
+
+/** Paginated response from `GET /reviews`. */
+export interface ReviewList extends RawBody, ResponseMeta {
+  items: ReviewListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Options for `listReviews` and `listAllReviews`. */
+export interface ListReviewsOptions extends RequestOptions {
+  /** 1-indexed page number (default 1). */
+  page?: number;
+  /** Results per page, 1 to 100 (default 20). */
+  pageSize?: number;
+}
+
 /** The `POST /review` receipt. `status` is always `queued`, not the current state. */
 export interface ReviewStarted extends RawBody, ResponseMeta {
   review_id: string;
