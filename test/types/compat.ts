@@ -56,7 +56,9 @@ type WithoutNewValues<T> = T extends string | number | boolean | bigint | null |
                   : K extends "verdicts"
                     ? WithoutNoPublicRecord<T[K]>
                     : WithoutNewValues<T[K]>;
-          }
+          } & (T extends { content_status: "available" | "purged" }
+            ? { domain: string | null; entities: Old.ReviewEntity[] }
+            : unknown)
         : T;
 
 /** `WithoutNewValues` of a returned value, for the call-form checks. */
@@ -192,8 +194,6 @@ export const new_ReviewClaim: New.ReviewClaim = value<Old.ReviewClaim>();
 export const old_ReviewClaim: Old.ReviewClaim = value<WithoutNewValues<New.ReviewClaim>>();
 export const new_ReviewCredits: New.ReviewCredits = value<Old.ReviewCredits>();
 export const old_ReviewCredits: Old.ReviewCredits = value<New.ReviewCredits>();
-export const new_ReviewEntity: New.ReviewEntity = value<Old.ReviewEntity>();
-export const old_ReviewEntity: Old.ReviewEntity = value<New.ReviewEntity>();
 export const new_ReviewEnvelope: New.ReviewEnvelope = value<Old.ReviewEnvelope>();
 export const old_ReviewEnvelope: Old.ReviewEnvelope = value<WithoutNewValues<New.ReviewEnvelope>>();
 export const new_ReviewFailure: New.ReviewFailure = value<Old.ReviewFailure>();
@@ -227,12 +227,6 @@ export const old_ReviewVerificationCounts: Old.ReviewVerificationCounts =
   value<New.ReviewVerificationCounts>();
 export const new_VerdictLabel: New.VerdictLabel = value<Old.VerdictLabel>();
 export const old_VerdictLabel: Old.VerdictLabel = value<New.VerdictLabel>();
-export const new_AskHistory: New.AskHistory = value<Old.AskHistory>();
-export const old_AskHistory: Old.AskHistory = value<New.AskHistory>();
-export const new_AskMessage: New.AskMessage = value<Old.AskMessage>();
-export const old_AskMessage: Old.AskMessage = value<New.AskMessage>();
-export const new_AskReply: New.AskReply = value<Old.AskReply>();
-export const old_AskReply: Old.AskReply = value<New.AskReply>();
 export const new_AssessClaim: New.AssessClaim = value<Old.AssessClaim>();
 export const old_AssessClaim: Old.AssessClaim = value<New.AssessClaim>();
 export const new_AssessInput: New.AssessInput = value<Old.AssessInput>();
@@ -268,8 +262,6 @@ export const new_CoverageStatus: New.CoverageStatus = value<Old.CoverageStatus>(
 export const old_CoverageStatus: Old.CoverageStatus = value<New.CoverageStatus>();
 export const new_DebateSide: New.DebateSide = value<Old.DebateSide>();
 export const old_DebateSide: Old.DebateSide = value<New.DebateSide>();
-export const new_EntityRef: New.EntityRef = value<Old.EntityRef>();
-export const old_EntityRef: Old.EntityRef = value<New.EntityRef>();
 export const new_ExtractInput: New.ExtractInput = value<Old.ExtractInput>();
 export const old_ExtractInput: Old.ExtractInput = value<New.ExtractInput>();
 export const new_ExtractStatus: New.ExtractStatus = value<Old.ExtractStatus>();
@@ -278,26 +270,14 @@ export const new_ExtractedClaims: New.ExtractedClaims = value<Old.ExtractedClaim
 export const old_ExtractedClaims: Old.ExtractedClaims = value<New.ExtractedClaims>();
 export const new_ExtractedClaim: New.ExtractedClaim = value<Old.ExtractedClaim>();
 export const old_ExtractedClaim: Old.ExtractedClaim = value<New.ExtractedClaim>();
-export const new_ExtractedEntity: New.ExtractedEntity = value<Old.ExtractedEntity>();
-export const old_ExtractedEntity: Old.ExtractedEntity = value<New.ExtractedEntity>();
 export const new_FailureClass: New.FailureClass = value<Old.FailureClass>();
 export const old_FailureClass: Old.FailureClass = value<New.FailureClass>();
-export const new_LibraryItem: New.LibraryItem = value<Old.LibraryItem>();
-export const old_LibraryItem: Old.LibraryItem = value<New.LibraryItem>();
-export const new_LibraryList: New.LibraryList = value<Old.LibraryList>();
-export const old_LibraryList: Old.LibraryList = value<New.LibraryList>();
-export const new_LibraryListInput: New.LibraryListInput = value<Old.LibraryListInput>();
-export const old_LibraryListInput: Old.LibraryListInput = value<New.LibraryListInput>();
 export const new_OnProgress: New.OnProgress = value<Old.OnProgress>();
 export const old_OnProgress: Old.OnProgress = value<New.OnProgress>();
 export const new_Progress: New.Progress = value<Old.Progress>();
 export const old_Progress: Old.Progress = value<New.Progress>();
-export const new_RelatedVerifications: New.RelatedVerifications = value<Old.RelatedVerifications>();
-export const old_RelatedVerifications: Old.RelatedVerifications = value<New.RelatedVerifications>();
 export const new_SelectInput: New.SelectInput = value<Old.SelectInput>();
 export const old_SelectInput: Old.SelectInput = value<New.SelectInput>();
-export const new_SimilarVerification: New.SimilarVerification = value<Old.SimilarVerification>();
-export const old_SimilarVerification: Old.SimilarVerification = value<New.SimilarVerification>();
 export const new_Source: New.Source = value<Old.Source>();
 export const old_Source: Old.Source = value<New.Source>();
 export const new_TaskAccepted: New.TaskAccepted = value<Old.TaskAccepted>();
@@ -403,12 +383,6 @@ export const verifications_getCertificate: Old.Lenz["verifications"]["getCertifi
   value<New.Lenz["verifications"]["getCertificate"]>();
 export const verifications_delete: Old.Lenz["verifications"]["delete"] =
   value<New.Lenz["verifications"]["delete"]>();
-export const verifications_related: Old.Lenz["verifications"]["related"] =
-  value<New.Lenz["verifications"]["related"]>();
-export const ask_history: Old.Lenz["ask"]["history"] = value<New.Lenz["ask"]["history"]>();
-export const ask_send: Old.Lenz["ask"]["send"] = value<New.Lenz["ask"]["send"]>();
-export const ask_reset: Old.Lenz["ask"]["reset"] = value<New.Lenz["ask"]["reset"]>();
-export const library_list: Old.Lenz["library"]["list"] = value<New.Lenz["library"]["list"]>();
 
 // Literal event mocks written against the old types still type-check.
 export const failedMock: New.VerificationFailed = {

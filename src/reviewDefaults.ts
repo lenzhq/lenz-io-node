@@ -1,4 +1,4 @@
-import { normalizeCitecheck, normalizeReview } from "./compat.js";
+import { normalizeCitecheck, normalizeReview, normalizeReviewListItem } from "./compat.js";
 
 /**
  * The same for a citation check's body: `[]` for the three lists, `null` for
@@ -76,6 +76,11 @@ export function withReviewDefaults<T>(body: T, legacyAliases = true): T {
       return { ...row, check: withNull(row["check"], "missing_quote") };
     });
   }
+  fillSummaryPolicyDefaults(b);
+  return b as T;
+}
+
+function fillSummaryPolicyDefaults(b: Record<string, unknown>): void {
   const summary = b["summary"];
   if (summary && typeof summary === "object" && !Array.isArray(summary)) {
     const s = { ...(summary as Record<string, unknown>) };
@@ -99,5 +104,36 @@ export function withReviewDefaults<T>(body: T, legacyAliases = true): T {
     if (p["suggest_edits"] === undefined) p["suggest_edits"] = false;
     b["policy"] = p;
   }
+}
+
+/**
+ * Fills the defaults for one review list item: `summary` citation keys
+ * (`citations_found`, `citations_selected`, `citation_limit`,
+ * `citation_limit_reached`, `citation_checks`, `citations_skipped` -> null,
+ * `citation_issues` -> 0) and `policy` (`max_citations` -> null,
+ * `suggest_edits` -> false).
+ * Does not add `citations`, `citation_issues`, `citation_failures`, or `more_*`
+ * keys to the top-level item.
+ */
+export function withReviewListItemDefaults<T>(body: T, legacyAliases = true): T {
+  // A client made with `legacyAliases: false` returns the body as sent.
+  if (!legacyAliases) return body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  const b = { ...(normalizeReviewListItem(body) as Record<string, unknown>) };
+  fillSummaryPolicyDefaults(b);
   return b as T;
+}
+
+/**
+ * Normalizes a `GET /reviews` response: maps each item through
+ * `withReviewListItemDefaults(item, legacyAliases)`.
+ */
+export function normalizeReviewList(body: unknown, legacyAliases = true): unknown {
+  if (!isObject(body) || !Array.isArray(body["items"])) return body;
+  return {
+    ...body,
+    items: (body["items"] as unknown[]).map((item) =>
+      withReviewListItemDefaults(item, legacyAliases),
+    ),
+  };
 }

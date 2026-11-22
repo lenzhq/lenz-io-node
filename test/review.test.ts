@@ -30,7 +30,6 @@ import {
 } from "../src/index.js";
 import { withReviewDefaults } from "../src/reviewDefaults.js";
 import type {
-  ReviewEntity,
   ReviewFull,
   ReviewCitationUncheckedReason,
   ReviewInput,
@@ -914,18 +913,6 @@ companies had started compliance work by the end of 2024.
     expect(results).toEqual([]);
     expect(deep?.verification_id).toBe("c9b769e1");
     expect(lines).toHaveLength(4); // outcome, two issues, one rewrite
-  });
-});
-
-describe("review types", () => {
-  it("a review entity's name may be null, as the API documents", () => {
-    const completed = fixture<ReviewFull>("review_completed.json");
-    const entity = completed.claims[3]!.verification!.entities[0]!;
-    // Compile-time check: `name` is nullable, so this must narrow first.
-    const name: string = entity.name ?? "";
-    expect(name).toBe("EU AI Act");
-    const nullable: ReviewEntity = { name: null, qid: null };
-    expect(nullable.name).toBeNull();
   });
 });
 

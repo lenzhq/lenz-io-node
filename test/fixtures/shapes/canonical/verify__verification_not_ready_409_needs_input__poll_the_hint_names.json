@@ -6,16 +6,13 @@
     "reason": "multi_claim",
     "claims": [
       {
-        "claim": "A.",
-        "domain": ""
+        "claim": "A."
       },
       {
-        "claim": "A happened.",
-        "domain": ""
+        "claim": "A happened."
       },
       {
-        "claim": "B happened.",
-        "domain": ""
+        "claim": "B happened."
       }
     ],
     "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."

@@ -36,10 +36,6 @@ export async function topLevel(c: Lenz): Promise<void> {
   meta(await c.verifications.get("abcd1234"));
   meta(await c.verifications.list());
   meta(await c.verifications.getCertificate("abcd1234"));
-  meta(await c.verifications.related("abcd1234"));
-  meta(await c.library.list());
-  meta(await c.ask.history("abcd1234"));
-  meta(await c.ask.send("abcd1234", { message: "why?" }));
 
   // A Result is still the plain type, for code that names it.
   const task: TaskAccepted = await c.verify({ claim: "a" });

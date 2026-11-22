@@ -5,8 +5,6 @@
       {
         "verification_id": "d3156905",
         "claim": "Paged claim 020.",
-        "domain": "",
-        "entities": [],
         "verdict": "True",
         "confidence": "low",
         "lenz_score": 10,
@@ -20,8 +18,6 @@
       {
         "verification_id": "2c4bbe00",
         "claim": "Paged claim 021.",
-        "domain": "",
-        "entities": [],
         "verdict": "True",
         "confidence": "low",
         "lenz_score": 10,

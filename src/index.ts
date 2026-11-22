@@ -3,9 +3,9 @@
  *
  *     npm install lenz-io
  *
- * Check the facts, figures, and citations in your work. Six API calls:
- * `extract`, `assess`, `verify` and `ask` form a research-depth ladder (find
- * claims, judge them fast, prove them deep, follow up); `review` runs it on a
+ * Check the facts, figures, and citations in your work. Five API calls:
+ * `extract`, `assess` and `verify` form a research-depth ladder (find
+ * claims, judge them fast, prove them deep); `review` runs it on a
  * whole draft and `citecheck` checks a draft's citations on their own.
  *
  * ```ts
@@ -30,15 +30,6 @@
  *   .map((c) => ({ claim: c.claim! }))
  *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
- *
- * // 4. ask — a follow-up question on a completed deep check, when there is one
- * const deep = results.find((r) => r.status === 'completed')?.verification;
- * if (deep?.verification_id) {
- *   const reply = await client.ask.send(deep.verification_id, {
- *     message: 'Which source is strongest?',
- *   });
- *   console.log(reply.content);
- * }
  * ```
  *
  * See https://lenz.io/api/v1/docs/ for the full API reference.
@@ -132,6 +123,7 @@ export type {
   CitecheckSummary,
   GetReviewOptions,
   GetStatusOptions,
+  ListReviewsOptions,
   ReviewAndWaitOptions,
   ReviewAssessment,
   ReviewAssessmentCounts,
@@ -150,7 +142,6 @@ export type {
   ReviewMoreCitation,
   ReviewClaim,
   ReviewCredits,
-  ReviewEntity,
   ReviewEnvelope,
   ReviewEscalateOption,
   ReviewExport,
@@ -164,6 +155,8 @@ export type {
   ReviewOptions,
   ReviewIssue,
   ReviewIssues,
+  ReviewList,
+  ReviewListItem,
   ReviewOutcome,
   ReviewResult,
   ReviewStarted,
@@ -173,9 +166,6 @@ export type {
   ReviewVerificationCounts,
   VerdictLabel,
   VerificationVerdict,
-  AskHistory,
-  AskMessage,
-  AskReply,
   AssessClaim,
   SearchedPage,
   AssessInput,
@@ -198,22 +188,15 @@ export type {
   CoverageReason,
   CoverageStatus,
   DebateSide,
-  EntityRef,
   ExtractFileOptions,
   ExtractInput,
   ExtractStatus,
   ExtractedClaim,
   ExtractedClaims,
-  ExtractedEntity,
   FailureClass,
-  LibraryItem,
-  LibraryList,
-  LibraryListInput,
   OnProgress,
   Progress,
-  RelatedVerifications,
   SelectInput,
-  SimilarVerification,
   Source,
   Evidence,
   SuppliedSource,

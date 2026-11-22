@@ -1,7 +1,7 @@
 /**
  * 3.2, mirrored in the Python SDK: a blank input refused before sending says
  * the API's own 422 sentence for that operation, whatever `legacyAliases`
- * says; a blank `select` item and a blank `ask.send` message are refused
+ * says; a blank `select` item is refused
  * too; a wait reading a failure block of the wrong type throws
  * `LenzInvalidResponseError`; top-level results carry `httpStatus` and
  * `headers`; and a call made without a key throws `LenzMissingKeyError`.
@@ -138,20 +138,6 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       "empty_list",
       "texts",
     ],
-    [
-      "ask.send blank",
-      (c) => c.ask.send("abcd1234", { message: "  " }),
-      "Message cannot be empty.",
-      "blank_input",
-      "message",
-    ],
-    [
-      "ask.send none",
-      (c) => c.ask.send("abcd1234", {} as { message: string }),
-      "message: Field required",
-      "blank_input",
-      "message",
-    ],
     ["review", (c) => c.review({ text: " " }), REVIEW, "blank_input", "text"],
     [
       "review {}",
@@ -257,15 +243,6 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       claims: "a claim" as unknown as string[],
     });
     expect(sent[0]!.body).toBe('{"texts":"a claim"}');
-  });
-
-  it("an ask.send with a message sends the same request as before", async () => {
-    const { fetch, sent } = server(() => ({ body: { reply: "x" } }));
-    await new Lenz({ apiKey: "lenz_t", fetch }).ask.send("abcd1234", {
-      message: " why? ",
-      idempotency: false,
-    });
-    expect(sent[0]!.body).toBe('{"message":" why? "}');
   });
 });
 
@@ -500,7 +477,7 @@ describe("a completed poll that carries no result", () => {
 // ── 4: httpStatus and headers on top-level results, runtime side ──
 
 describe("every top-level result carries httpStatus and headers", () => {
-  it("select, getCertificate and related too", async () => {
+  it("select and getCertificate too", async () => {
     const { fetch } = server((s) => {
       if (s.url.includes("/select")) return { status: 202, body: { batch_id: "b", items: [] } };
       if (s.url.includes("/certificate")) return { body: { verification_id: "abcd1234" } };
@@ -510,7 +487,6 @@ describe("every top-level result carries httpStatus and headers", () => {
     const outs: Array<[unknown, number]> = [
       [await c.select("t1", { claims: ["a"] }), 202],
       [await c.verifications.getCertificate("abcd1234"), 200],
-      [await c.verifications.related("abcd1234"), 200],
     ];
     for (const [out, code] of outs) {
       const o = out as { httpStatus: number; headers: Record<string, string> };

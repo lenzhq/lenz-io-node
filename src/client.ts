@@ -1,31 +1,29 @@
 /**
  * Public Lenz client — the ergonomic top-level surface.
  *
- * Multi-language SDK convention (13 languages):
- * - Request methods (verify, assess, extract, ask.send, …) take
+ * Multi-language SDK convention (39 languages):
+ * - Request methods (verify, assess, extract, …) take
  *   `language?: string`. Omit the field (or pass empty string) for
  *   English (default) — the SDK then omits the key from the request
  *   body, preserving byte-identical wire format for existing English
- *   callers. Set `language: "es"` (or any of the 13 supported codes)
+ *   callers. Set `language: "es"` (or any of the 39 supported codes)
  *   to receive prose fields in that language. `assess`, `verify`,
- *   `verifyAndWait`, `review`, `reviewAndWait`, `extract` and `ask.send` also take
+ *   `verifyAndWait`, `review`, `reviewAndWait` and `extract` also take
  *   `language: "auto"`: the answer comes back in the language of the submitted
- *   text (for `ask.send`, the language of the claim being discussed; for a
- *   review, one language for the whole draft; for `extract`, the claims are
- *   written in it). `verifyBatch` and `citecheck` do not take `"auto"`.
+ *   text (for a review, one language for the whole draft; for `extract`,
+ *   the claims are written in it). `verifyBatch` and `citecheck` do not take `"auto"`.
  * - Response shapes (Verification, VerificationListItem, AssessClaim)
  *   expose `language?: string` populated by the server. Verdict /
- *   domain / status enums stay English regardless of language; only
+ *   status enums stay English regardless of language; only
  *   free-form prose follows the request.
  * - Mixing the two (e.g. `language: "en"` on a request) would send
  *   an extra `"language": "en"` key on every English call — breaks the
  *   byte-identical English path. The omit-when-empty convention exists
  *   precisely to avoid that.
  *
- * Six API calls: `extract`, `assess`, `verify` and `ask` form a
- * research-depth ladder (find claims, judge them fast, prove them deep,
- * follow up); `review` runs it on a whole draft and `citecheck` checks a
- * draft's citations on their own.
+ * Five API calls: `extract`, `assess` and `verify` form a research-depth
+ * ladder (find claims, judge them fast, prove them deep); `review` runs
+ * it on a whole draft and `citecheck` checks a draft's citations on their own.
  *
  * ```ts
  * import { Lenz, type AssessClaim } from 'lenz-io';
@@ -49,15 +47,6 @@
  *   .map((c) => ({ claim: c.claim! }))
  *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
- *
- * // 4. ask — a follow-up question on a completed deep check, when there is one
- * const deep = results.find((r) => r.status === 'completed')?.verification;
- * if (deep?.verification_id) {
- *   const reply = await client.ask.send(deep.verification_id, {
- *     message: 'Which source is strongest?',
- *   });
- *   console.log(reply.content);
- * }
  *
  * // Async verify: submit, then wait (or receive the webhook)
  * const task = await client.verify({ claim: '...' }); // returns task_id
@@ -94,9 +83,6 @@ import {
 } from "./errors.js";
 import type {
   Result,
-  AskHistory,
-  AskReply,
-  AskSendInput,
   AssessInput,
   AssessResponse,
   BatchAccepted,
@@ -106,9 +92,6 @@ import type {
   ExtractFileOptions,
   ExtractInput,
   ExtractedClaims,
-  LibraryItem,
-  LibraryList,
-  LibraryListInput,
   OnProgress,
   Progress,
   Citecheck,
@@ -118,7 +101,6 @@ import type {
   ExportReviewOptions,
   GetReviewOptions,
   GetStatusOptions,
-  RelatedVerifications,
   RequestOptions,
   ReviewAndWaitOptions,
   ReviewFull,
@@ -127,7 +109,10 @@ import type {
   ReviewStarted,
   ReviewExport,
   ReviewFileOptions,
+  ListReviewsOptions,
   ReviewFileAndWaitOptions,
+  ReviewList,
+  ReviewListItem,
   SelectInput,
   TaskAccepted,
   TaskStatus,
@@ -179,6 +164,11 @@ const ASSESS_TIMEOUT_MS = 100_000;
  * the call. 150s leaves room above the slowest.
  */
 const EXTRACT_TIMEOUT_MS = 150_000;
+const AUDIO_EXTRACT_TIMEOUT_MS = 240_000;
+/**
+ * Floor on the per-call timeout for media uploads (image files) and document URL inputs.
+ */
+const URL_TIMEOUT_FLOOR_MS = 90_000;
 /** Default deadline for `wait`, `verifyAndWait` and `verifyBatchAndWait`. */
 const WAIT_DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_MAX_RETRIES = 3;
@@ -212,7 +202,11 @@ const THROW_AT_ONCE_429_CODES: readonly string[] = ["review_in_flight"];
 // scripts/sync-version.mjs. Keeps the User-Agent in lockstep with the
 // published package.
 import { VERSION as SDK_VERSION } from "./_version.js";
-import { withCitecheckDefaults, withReviewDefaults } from "./reviewDefaults.js";
+import {
+  normalizeReviewList,
+  withCitecheckDefaults,
+  withReviewDefaults,
+} from "./reviewDefaults.js";
 import {
   normalizeAssess,
   normalizeCitecheck,
@@ -466,7 +460,7 @@ interface SendOptions {
    * Optional-auth endpoint: don't fail when no key, but DO send the key when
    * we have one. The server returns a caller's own private/hidden rows only to
    * the owning bearer, so `verifications.get` opts in (→ a fresh private claim
-   * is retrievable). Purely public reads (`library.list`) leave this off so a
+   * is retrievable). Purely public reads leave this off so a
    * key never reaches an endpoint that doesn't need it.
    */
   authOptional?: boolean;
@@ -984,11 +978,12 @@ function shown(value: unknown): string {
 }
 
 /** The start page of a `listAll`: a whole number from 1, checked when it is called. */
-function startPage(page: number | undefined): number {
+function startPage(page: number | undefined, method = "listAll"): number {
   const first = page ?? 1;
   if (!Number.isInteger(first) || first < 1) {
+    const name = method.replace(/\(\)$/, "");
     throw argumentError(
-      `listAll needs a whole start page of 1 or more (got ${String(page)}).`,
+      `${name} needs a whole start page of 1 or more (got ${String(page)}).`,
       "invalid_page",
       "page",
     );
@@ -1105,10 +1100,26 @@ function resolveUpload(
   const isPng = lower.endsWith(".png");
   const isJpg = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
   const isWebp = lower.endsWith(".webp");
-  if (!isDocx && !isPdf && !isPng && !isJpg && !isWebp) {
+  const isMp3 = lower.endsWith(".mp3");
+  const isM4a = lower.endsWith(".m4a");
+  const isWav = lower.endsWith(".wav");
+  const isOgg = lower.endsWith(".ogg");
+  const isWebm = lower.endsWith(".webm");
+  if (
+    !isDocx &&
+    !isPdf &&
+    !isPng &&
+    !isJpg &&
+    !isWebp &&
+    !isMp3 &&
+    !isM4a &&
+    !isWav &&
+    !isOgg &&
+    !isWebm
+  ) {
     const action = methodName === "extractFile()" ? "extraction" : "review";
     throw argumentError(
-      `Unsupported file format for ${action}: ${filename}. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.`,
+      `Unsupported file format for ${action}: ${filename}. Only Word (.docx), PDF (.pdf), image (.png, .jpg, .webp), and audio (.mp3, .m4a, .wav, .ogg, .webm) files are supported.`,
       "invalid_argument",
       "filename",
     );
@@ -1127,6 +1138,16 @@ function resolveUpload(
       mime = "image/jpeg";
     } else if (isWebp) {
       mime = "image/webp";
+    } else if (isMp3) {
+      mime = "audio/mpeg";
+    } else if (isM4a) {
+      mime = "audio/mp4";
+    } else if (isWav) {
+      mime = "audio/wav";
+    } else if (isOgg) {
+      mime = "audio/ogg";
+    } else if (isWebm) {
+      mime = "audio/webm";
     }
     uploadBlob = new Blob([file as any], { type: mime });
   }
@@ -2005,8 +2026,6 @@ const BLANK_SENTENCES = {
   list: "claims is required.",
   /** `POST /assess`: a blank item. */
   item: (i: number) => `claims[${i}] is blank.`,
-  /** `POST /ask/{verification_id}`: a blank `message`. */
-  message: "Message cannot be empty.",
   /** `POST /review`: a blank `text`. */
   review: "text: send the draft, or one public http(s) URL.",
   /** `POST /citecheck` with neither `text` nor `pairs`. */
@@ -2360,8 +2379,7 @@ class VerificationsNamespace {
 
   /**
    * Fetch a single verification. Accepts anon callers — any non-hidden
-   * public claim resolves without an API key (the old `library.get`
-   * endpoint merged into this one).
+   * public claim resolves without an API key.
    *
    * With a key, also accepts the `taskId` that `verify` returned: a completed
    * run resolves to its verification. A run with no result yet throws
@@ -2439,162 +2457,6 @@ class VerificationsNamespace {
       }
       throw exc;
     }
-  }
-
-  /**
-   * Public verifications semantically related to this one (pgvector ANN).
-   * Server clamps `limit` to 10. Excludes the verification itself and
-   * editorially-hidden claims. Keyless like the library/detail reads; a
-   * key additionally unlocks the caller's own verifications.
-   *
-   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
-   */
-  async related(
-    verificationId: string,
-    { limit = 5, ...options }: { limit?: number } & RequestOptions = {},
-  ): Promise<Result<RelatedVerifications>> {
-    const id = requirePathId("verifications.related", "verification_id", verificationId);
-    const call = resolveCall(this.client, options, "verifications.related");
-    return asResult(
-      await this.client.request<RelatedVerifications>({
-        method: "GET",
-        path: `/verifications/${id}/related`,
-        query: { limit },
-        authRequired: false,
-        authOptional: true, // send the key if we have one → owner sees own rows
-        ...transportOf(call),
-      }),
-    );
-  }
-}
-
-class AskNamespace {
-  constructor(private readonly client: Lenz) {}
-
-  /**
-   * The follow-up conversation on a verification.
-   *
-   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
-   */
-  async history(verificationId: string, options?: RequestOptions): Promise<Result<AskHistory>> {
-    const id = requirePathId("ask.history", "verification_id", verificationId);
-    const call = resolveCall(this.client, options, "ask.history");
-    return asResult(
-      await this.client.request<AskHistory>({
-        method: "GET",
-        path: `/ask/${id}`,
-        ...transportOf(call),
-      }),
-    );
-  }
-
-  /**
-   * Ask a follow-up question about a verification. Paid, one credit per turn.
-   *
-   * Sends a random `Idempotency-Key` per call, reused across this client's
-   * own retries, so a retried question replays its reply rather than asking
-   * (and charging) again. Pin one with `idempotencyKey`, or send none with
-   * `idempotency: false`. See {@link AskSendInput.idempotencyKey}.
-   *
-   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
-   */
-  async send(
-    verificationId: string,
-    input: AskSendInput,
-    options?: RequestOptions,
-  ): Promise<Result<AskReply>> {
-    const id = requirePathId("ask.send", "verification_id", verificationId);
-    requireObject(input, "ask.send", "input");
-    const message: unknown = input.message;
-    if (message === undefined || (typeof message === "string" && !hasText(message))) {
-      throw blankInput(
-        message === undefined ? BLANK_SENTENCES.absent("message") : BLANK_SENTENCES.message,
-        "blank_input",
-        "Pass the follow-up question as `message`.",
-        "message",
-      );
-    }
-    const call = resolveCall(this.client, options, "ask.send");
-    const body: Record<string, unknown> = { message: input.message };
-    if (input.language) body.language = input.language;
-    const idempotencyKey = await callIdempotencyKey(input);
-    const headers: Record<string, string> = {};
-    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-    return asResult(
-      await this.client.request<AskReply>({
-        method: "POST",
-        path: `/ask/${id}`,
-        json: body,
-        headers,
-        ...transportOf(call),
-      }),
-    );
-  }
-
-  async reset(verificationId: string, options?: RequestOptions): Promise<boolean> {
-    const id = requirePathId("ask.reset", "verification_id", verificationId);
-    const call = resolveCall(this.client, options, "ask.reset");
-    await this.client.request<unknown>({
-      method: "DELETE",
-      path: `/ask/${id}`,
-      ...transportOf(call),
-    });
-    return true;
-  }
-}
-
-class LibraryNamespace {
-  constructor(private readonly client: Lenz) {}
-
-  async list(input: LibraryListInput = {}, options?: RequestOptions): Promise<Result<LibraryList>> {
-    requireObject(input, "library.list", "input");
-    const call = resolveCall(this.client, options, "library.list");
-    const body = await this.client.request<LibraryList>({
-      method: "GET",
-      path: "/library",
-      query: {
-        page: input.page ?? 1,
-        sort: input.sort ?? "recent",
-        search: input.search,
-        domain: input.domain,
-        entity: input.entity,
-        curated: input.curated?.length ? input.curated.join(",") : undefined,
-        verdict: input.verdict,
-      },
-      authRequired: false,
-      ...transportOf(call),
-    });
-    return asResult(aliased(this.client, (b) => normalizeVerificationList(b, true), body));
-  }
-
-  /**
-   * Every library item matching the filters, across pages: one `list`
-   * request per page, made when the previous page has been read; starts at
-   * `page` (default 1) and stops on a short or empty page, or one that
-   * reaches `total`. Throws when called for `sort: "random"`, whose pages are
-   * separate samples, not one list, and for a start page below 1.
-   *
-   * The request options apply to every page request; they are checked when
-   * `listAll` is called. A `signal` also stops the items of a page already
-   * read: once it fires, the next item throws `LenzAbortError`.
-   */
-  listAll(input: LibraryListInput = {}, options?: RequestOptions): AsyncIterable<LibraryItem> {
-    requireObject(input, "library.listAll", "input");
-    const call = resolveCall(this.client, options, "library.listAll", "request", false);
-    if (input.sort === "random") {
-      throw argumentError(
-        'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
-        "invalid_argument",
-        "sort",
-      );
-    }
-    const first = startPage(input.page);
-    // Every page uses the options as they were when listAll was called.
-    return walkPages(
-      (page: number) => this.list({ ...input, page }, call.own),
-      first,
-      call.signals,
-    );
   }
 }
 
@@ -2738,8 +2600,6 @@ export class Lenz {
   private copyTimeoutMs: number | undefined;
 
   readonly verifications: VerificationsNamespace;
-  readonly ask: AskNamespace;
-  readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
     requireObject(opts, "new Lenz()", "options");
@@ -2768,8 +2628,6 @@ export class Lenz {
     this.logger = opts.logger;
 
     this.verifications = new VerificationsNamespace(this);
-    this.ask = new AskNamespace(this);
-    this.library = new LibraryNamespace(this);
   }
 
   /**
@@ -2843,8 +2701,8 @@ export class Lenz {
     });
     // Each namespace is copied from the one it replaces (its class and any
     // method set on it kept) and bound to the copy.
-    const namespaces = copy as unknown as Record<"verifications" | "ask" | "library", object>;
-    for (const name of ["verifications", "ask", "library"] as const) {
+    const namespaces = copy as unknown as Record<"verifications", object>;
+    for (const name of ["verifications"] as const) {
       const from = namespaces[name];
       namespaces[name] = Object.assign(
         Object.create(Object.getPrototypeOf(from) as object) as object,
@@ -2942,7 +2800,7 @@ export class Lenz {
 
   /**
    * Pull the verifiable claims out of any text, or out of a public web page,
-   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp) given its URL. Sync, free, capped at 1000
+   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm) given its URL. Sync, free, capped at 1000
    * calls/account/day (shared across your API keys).
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
@@ -3005,8 +2863,8 @@ export class Lenz {
   }
 
   /**
-   * Pull the verifiable claims out of a `.docx`, `.pdf`, or image (`.png`,
-   * `.jpg`, `.webp`) file (up to 10 MB). Sync, free, capped at 1000 calls/account/day.
+   * Pull the verifiable claims out of a Word (.docx), PDF (.pdf),
+   * image (.png, .jpg, .webp), or audio (.mp3, .m4a, .wav, .ogg, .webm) file (up to 10 MB). Sync, free, capped at 1000 calls/account/day.
    *
    * Pass `focus` to narrow the result to the claims you care about, e.g.
    * `"market size and competitors"`. A focus can only SELECT from the claims
@@ -3040,14 +2898,23 @@ export class Lenz {
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
+    const lowerFn = filename.toLowerCase();
+    const isAudio =
+      uploadBlob.type.startsWith("audio/") ||
+      lowerFn.endsWith(".mp3") ||
+      lowerFn.endsWith(".m4a") ||
+      lowerFn.endsWith(".wav") ||
+      lowerFn.endsWith(".ogg") ||
+      lowerFn.endsWith(".webm");
+    const extractFloorMs = isAudio ? AUDIO_EXTRACT_TIMEOUT_MS : EXTRACT_TIMEOUT_MS;
+
     const out = await this.request<ExtractedClaims>({
       method: "POST",
       path: "/extract/file",
       body: form,
       headers,
       ...transportOf(call),
-      timeoutMs:
-        call.timeoutMs ?? this.copyTimeoutMs ?? Math.max(this.timeoutMs, EXTRACT_TIMEOUT_MS),
+      timeoutMs: call.timeoutMs ?? this.copyTimeoutMs ?? Math.max(this.timeoutMs, extractFloorMs),
     });
     return asResult(aliased(this, (b) => normalizeExtract(b, options.locate), out));
   }
@@ -3354,7 +3221,7 @@ export class Lenz {
 
   /**
    * Start a review of a draft (text or one public http(s) URL to a web page,
-   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)): Lenz reads its claims, gives each a
+   * Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm)): Lenz reads its claims, gives each a
    * quick verdict, and deep-checks the ones that look wrong or uncertain.
    * Returns the receipt at once; read the review with `getReview`, wait with
    * `reviewAndWait`, or receive `review.completed` at your webhook.
@@ -3713,6 +3580,62 @@ export class Lenz {
   }
 
   /**
+   * List reviews of the account, newest first, paginated:
+   *
+   * ```ts
+   * const page = await client.listReviews({ page: 1, pageSize: 20 });
+   * console.log(page.items.length, page.total);
+   * ```
+   *
+   * Default query sends `page=1`. `pageSize` (1-100) is sent only when set.
+   * Throws {@link LenzValidationError} when `page` or `pageSize` is invalid
+   * before any network request.
+   */
+  async listReviews(options: ListReviewsOptions = {}): Promise<Result<ReviewList>> {
+    requireObject(options, "listReviews", "options");
+    const { page = 1, pageSize, ...opts } = options;
+    checkPageSize(pageSize, "listReviews");
+    const call = resolveCall(this, opts, "listReviews");
+    const body = await this.request<ReviewList>({
+      method: "GET",
+      path: "/reviews",
+      query: { page, page_size: pageSize },
+      ...transportOf(call),
+    });
+    return asResult(aliased(this, (b) => normalizeReviewList(b, true), body));
+  }
+
+  /**
+   * Every review of the account, newest first, across pages:
+   *
+   * ```ts
+   * for await (const r of client.listAllReviews()) console.log(r.review_id);
+   * ```
+   *
+   * One `listReviews` request per page, made when the previous page has been read;
+   * starts at `page` (default 1; a page below 1 throws when called) and stops
+   * on a short or empty page, or one that reaches `total`. `pageSize` (1-100,
+   * checked when called) is asked of every page; without it the server's
+   * default applies.
+   *
+   * The request options apply to every page request; they are checked when
+   * `listAllReviews` is called. A `signal` also stops the items of a page already
+   * read: once it fires, the next item throws `LenzAbortError`.
+   */
+  listAllReviews(options: ListReviewsOptions = {}): AsyncIterable<ReviewListItem> {
+    requireObject(options, "listAllReviews", "options");
+    const { page, pageSize, ...opts } = options;
+    const first = startPage(page, "listAllReviews()");
+    checkPageSize(pageSize, "listAllReviews");
+    const call = resolveCall(this, opts, "listAllReviews", "request", false);
+    return walkPages(
+      (p) => this.listReviews({ ...call.own, page: p, pageSize }),
+      first,
+      call.signals,
+    );
+  }
+
+  /**
    * Start a review and poll it until it ends; returns the completed review.
    *
    * Polls on the review's `poll_after_seconds` (never tighter than 5 s) and
@@ -3777,7 +3700,7 @@ export class Lenz {
   }
 
   /**
-   * Upload a `.docx`, `.pdf`, or image (`.png`, `.jpg`, `.webp`) file to review.
+   * Upload a `.docx`, `.pdf`, image (`.png`, `.jpg`, `.webp`), or audio (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) file to review.
    *
    * Takes a `Blob`, `ArrayBuffer`, or `Uint8Array`.
    * When passing an `ArrayBuffer` or `Uint8Array` (or a `Blob` without a `name` property),
@@ -3844,6 +3767,26 @@ export class Lenz {
     const headers: Record<string, string> = {};
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
+    const lowerFn = filename.toLowerCase();
+    const isAudio =
+      uploadBlob.type.startsWith("audio/") ||
+      lowerFn.endsWith(".mp3") ||
+      lowerFn.endsWith(".m4a") ||
+      lowerFn.endsWith(".wav") ||
+      lowerFn.endsWith(".ogg") ||
+      lowerFn.endsWith(".webm");
+    const isImage =
+      uploadBlob.type.startsWith("image/") ||
+      lowerFn.endsWith(".png") ||
+      lowerFn.endsWith(".jpg") ||
+      lowerFn.endsWith(".jpeg") ||
+      lowerFn.endsWith(".webp");
+    const timeoutFloor = isAudio ? EXTRACT_TIMEOUT_MS : isImage ? URL_TIMEOUT_FLOOR_MS : undefined;
+    const timeoutMs =
+      call.timeoutMs ??
+      this.copyTimeoutMs ??
+      (timeoutFloor ? Math.max(this.timeoutMs, timeoutFloor) : undefined);
+
     try {
       const receipt = await this.request<ReviewStarted>({
         method: "POST",
@@ -3852,6 +3795,7 @@ export class Lenz {
         headers,
         conflictReceipt: "review_id",
         ...transportOf(call),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
       return asResult(settled(receipt, false));
     } catch (exc) {
@@ -3870,7 +3814,7 @@ export class Lenz {
   }
 
   /**
-   * Upload a `.docx`, `.pdf`, or image (`.png`, `.jpg`, `.webp`) file to review and wait for completion.
+   * Upload a `.docx`, `.pdf`, image (`.png`, `.jpg`, `.webp`), or audio (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) file to review and wait for completion.
    */
   async reviewFileAndWait(
     file: Blob | ArrayBuffer | Uint8Array,
@@ -5006,7 +4950,7 @@ export class Lenz {
       throw new LenzMissingKeyError({
         message: "API key required",
         cause: "This method requires authentication; no API key was provided.",
-        fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-credentials. Library endpoints work without a key.",
+        fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-credentials.",
         docUrl: "https://lenz.io/docs/auth",
       });
     }

@@ -6,9 +6,19 @@ All notable changes to this SDK are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `listReviews(options?) -> Promise<Result<ReviewList>>` and `listAllReviews(options?) -> AsyncIterable<ReviewListItem>`: list the account's API reviews (`GET /api/v1/reviews`, newest first, `pageSize` 1 to 100). Exports `ReviewList`, `ReviewListItem`, and `ListReviewsOptions` from both entry points.
+- Support for audio file uploads (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) and direct audio URLs across `extractFile`, `reviewFile`, and `reviewFileAndWait`.
+
 ### Changed
 
 - Docs: `sr` (Serbian, answered in the Latin script) is listed among the supported `language` codes; the API now accepts it. No code change: the SDK sends `language` as given.
+
+### Removed
+
+- `client.ask` (`ask.send`, `ask.history`, `ask.reset`) and types `AskHistory`, `AskMessage`, `AskReply`, and `AskSendInput`, following the retirement of `GET|POST|DELETE /api/v1/ask/{verification_id}`.
+- `client.library` (`library.list`, `library.paginate`, `library.iter`) and `client.verifications.related` (plus `LibraryItem`, `LibraryList`, `LibraryListOptions`, `RelatedVerification`, `RelatedVerifications`, and `RelatedOptions`), following the retirement of `GET /api/v1/library` and `GET /api/v1/verifications/{id}/related`.
 
 ## [3.6.0] - 2026-10-31
 

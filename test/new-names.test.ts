@@ -315,14 +315,14 @@ describe("bodies keep what they had", () => {
       event: "verification.needs_input",
       task_id: "t",
       status: "needs_input",
-      needs_input: { reason: "multi_claim", claims: [{ text: null, domain: "" }], hint: "h" },
+      needs_input: { reason: "multi_claim", claims: [{ text: null }], hint: "h" },
       attempt: 1,
       delivered_at: new Date().toISOString(),
     };
     const out = (await runScenario(SDK, "webhook__adhoc", { payload })) as {
       value: { needsInput: { claims: Array<Record<string, unknown>> } };
     };
-    expect(out.value.needsInput.claims[0]).toEqual({ text: null, claim: null, domain: "" });
+    expect(out.value.needsInput.claims[0]).toEqual({ text: null, claim: null });
   });
 
   it("citecheckAndWait does not add more_citations to a body without it", async () => {

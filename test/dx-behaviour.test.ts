@@ -55,7 +55,6 @@ const key = (c: FetchCall) => new Headers(c.init.headers).get("Idempotency-Key")
 const sent = (c: FetchCall) => JSON.parse(String(c.init.body)) as unknown;
 
 const BATCH_BODY = { batch_id: "b", items: [{ task_id: "t1", claim: "a" }] };
-const ASK_BODY = { role: "expert", content: "Because.", created_at: "2026-10-11T00:00:00Z" };
 const COMPLETED = {
   status: "completed",
   result: {
@@ -77,7 +76,7 @@ async function settle(p: Promise<unknown>): Promise<unknown> {
 
 // ── A1 ────────────────────────────────────────────────────────────────────
 
-describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () => {
+describe("A1: verifyBatch sends an Idempotency-Key by default", () => {
   const cases = [
     {
       name: "verifyBatch",
@@ -85,13 +84,6 @@ describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () =
       call: (client: Lenz, extra: Record<string, unknown> = {}) =>
         client.verifyBatch({ claims: [{ claim: "a" }], ...extra }),
       wire: { claims: [{ text: "a" }] },
-    },
-    {
-      name: "ask.send",
-      body: ASK_BODY,
-      call: (client: Lenz, extra: Record<string, unknown> = {}) =>
-        client.ask.send("vid_1", { message: "Why?", ...extra }),
-      wire: { message: "Why?" },
     },
   ] as const;
 
@@ -119,7 +111,7 @@ describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () =
         const client = new Lenz({ apiKey: "lenz_t", fetch });
         const pending = c.call(client);
         await vi.advanceTimersByTimeAsync(20_000);
-        expect(await pending).toMatchObject(c.name === "ask.send" ? ASK_BODY : { batch_id: "b" });
+        expect(await pending).toMatchObject({ batch_id: "b" });
       } finally {
         vi.useRealTimers();
       }
@@ -146,7 +138,7 @@ describe("A1: verifyBatch and ask.send send an Idempotency-Key by default", () =
         vi.useRealTimers();
       }
       expect(out).not.toBeInstanceOf(Error);
-      expect(out).toMatchObject(c.name === "ask.send" ? ASK_BODY : { batch_id: "b" });
+      expect(out).toMatchObject({ batch_id: "b" });
       expect(calls.map(key)).toEqual(["caller-key", "caller-key", "caller-key"]);
       expect(calls.map(sent)).toEqual([c.wire, c.wire, c.wire]);
     });
