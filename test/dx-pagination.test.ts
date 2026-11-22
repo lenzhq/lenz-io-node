@@ -1,16 +1,15 @@
 /**
- * 3.0 pagination iterators (B8): `verifications.listAll` and
- * `library.listAll` walk the pages one request at a time.
+ * 3.0 pagination iterators (B8): `verifications.listAll`
+ * walks the pages one request at a time.
  *
  * Contract (the same in the Python SDK's `iter`): the page size is read from
  * each response (no size is sent), the start page is honoured, the walk
- * stops on a short or empty page, `sort: "random"` is refused (its pages are
- * not a partition), and nothing is fetched before it is asked for.
+ * stops on a short or empty page, and nothing is fetched before it is asked for.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
-import { Lenz, type LibraryItem, type VerificationListItem } from "../src/index.js";
+import { Lenz, type VerificationListItem } from "../src/index.js";
 
 function pages(...bodies: Array<{ ids: string[]; page: number; page_size: number }>) {
   const urls: string[] = [];
@@ -111,36 +110,6 @@ describe("B8: verifications.listAll", () => {
   });
 });
 
-describe("B8: library.listAll", () => {
-  it("forwards the filters on every page", async () => {
-    const { fetch, urls } = pages(
-      { ids: ["a"], page: 2, page_size: 1 },
-      { ids: [], page: 3, page_size: 1 },
-    );
-    const client = new Lenz({ fetch });
-    const rows: LibraryItem[] = await collect(
-      client.library.listAll({ page: 2, search: "tower", verdict: "False", sort: "most_true" }),
-    );
-    expect(ids(rows)).toEqual(["a"]);
-    for (const [i, u] of urls.entries()) {
-      const q = new URL(u).searchParams;
-      expect(q.get("page")).toBe(String(i + 2));
-      expect(q.get("search")).toBe("tower");
-      expect(q.get("verdict")).toBe("False");
-      expect(q.get("sort")).toBe("most_true");
-    }
-  });
-
-  it("refuses sort: random when called, before any request", () => {
-    const { fetch, urls } = pages({ ids: ["a"], page: 1, page_size: 1 });
-    const client = new Lenz({ fetch });
-    expect(() => client.library.listAll({ sort: "random" })).toThrow(
-      'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
-    );
-    expect(urls).toHaveLength(0);
-  });
-});
-
 describe("S5: listAll stops on every end signal", () => {
   function raw(...bodies: Array<Record<string, unknown>>) {
     const urls: string[] = [];
@@ -188,8 +157,8 @@ describe("S5: listAll stops on every end signal", () => {
       { items: rows("a", "b"), total: 99, page: 1, page_size: 2 },
       { items: rows("a", "b"), total: 99, page: 1, page_size: 2 },
     );
-    const client = new Lenz({ fetch });
-    expect(ids(await collect(client.library.listAll()))).toEqual(["a", "b"]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    expect(ids(await collect(client.verifications.listAll()))).toEqual(["a", "b"]);
     expect(urls).toHaveLength(2);
   });
 
@@ -197,7 +166,6 @@ describe("S5: listAll stops on every end signal", () => {
     const { fetch, urls } = raw();
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     expect(() => client.verifications.listAll({ page })).toThrow(/page/);
-    expect(() => client.library.listAll({ page })).toThrow(/page/);
     expect(urls).toHaveLength(0);
   });
 });

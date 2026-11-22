@@ -272,13 +272,6 @@ const METHODS: Method[] = [
     run: (c, o) => c.verifications.delete("v1", o),
   },
   {
-    name: "verifications.related",
-    python: "verifications.related",
-    takes: "all",
-    replies: [{ body: { items: [] } }],
-    run: (c, o) => c.verifications.related("v1", { limit: 3, ...o }),
-  },
-  {
     name: "ask.history",
     python: "ask.history",
     takes: "all",
@@ -298,20 +291,6 @@ const METHODS: Method[] = [
     takes: "all",
     replies: [{ status: 200, body: { ok: true } }],
     run: (c, o) => c.ask.reset("v1", o),
-  },
-  {
-    name: "library.list",
-    python: "library.list",
-    takes: "all",
-    replies: [{ body: LIST(2, 1, 1) }],
-    run: (c, o) => c.library.list({ page: 2, search: "s", curated: ["x"] }, o),
-  },
-  {
-    name: "library.listAll",
-    python: "library.iter",
-    takes: "all",
-    replies: [{ body: LIST(1, 2, 3) }, { body: LIST(2, 1, 3) }],
-    run: (c, o) => drain(c.library.listAll({ search: "s" }, o)),
   },
   {
     name: "wait",
@@ -429,7 +408,6 @@ describe("the parity map", () => {
     own(Lenz.prototype, "");
     own(Object.getPrototypeOf(client.verifications) as object, "verifications.");
     own(Object.getPrototypeOf(client.ask) as object, "ask.");
-    own(Object.getPrototypeOf(client.library) as object, "library.");
     // Private helpers TypeScript leaves on the prototype.
     for (const internal of ["submit", "log"]) names.delete(internal);
     const mapped = new Set([...METHODS.map((m) => m.name), ...Object.keys(NOT_A_CALL)]);
@@ -697,7 +675,7 @@ describe("maxRetries precedence", () => {
   });
 
   it("reaches every page of a listAll", async () => {
-    expect(await attempts((c) => drain(c.library.listAll({}, { maxRetries: 1 })))).toBe(2);
+    expect(await attempts((c) => drain(c.verifications.listAll({ maxRetries: 1 })))).toBe(2);
   });
 
   it("on a wait, is the submit's; the polls keep the client's", async () => {
@@ -774,7 +752,6 @@ describe("validation: one rule for every per-request setting", () => {
       await refused(() => c.assess({ claim: "a" }, o), fetch);
       await refused(() => c.getReview("r1", o), fetch);
       await refused(() => c.verifications.list(o), fetch);
-      await refused(() => c.library.listAll({}, o), fetch);
       await refused(() => c.verifications.listAll(o), fetch);
       await refused(() => c.withOptions(o), fetch);
       // On the 2.x fields, null still means "not given" (below).
@@ -938,9 +915,7 @@ describe("validation: one rule for every per-request setting", () => {
     const fetch = noNetwork();
     const c = new Lenz({ apiKey: "lenz_t", fetch });
     expect(() => c.verifications.listAll({ maxRetries: -1 })).toThrow(/maxRetries/);
-    expect(() => c.library.listAll({}, { headers: { Host: "x" } })).toThrow(/Host/);
-    // The options first, then the input.
-    expect(() => c.library.listAll({ sort: "random" }, { maxRetries: -1 })).toThrow(/maxRetries/);
+    expect(() => c.verifications.listAll({ headers: { Host: "x" } })).toThrow(/Host/);
   });
 
   it("valid constructor values are taken as before", async () => {
@@ -1098,11 +1073,11 @@ describe("a call's options are copied when it is made", () => {
     ]);
   });
 
-  it("library.listAll: the same, options object and all", async () => {
+  it("verifications.listAll: the same, options object and all", async () => {
     const { fetch, sent } = recorder([{ body: LIST(1, 2, 3) }, { body: LIST(2, 1, 3) }]);
     const c = new Lenz({ apiKey: "lenz_t", fetch });
     const options: RequestOptions = { headers: { "X-A": "1" } };
-    const it = c.library.listAll({}, options)[Symbol.asyncIterator]();
+    const it = c.verifications.listAll(options)[Symbol.asyncIterator]();
     await it.next();
     options.headers = { "X-A": "changed" };
     while (!(await it.next()).done);

@@ -272,49 +272,6 @@ exports[`frozen: the request of every call form > getStatus 1`] = `
 ]
 `;
 
-exports[`frozen: the request of every call form > library.list 1`] = `
-[
-  [
-    "GET https://lenz.io/api/v1/library?page=1&sort=recent",
-    "body: <none>",
-    "User-Agent: lenz-io-node/<VERSION>",
-    "Accept: application/json",
-    "X-Lenz-API-Version: 2026-10-11",
-  ],
-]
-`;
-
-exports[`frozen: the request of every call form > library.list, every filter 1`] = `
-[
-  [
-    "GET https://lenz.io/api/v1/library?page=2&sort=most_true&search=a+b&domain=health&entity=WHO&curated=x%2Cy&verdict=False",
-    "body: <none>",
-    "User-Agent: lenz-io-node/<VERSION>",
-    "Accept: application/json",
-    "X-Lenz-API-Version: 2026-10-11",
-  ],
-]
-`;
-
-exports[`frozen: the request of every call form > library.listAll 1`] = `
-[
-  [
-    "GET https://lenz.io/api/v1/library?page=1&sort=recent&search=s",
-    "body: <none>",
-    "User-Agent: lenz-io-node/<VERSION>",
-    "Accept: application/json",
-    "X-Lenz-API-Version: 2026-10-11",
-  ],
-  [
-    "GET https://lenz.io/api/v1/library?page=2&sort=recent&search=s",
-    "body: <none>",
-    "User-Agent: lenz-io-node/<VERSION>",
-    "Accept: application/json",
-    "X-Lenz-API-Version: 2026-10-11",
-  ],
-]
-`;
-
 exports[`frozen: the request of every call form > raw request with a lowercase accept 1`] = `
 [
   [
@@ -514,32 +471,6 @@ exports[`frozen: the request of every call form > verifications.listAll from pag
   ],
   [
     "GET https://lenz.io/api/v1/verifications?page=3",
-    "body: <none>",
-    "User-Agent: lenz-io-node/<VERSION>",
-    "Accept: application/json",
-    "X-Lenz-API-Version: 2026-10-11",
-    "Authorization: Bearer lenz_t",
-  ],
-]
-`;
-
-exports[`frozen: the request of every call form > verifications.related 1`] = `
-[
-  [
-    "GET https://lenz.io/api/v1/verifications/v1/related?limit=5",
-    "body: <none>",
-    "User-Agent: lenz-io-node/<VERSION>",
-    "Accept: application/json",
-    "X-Lenz-API-Version: 2026-10-11",
-    "Authorization: Bearer lenz_t",
-  ],
-]
-`;
-
-exports[`frozen: the request of every call form > verifications.related limit 3 1`] = `
-[
-  [
-    "GET https://lenz.io/api/v1/verifications/v1/related?limit=3",
     "body: <none>",
     "User-Agent: lenz-io-node/<VERSION>",
     "Accept: application/json",

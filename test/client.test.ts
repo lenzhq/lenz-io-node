@@ -87,11 +87,11 @@ afterEach(() => {
 });
 
 describe("Construction", () => {
-  it("no api key permits library", async () => {
-    const { fetch } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+  it("no api key permits verifications.get", async () => {
+    const { fetch } = makeFetch([{ body: { verification_id: "vid_1", claim: "Earth is round" } }]);
     const client = new Lenz({ fetch });
-    const page = await client.library.list();
-    expect(page.total).toBe(0);
+    const item = await client.verifications.get("vid_1");
+    expect(item.verification_id).toBe("vid_1");
   });
 
   it("auth-required method without key raises with link", async () => {
@@ -107,10 +107,12 @@ describe("Construction", () => {
   });
 
   it("base url override routes through alternate base", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const { fetch, calls } = makeFetch([
+      { body: { verification_id: "vid_1", claim: "Earth is round" } },
+    ]);
     const client = new Lenz({ baseUrl: "http://localhost:8001/api/v1", fetch });
-    await client.library.list();
-    expect(calls[0]!.url).toContain("http://localhost:8001/api/v1/library");
+    await client.verifications.get("vid_1");
+    expect(calls[0]!.url).toContain("http://localhost:8001/api/v1/verifications/vid_1");
   });
 
   it("X-Lenz-API-Version header sent on every request", async () => {
@@ -154,7 +156,7 @@ describe("Construction", () => {
     expect((captured as LenzAuthError).message).toContain("API key required");
     expect(calls).toHaveLength(0);
     // A keyless read still works, and sends no Authorization header.
-    await client.library.list();
+    await client.verifications.get("vid_1");
     expect(new Headers(calls[0]!.init.headers).has("Authorization")).toBe(false);
   });
 
@@ -1671,41 +1673,6 @@ describe("Resource namespaces", () => {
     ).toBeUndefined();
   });
 
-  it("verifications.related returns typed items with flat verdict + lenz_score", async () => {
-    const { fetch, calls } = makeFetch([
-      {
-        body: {
-          items: [
-            {
-              verification_id: "rel00001",
-              claim: "A related claim",
-              verdict: "False",
-              confidence: "medium",
-              lenz_score: 2,
-              url: "https://lenz.io/c/foo-rel00001",
-              distance: 0.31,
-            },
-          ],
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const related = await client.verifications.related("vid_1", { limit: 5 });
-    expect(calls[0]!.url).toContain("limit=5");
-    expect(related.items).toHaveLength(1);
-    expect(related.items[0]!.verification_id).toBe("rel00001");
-    expect(related.items[0]!.verdict).toBe("False");
-    expect(related.items[0]!.lenz_score).toBe(2);
-    expect(related.items[0]!.distance).toBe(0.31);
-  });
-
-  it("verifications.related empty list", async () => {
-    const { fetch } = makeFetch([{ body: { items: [] } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const related = await client.verifications.related("vid_2");
-    expect(related.items).toEqual([]);
-  });
-
   it("ask.history hits /ask/{id} and returns typed messages", async () => {
     const { fetch, calls } = makeFetch([
       {
@@ -1783,51 +1750,6 @@ describe("Resource namespaces", () => {
     expect(ok).toBe(true);
     expect(calls[0]!.url).toContain("/ask/vid_1");
     expect(calls[0]!.init.method).toBe("DELETE");
-  });
-
-  it("library.list works without api_key", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
-    const client = new Lenz({ fetch });
-    await client.library.list({ page: 1, sort: "recent" });
-    const headers = new Headers(calls[0]!.init.headers);
-    expect(headers.get("Authorization")).toBeNull();
-  });
-
-  it("library.list stays anonymous even when keyed (public content, no authOptional)", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.library.list({ page: 1, sort: "recent" });
-    const headers = new Headers(calls[0]!.init.headers);
-    expect(headers.get("Authorization")).toBeNull();
-  });
-
-  it("library.get is removed (TypeScript surface)", () => {
-    const client = new Lenz();
-    // @ts-expect-error -- library.get was merged into verifications.get
-    const _ref = client.library.get;
-    expect(_ref).toBeUndefined();
-  });
-
-  it("library.list forwards curated / verdict / sort=random as query params", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
-    const client = new Lenz({ fetch });
-    await client.library.list({ curated: ["trivia"], sort: "random", verdict: "True,False" });
-    const url = new URL(calls[0]!.url);
-    expect(url.searchParams.get("curated")).toBe("trivia");
-    expect(url.searchParams.get("sort")).toBe("random");
-    expect(url.searchParams.get("verdict")).toBe("True,False");
-  });
-
-  it("library.list joins multiple curated lists and omits when empty", async () => {
-    const { fetch, calls } = makeFetch([
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-    ]);
-    const client = new Lenz({ fetch });
-    await client.library.list({ curated: ["trivia", "featured"] });
-    expect(new URL(calls[0]!.url).searchParams.get("curated")).toBe("trivia,featured");
-    await client.library.list({ curated: [] });
-    expect(new URL(calls[1]!.url).searchParams.has("curated")).toBe(false);
   });
 });
 
@@ -2208,9 +2130,9 @@ describe("suggested_rewrite", () => {
       page: 1,
       page_size: 20,
     };
-    const { fetch } = makeFetch([{ body }, { body }]);
+    const { fetch } = makeFetch([{ body }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    for (const page of [await client.verifications.list(), await client.library.list()]) {
+    for (const page of [await client.verifications.list()]) {
       const [withRewrite, trueRow, olderRow] = page.items;
       expect(withRewrite!.suggested_rewrite).toBe(REWRITE);
       expect(trueRow!.suggested_rewrite).toBeNull();

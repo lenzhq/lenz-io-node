@@ -388,7 +388,7 @@ describe("an apiKey a header cannot carry is refused before sending", () => {
     await expect(none.usage()).rejects.toBeInstanceOf(LenzAuthError);
     await expect(new Lenz({ apiKey: "   ", fetch }).usage()).rejects.toBeInstanceOf(LenzAuthError);
     await expect(none.withOptions({ apiKey: " " }).usage()).rejects.toBeInstanceOf(LenzAuthError);
-    await none.library.list();
+    await none.verifications.get("vid_1");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.headers.get("authorization")).toBeNull();
   });

@@ -74,7 +74,6 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name.startsWith("account__me_usage_") || name.startsWith("account__api_version_header_")) {
     return [["Usage", (c) => c.usage()]];
   }
-  if (name.startsWith("account__library_")) return [["LibraryList", (c) => c.library.list()]];
   if (name.startsWith("account__ask_history_")) {
     return [["AskHistory", (c) => c.ask.history("v")]];
   }

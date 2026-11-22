@@ -624,19 +624,6 @@ describe("copies and listeners", () => {
     expectAbort(await settle(it.next()));
     expect(sent).toHaveLength(1);
   });
-
-  it("library.listAll: an abort between pages ends before the next page", async () => {
-    const { fetch, sent } = recorder([
-      { body: { items: [{ verification_id: "a" }], total: 4, page: 1, page_size: 1 } },
-    ]);
-    const c = new Lenz({ apiKey: "lenz_t", fetch });
-    const controller = new AbortController();
-    const it = c.library.listAll({}, { signal: controller.signal })[Symbol.asyncIterator]();
-    await it.next();
-    controller.abort();
-    expectAbort(await settle(it.next()));
-    expect(sent).toHaveLength(1);
-  });
 });
 
 describe("an abort from a callback wins over the wait's own result", () => {

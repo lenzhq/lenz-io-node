@@ -127,21 +127,6 @@ export interface EntityRef extends RawBody {
 }
 
 /**
- * An existing public verification that semantically resembles another one,
- * as returned by `related`. Same vocabulary as `Verification` — flat
- * `verdict` / `confidence` / `lenz_score`, no nested object.
- */
-export interface SimilarVerification extends RawBody {
-  verification_id?: string;
-  claim?: string;
-  verdict?: Verdict | (string & NonNullable<unknown>);
-  confidence?: Confidence | (string & NonNullable<unknown>);
-  lenz_score?: number | null;
-  url?: string;
-  distance?: number;
-}
-
-/**
  * The part of an answer's body a result (or an object nested in one) was read
  * from, exactly as the API sent it.
  *
@@ -423,21 +408,6 @@ export interface VerificationListItem extends RawBody {
 
 export interface VerificationList extends RawBody, ResponseMeta {
   items: VerificationListItem[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-/** Same shape as `VerificationListItem` on the public Library list. */
-export type LibraryItem = VerificationListItem;
-
-/** Wrapper for `GET /verifications/{id}/related`. */
-export interface RelatedVerifications extends RawBody, ResponseMeta {
-  items: SimilarVerification[];
-}
-
-export interface LibraryList extends RawBody, ResponseMeta {
-  items: LibraryItem[];
   total: number;
   page: number;
   page_size: number;
@@ -823,11 +793,6 @@ export interface TaskStatus extends RawBody, ResponseMeta {
    */
   candidates?: string[];
   /**
-   * @deprecated Always empty: the API never raised `duplicate_found` for API
-   * tasks and no longer sends it. No replacement.
-   */
-  similar_claims?: SimilarVerification[];
-  /**
    * On a `failed` status, why: `code` (`no_checkable_claim` |
    * `upstream_unavailable` | `internal` | `cancelled`), `detail` (one sentence), `hint`, `failure_class`,
    * `retryable`, `docs_url`.
@@ -1187,9 +1152,8 @@ export interface VerifyInput {
   webhookUrl?: string;
   /**
    * "private" (default, owner-only) or "unlisted" (readable by
-   * verification_id and at the /c/ URL, but never listed in the Library
-   * or search). Omitted from the request body when unset — the server
-   * applies its "private" default.
+   * verification_id and at the /c/ URL, but never listed in search).
+   * Omitted from the request body when unset — the server applies its "private" default.
    */
   visibility?: "private" | "unlisted";
   /**
@@ -1515,18 +1479,6 @@ export interface SelectInput {
    * replays too. Wins over `idempotency`.
    */
   idempotencyKey?: string;
-}
-
-export interface LibraryListInput {
-  page?: number;
-  sort?: "recent" | "most_true" | "most_untrue" | "relevance" | "random";
-  search?: string;
-  domain?: string;
-  entity?: string;
-  /** Restrict to one or more named curated collections, e.g. `["trivia"]`. */
-  curated?: string[];
-  /** Comma-separated verdict labels, e.g. "True,False". Others: "Mostly True", "Mixed", "Mostly False". */
-  verdict?: string;
 }
 
 /**

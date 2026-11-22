@@ -500,7 +500,7 @@ describe("a completed poll that carries no result", () => {
 // ── 4: httpStatus and headers on top-level results, runtime side ──
 
 describe("every top-level result carries httpStatus and headers", () => {
-  it("select, getCertificate and related too", async () => {
+  it("select and getCertificate too", async () => {
     const { fetch } = server((s) => {
       if (s.url.includes("/select")) return { status: 202, body: { batch_id: "b", items: [] } };
       if (s.url.includes("/certificate")) return { body: { verification_id: "abcd1234" } };
@@ -510,7 +510,6 @@ describe("every top-level result carries httpStatus and headers", () => {
     const outs: Array<[unknown, number]> = [
       [await c.select("t1", { claims: ["a"] }), 202],
       [await c.verifications.getCertificate("abcd1234"), 200],
-      [await c.verifications.related("abcd1234"), 200],
     ];
     for (const [out, code] of outs) {
       const o = out as { httpStatus: number; headers: Record<string, string> };

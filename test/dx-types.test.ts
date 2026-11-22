@@ -14,7 +14,6 @@ import type {
   Depth,
   LenzLogger,
   LenzOptions,
-  SimilarVerification,
   Verdict,
   VerdictLabel,
   Verification,
@@ -52,9 +51,6 @@ describe("B6: verdict and confidence name their values", () => {
     expectTypeOf<AssessClaim["confidence"]>().toEqualTypeOf<Confidence | Open | undefined>();
     expectTypeOf<VerificationListItem["verdict"]>().toEqualTypeOf<
       VerificationVerdict | Verdict | Open | undefined
-    >();
-    expectTypeOf<SimilarVerification["confidence"]>().toEqualTypeOf<
-      Confidence | Open | undefined
     >();
   });
 

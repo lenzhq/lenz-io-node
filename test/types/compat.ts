@@ -282,22 +282,12 @@ export const new_ExtractedEntity: New.ExtractedEntity = value<Old.ExtractedEntit
 export const old_ExtractedEntity: Old.ExtractedEntity = value<New.ExtractedEntity>();
 export const new_FailureClass: New.FailureClass = value<Old.FailureClass>();
 export const old_FailureClass: Old.FailureClass = value<New.FailureClass>();
-export const new_LibraryItem: New.LibraryItem = value<Old.LibraryItem>();
-export const old_LibraryItem: Old.LibraryItem = value<New.LibraryItem>();
-export const new_LibraryList: New.LibraryList = value<Old.LibraryList>();
-export const old_LibraryList: Old.LibraryList = value<New.LibraryList>();
-export const new_LibraryListInput: New.LibraryListInput = value<Old.LibraryListInput>();
-export const old_LibraryListInput: Old.LibraryListInput = value<New.LibraryListInput>();
 export const new_OnProgress: New.OnProgress = value<Old.OnProgress>();
 export const old_OnProgress: Old.OnProgress = value<New.OnProgress>();
 export const new_Progress: New.Progress = value<Old.Progress>();
 export const old_Progress: Old.Progress = value<New.Progress>();
-export const new_RelatedVerifications: New.RelatedVerifications = value<Old.RelatedVerifications>();
-export const old_RelatedVerifications: Old.RelatedVerifications = value<New.RelatedVerifications>();
 export const new_SelectInput: New.SelectInput = value<Old.SelectInput>();
 export const old_SelectInput: Old.SelectInput = value<New.SelectInput>();
-export const new_SimilarVerification: New.SimilarVerification = value<Old.SimilarVerification>();
-export const old_SimilarVerification: Old.SimilarVerification = value<New.SimilarVerification>();
 export const new_Source: New.Source = value<Old.Source>();
 export const old_Source: Old.Source = value<New.Source>();
 export const new_TaskAccepted: New.TaskAccepted = value<Old.TaskAccepted>();
@@ -403,12 +393,9 @@ export const verifications_getCertificate: Old.Lenz["verifications"]["getCertifi
   value<New.Lenz["verifications"]["getCertificate"]>();
 export const verifications_delete: Old.Lenz["verifications"]["delete"] =
   value<New.Lenz["verifications"]["delete"]>();
-export const verifications_related: Old.Lenz["verifications"]["related"] =
-  value<New.Lenz["verifications"]["related"]>();
 export const ask_history: Old.Lenz["ask"]["history"] = value<New.Lenz["ask"]["history"]>();
 export const ask_send: Old.Lenz["ask"]["send"] = value<New.Lenz["ask"]["send"]>();
 export const ask_reset: Old.Lenz["ask"]["reset"] = value<New.Lenz["ask"]["reset"]>();
-export const library_list: Old.Lenz["library"]["list"] = value<New.Lenz["library"]["list"]>();
 
 // Literal event mocks written against the old types still type-check.
 export const failedMock: New.VerificationFailed = {

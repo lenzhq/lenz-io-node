@@ -106,9 +106,6 @@ import type {
   ExtractFileOptions,
   ExtractInput,
   ExtractedClaims,
-  LibraryItem,
-  LibraryList,
-  LibraryListInput,
   OnProgress,
   Progress,
   Citecheck,
@@ -118,7 +115,6 @@ import type {
   ExportReviewOptions,
   GetReviewOptions,
   GetStatusOptions,
-  RelatedVerifications,
   RequestOptions,
   ReviewAndWaitOptions,
   ReviewFull,
@@ -478,7 +474,7 @@ interface SendOptions {
    * Optional-auth endpoint: don't fail when no key, but DO send the key when
    * we have one. The server returns a caller's own private/hidden rows only to
    * the owning bearer, so `verifications.get` opts in (→ a fresh private claim
-   * is retrievable). Purely public reads (`library.list`) leave this off so a
+   * is retrievable). Purely public reads leave this off so a
    * key never reaches an endpoint that doesn't need it.
    */
   authOptional?: boolean;
@@ -2399,8 +2395,7 @@ class VerificationsNamespace {
 
   /**
    * Fetch a single verification. Accepts anon callers — any non-hidden
-   * public claim resolves without an API key (the old `library.get`
-   * endpoint merged into this one).
+   * public claim resolves without an API key.
    *
    * With a key, also accepts the `taskId` that `verify` returned: a completed
    * run resolves to its verification. A run with no result yet throws
@@ -2479,32 +2474,6 @@ class VerificationsNamespace {
       throw exc;
     }
   }
-
-  /**
-   * Public verifications semantically related to this one (pgvector ANN).
-   * Server clamps `limit` to 10. Excludes the verification itself and
-   * editorially-hidden claims. Keyless like the library/detail reads; a
-   * key additionally unlocks the caller's own verifications.
-   *
-   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
-   */
-  async related(
-    verificationId: string,
-    { limit = 5, ...options }: { limit?: number } & RequestOptions = {},
-  ): Promise<Result<RelatedVerifications>> {
-    const id = requirePathId("verifications.related", "verification_id", verificationId);
-    const call = resolveCall(this.client, options, "verifications.related");
-    return asResult(
-      await this.client.request<RelatedVerifications>({
-        method: "GET",
-        path: `/verifications/${id}/related`,
-        query: { limit },
-        authRequired: false,
-        authOptional: true, // send the key if we have one → owner sees own rows
-        ...transportOf(call),
-      }),
-    );
-  }
 }
 
 class AskNamespace {
@@ -2579,61 +2548,6 @@ class AskNamespace {
       ...transportOf(call),
     });
     return true;
-  }
-}
-
-class LibraryNamespace {
-  constructor(private readonly client: Lenz) {}
-
-  async list(input: LibraryListInput = {}, options?: RequestOptions): Promise<Result<LibraryList>> {
-    requireObject(input, "library.list", "input");
-    const call = resolveCall(this.client, options, "library.list");
-    const body = await this.client.request<LibraryList>({
-      method: "GET",
-      path: "/library",
-      query: {
-        page: input.page ?? 1,
-        sort: input.sort ?? "recent",
-        search: input.search,
-        domain: input.domain,
-        entity: input.entity,
-        curated: input.curated?.length ? input.curated.join(",") : undefined,
-        verdict: input.verdict,
-      },
-      authRequired: false,
-      ...transportOf(call),
-    });
-    return asResult(aliased(this.client, (b) => normalizeVerificationList(b, true), body));
-  }
-
-  /**
-   * Every library item matching the filters, across pages: one `list`
-   * request per page, made when the previous page has been read; starts at
-   * `page` (default 1) and stops on a short or empty page, or one that
-   * reaches `total`. Throws when called for `sort: "random"`, whose pages are
-   * separate samples, not one list, and for a start page below 1.
-   *
-   * The request options apply to every page request; they are checked when
-   * `listAll` is called. A `signal` also stops the items of a page already
-   * read: once it fires, the next item throws `LenzAbortError`.
-   */
-  listAll(input: LibraryListInput = {}, options?: RequestOptions): AsyncIterable<LibraryItem> {
-    requireObject(input, "library.listAll", "input");
-    const call = resolveCall(this.client, options, "library.listAll", "request", false);
-    if (input.sort === "random") {
-      throw argumentError(
-        'listAll cannot walk sort: "random" (each page is a fresh sample); call library.list instead.',
-        "invalid_argument",
-        "sort",
-      );
-    }
-    const first = startPage(input.page);
-    // Every page uses the options as they were when listAll was called.
-    return walkPages(
-      (page: number) => this.list({ ...input, page }, call.own),
-      first,
-      call.signals,
-    );
   }
 }
 
@@ -2778,7 +2692,6 @@ export class Lenz {
 
   readonly verifications: VerificationsNamespace;
   readonly ask: AskNamespace;
-  readonly library: LibraryNamespace;
 
   constructor(opts: LenzOptions = {}) {
     requireObject(opts, "new Lenz()", "options");
@@ -2808,7 +2721,6 @@ export class Lenz {
 
     this.verifications = new VerificationsNamespace(this);
     this.ask = new AskNamespace(this);
-    this.library = new LibraryNamespace(this);
   }
 
   /**
@@ -2882,8 +2794,8 @@ export class Lenz {
     });
     // Each namespace is copied from the one it replaces (its class and any
     // method set on it kept) and bound to the copy.
-    const namespaces = copy as unknown as Record<"verifications" | "ask" | "library", object>;
-    for (const name of ["verifications", "ask", "library"] as const) {
+    const namespaces = copy as unknown as Record<"verifications" | "ask", object>;
+    for (const name of ["verifications", "ask"] as const) {
       const from = namespaces[name];
       namespaces[name] = Object.assign(
         Object.create(Object.getPrototypeOf(from) as object) as object,
@@ -5131,7 +5043,7 @@ export class Lenz {
       throw new LenzMissingKeyError({
         message: "API key required",
         cause: "This method requires authentication; no API key was provided.",
-        fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-credentials. Library endpoints work without a key.",
+        fix: "Pass apiKey to new Lenz(), set LENZ_API_KEY env var, or get one at https://lenz.io/api-credentials.",
         docUrl: "https://lenz.io/docs/auth",
       });
     }

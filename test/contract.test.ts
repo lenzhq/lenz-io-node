@@ -106,7 +106,6 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "claims",
     "failure",
     "candidates",
-    "similar_claims",
     "error",
     "failure_reason",
     "failure_detail",
