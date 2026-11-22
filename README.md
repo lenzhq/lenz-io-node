@@ -2,13 +2,12 @@
 
 Official Node SDK for the [Lenz Accuracy Verification API](https://lenz.io/developers) — check the facts, figures, and citations in your work.
 
-**Six API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
+**Five API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
 
 - `extract` — pull verifiable claims out of any text or a public web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube URL, or direct image (.png, .jpg, .webp), optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~15s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
 - `citecheck` — the citation check on its own: does each source a draft cites say what the draft says? Async.
-- `ask` — follow-up questions grounded on a verification. Sync, paid.
 - `review` — the ladder on a draft (text, document, or URL) in one async call, its citations too if asked: its claims, a quick verdict on each, a deep check on the doubtful ones, issues, with rewrites.
 
 Built for teams whose AI output is async or document-shaped: legal-memo
@@ -183,16 +182,29 @@ default); the review keeps running, so read it later with
 `{ review_id }`, and `client.getReview(reviewId, { view: "issues" })` returns
 the review without its `claims`.
 
-**Reviewing document files (.docx, .pdf) and standalone images (.png, .jpg, .webp).** Instead of raw text, you can upload Word documents, PDFs, or standalone images directly using `reviewFile` and `reviewFileAndWait`. Pass a `Uint8Array`, `ArrayBuffer`, or `Blob`:
+**Listing reviews.** List your reviews, newest first, paginated or across all pages:
+
+```ts
+// One page (default 20, up to 100):
+const page = await client.listReviews({ page: 1, pageSize: 20 });
+console.log(page.items, page.total);
+
+// Or iterate across all pages:
+for await (const r of client.listAllReviews({ pageSize: 50 })) {
+  console.log(r.review_id, r.status);
+}
+```
+
+**Reviewing document files (.docx, .pdf), images (.png, .jpg, .webp), and audio recordings (.mp3, .m4a, .wav, .ogg, .webm).** Instead of raw text, you can upload Word documents, PDFs, standalone images, or audio files directly using `reviewFile` and `reviewFileAndWait`. Pass a `Uint8Array`, `ArrayBuffer`, or `Blob`:
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises";
 
-// Submit and wait for a Word document, PDF, or image:
+// Submit and wait for a Word document, PDF, image, or audio recording:
 const docxBytes = await readFile("report.docx");
 const review = await client.reviewFileAndWait(docxBytes, { filename: "report.docx" });
 
-// Or submit without waiting and poll later (works for .pdf, .png, .jpg, .webp too):
+// Or submit without waiting and poll later (works for .pdf, .png, .jpg, .webp, .mp3, .m4a, .wav, .ogg, .webm too):
 const imgBytes = await readFile("chart.png");
 const started = await client.reviewFile(imgBytes, { filename: "chart.png" });
 const completed = await client.waitForReview(started.review_id);
@@ -293,15 +305,6 @@ for (const r of results) {
     console.log(v.verdict, v.lenz_score, v.executive_summary);
   }
 }
-
-// 4. ask — a follow-up question on a completed deep check, when there is one
-const deep = results.find((r) => r.status === "completed")?.verification;
-if (deep?.verification_id) {
-  const reply = await client.ask.send(deep.verification_id, {
-    message: "Which source is strongest?",
-  });
-  console.log(reply.content);
-}
 ```
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
@@ -386,8 +389,8 @@ work and are deprecated. A citation pair's own enumerable keys are read, as
 when it is serialized. Giving both spellings of a field with different values
 throws the local argument error (`LenzValidationError`) naming both before anything is sent.)
 
-- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. `text` can be prose or a single public `http(s)` URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)). Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
-- **`client.extractFile(file, options)`** → `ExtractedClaims`. Free, capped at 1000/account/day. Upload a Word document (`.docx`), PDF (`.pdf`), or standalone image (`.png`, `.jpg`, `.webp`) up to 10 MB as a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File`. Accepts `filename` (required when passing a raw buffer or nameless Blob), `language` (defaults to `"auto"`, the document's own language), `focus`, and `locate` (returns passage text in `positions[i].text` with `start`/`end: null`). Shares the same 150s default timeout floor and options as `extract`.
+- **`client.extract({ text })`** → `ExtractedClaims`. Free, capped at 1000/account/day. `text` can be prose or a single public `http(s)` URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm)). Add `focus` to narrow the list, and `locate: true` to keep only the claims traced back to your text with where each is made — see [Steering extract](#steering-extract). Each attempt waits up to 150s by default (a timeout is retried like any transport error, under the same idempotency key); `timeoutMs` in the options argument (`extract(input, { timeoutMs })`) overrides it for that call.
+- **`client.extractFile(file, options)`** → `ExtractedClaims`. Free, capped at 1000/account/day. Upload a Word document (`.docx`), PDF (`.pdf`), standalone image (`.png`, `.jpg`, `.webp`), or audio recording (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) up to 10 MB as a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File`. Accepts `filename` (required when passing a raw buffer or nameless Blob), `language` (defaults to `"auto"`, the document's own language), `focus`, and `locate` (returns passage text in `positions[i].text` with `start`/`end: null`). Shares the same 150s default timeout floor and options as `extract`.
 - **`client.assess({ claim })`** → `AssessResponse`. Sync, ~15s, returns one entry per identified claim. (`text` is accepted as an alias: a document is `text`, a claim is `claim`.)
 - **`client.assess({ claims })`** → `AssessResponse`. Up to 20 claims in one call, one row per item in the order sent; rows without a verdict come back in position with `status: "failed"` and a `failure` (`code`, `hint`). Both forms take a per-call `timeoutMs` in the options argument (default 100s: a long text can take up to 90s on the server).
 - **`client.verify({ claim })`** → `TaskAccepted`. Async submit; returns a `task_id`. Get the result by polling (`client.wait(...)` / `client.getStatus(...)`) or via a webhook.
@@ -395,10 +398,8 @@ throws the local argument error (`LenzValidationError`) naming both before anyth
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
-- **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
-- **`client.verifications.{list,get,delete,related}(...)`** → manage past verifications. `verifications.list({ page, pageSize })` reads one page; `pageSize` is a whole number from 1 to 100 (anything else throws before a request) and, when omitted, the server's default of 20 applies. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll({ pageSize: 100 })) …`), one request a page, each asking for the same `pageSize`. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
-- **`client.library.list(...)`** → browse the public catalog (no API key needed). `library.listAll(filters)` iterates every page of a filtered list (any `sort` but `"random"`).
-- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
+- **`client.verifications.{list,get,delete}(...)`** → manage past verifications. `verifications.list({ page, pageSize })` reads one page; `pageSize` is a whole number from 1 to 100 (anything else throws before a request) and, when omitted, the server's default of 20 applies. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll({ pageSize: 100 })) …`), one request a page, each asking for the same `pageSize`. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
+- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
 
@@ -712,7 +713,7 @@ original sentence. It has not been verified itself: before using it, review
 it or run it through `client.verify({ claim })`. It is `null` for a true
 claim, when no correction is established, and on verifications that predate
 the field, and absent on responses from an API that predates it. It is on every verification, single or listed:
-`verifications.get`, `verifications.list`, `library.list`, `verifyAndWait`,
+`verifications.get`, `verifications.list`, `verifyAndWait`,
 `wait`, and the `verification.completed` webhook's `result`. `assess` rows
 carry their own with `suggestRewrite: true`.
 
@@ -841,7 +842,6 @@ One balance per account, spent by every billable call:
 | `verify` (and `verifyBatch`, `select`) | **10** per claim                         |
 | `verify` with `depth: "low"`           | **5** per claim                          |
 | `assess`                               | 1 per claim; `Error` rows are free       |
-| `ask`                                  | 1                                        |
 | `extract`                              | 0 — free, bounded by a daily cap instead |
 
 ```ts
@@ -1185,8 +1185,6 @@ as the Python SDK):
 | `select`                            | `claims` empty, or every item blank                | `empty_list`  | `"claims"`    | `claims is required.`                                      |
 | `select` given `texts`              | `texts` empty, or every item blank                 | `empty_list`  | `"texts"`     | `claims is required.`                                      |
 | `select`                            | neither `claims` nor `texts`                       | `empty_list`  | `"claims"`    | `claims: Field required`                                   |
-| `ask.send`                          | `message` only whitespace                          | `blank_input` | `"message"`   | `Message cannot be empty.`                                 |
-| `ask.send`                          | no `message`                                       | `blank_input` | `"message"`   | `message: Field required`                                  |
 | `review`, `reviewAndWait`           | `text` only whitespace                             | `blank_input` | `"text"`      | `text: send the draft, or one public http(s) URL.`         |
 | `review`, `reviewAndWait`           | no `text`                                          | `blank_input` | `"text"`      | `text: Field required`                                     |
 | `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`                         | `blank_input` | `"text"`      | `payload: Value error, send exactly one of text and pairs` |
@@ -1212,16 +1210,16 @@ camelCase). It is still an `Error`, and a wait stops on it at once.
 
 | `code`              | When                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `param`                                                                                                              |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `ask.send` with no `message`; `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                  | `"claim"`; `"message"`; `"text"`                                                                                     |
+| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                                                | `"claim"`; `"text"`                                                                                                  |
 | `blank_item`        | a blank `assess` item                                                                                                                                                                                                                                                                                                                                                                                                                                | `"claims[1]"`                                                                                                        |
 | `empty_list`        | `select` without claims; `assess` with an empty `claims` list (and no `claim`)                                                                                                                                                                                                                                                                                                                                                                       | `"claims"`                                                                                                           |
-| `invalid_page_size` | `pageSize` on `verifications.list` / `listAll` that is not a whole number from 1 to 100                                                                                                                                                                                                                                                                                                                                                              | `"pageSize"`                                                                                                         |
-| `invalid_page`      | a `listAll` start page below 1                                                                                                                                                                                                                                                                                                                                                                                                                       | `"page"`                                                                                                             |
+| `invalid_page_size` | `pageSize` on `verifications.list` / `listAll`, `listReviews` / `listAllReviews` that is not a whole number from 1 to 100                                                                                                                                                                                                                                                                                                                            | `"pageSize"`                                                                                                         |
+| `invalid_page`      | a `listAll` / `listAllReviews` start page below 1                                                                                                                                                                                                                                                                                                                                                                                                    | `"page"`                                                                                                             |
 | `invalid_id`        | an id that cannot name one thing (not a string, empty, `.`, `..`, a lone surrogate), on every method that puts one in a path, and `wait`                                                                                                                                                                                                                                                                                                             | `"taskId"`, `"reviewId"`, `"citecheckId"`, `"verificationId"`                                                        |
 | `invalid_header`    | an `idempotencyKey` a header cannot carry; request-option `headers` that are not an object, or with a bad name, a reserved name, or a value a header cannot carry                                                                                                                                                                                                                                                                                    | `"idempotencyKey"`; `"headers"`                                                                                      |
 | `invalid_option`    | request options (`timeoutMs`, `maxRetries`, `signal`, `cancelOnAbort`, options that are not an object), a wait's `timeoutMs` that is not a finite number (`NaN`, `Infinity`, a string), `new Lenz()` / `new LenzWebhooks()` options that are not an object, `new Lenz()` (`timeoutMs`, `maxRetries`, `legacyAliases`), `withOptions()` (an unknown option, `legacyAliases`, an `apiKey` that is not a string), `new LenzWebhooks()` without a secret | the option's name; for an unknown `withOptions()` option, the name as given (`withOptions({ apikey })` → `"apikey"`) |
 | `conflicting_input` | `assess` given both `claim` and `claims`; `citecheck` given both `text` and `pairs`, or `maxCitations` beside `pairs`; two spellings of a field that differ (a batch item's `sourceUrl` / `source_url`, a citation pair's)                                                                                                                                                                                                                           | `"claims"`; `"text"`, `"maxCitations"`; `"claims[0]"`, `"pairs[2]"`                                                  |
-| `invalid_argument`  | anything else: an input that is not an object (`verify(null)`, `select("t")`, a `verifyBatch` `claims` that is not a list of objects), webhook headers or an `unwrap` request that are not objects, an `assess` item that is not a string, `library.listAll` with `sort: "random"`, `verifySignature` without a secret, a webhook body that is not bytes                                                                                             | `"input"`, `"claims[1]"`, `"headers"`, `"sort"`, `"secret"`, `"body"`                                                |
+| `invalid_argument`  | anything else: an input that is not an object (`verify(null)`, `select("t")`, a `verifyBatch` `claims` that is not a list of objects), webhook headers or an `unwrap` request that are not objects, an `assess` item that is not a string, `verifySignature` without a secret, a webhook body that is not bytes                                                                                                                                      | `"input"`, `"claims[1]"`, `"headers"`, `"secret"`, `"body"`                                                          |
 
 `USAGE_ERROR_CODES` lists the SDK's own codes (the `UsageErrorCode` type
 names one); the Python SDK has the same list. These are local codes: the same whatever `legacyAliases` says, and never the API's
@@ -1280,8 +1278,8 @@ if (status.status === "completed") {
 
 An account on the Pro or Scale plan can set a retention period on its
 [API credentials page](https://lenz.io/api-credentials). Verifications older than the period are removed, and every
-read of one — `verifications.get`, `wait` / `getStatus` on its task, related
-claims, follow-up questions — throws `LenzGoneError`:
+read of one — `verifications.get`, `wait` / `getStatus` on its task, follow-up
+questions — throws `LenzGoneError`:
 
 ```ts
 import { LenzGoneError } from "lenz-io";
@@ -1303,7 +1301,7 @@ covered verification is kept and can still be downloaded.
 
 Every call that runs or charges for work sends an `Idempotency-Key` by
 default: `verify`, `verifyAndWait`, `verifyBatch`, `verifyBatchAndWait`,
-`select`, `assess`, `extract`, `ask.send`, `review` and `citecheck`. The key
+`select`, `assess`, `extract`, `review` and `citecheck`. The key
 is random per call and reused across that call's own retries, so a network
 drop or a client timeout doesn't start a duplicate verification or charge a
 second credit. It is never derived from the request: the same text sent again
@@ -1315,9 +1313,9 @@ since 3.2; they always sent one before). A non-empty `idempotencyKey` wins over
 twice: opt out only when your caller already dedupes, or with `maxRetries: 0`.
 
 ```ts
-const reply = await client.ask.send(verificationId, {
-  message: "Which source says that?",
-  idempotencyKey: `${conversationId}:turn-4`,
+const accepted = await client.verify({
+  claim: "Sharks don't get cancer",
+  idempotencyKey: `${docId}:claim-1`,
 });
 ```
 
@@ -1346,13 +1344,7 @@ returns the run as it stands, so a repeat is harmless.
 
 Every error of a call that sent a key carries it as `err.idempotencyKey`,
 including the timeout of a `*AndWait` (resending it with that key returns the
-work already started). A plain new call mints a new key and can run twice. On
-`ask.send`, the default key is per call: it protects that call's own retries
-(a network drop does not ask twice or charge twice), and asking the same
-question again in a new call is a new turn with a new key, answered and
-charged again. Pin `idempotencyKey` (one per turn, say
-`${conversationId}:turn-4`) to make a resend from another process replay the
-first answer.
+work already started). A plain new call mints a new key and can run twice.
 
 ## Steering extract
 
@@ -1424,9 +1416,9 @@ statement (where `text` is `null`: the row carries the statement).
 or when the claims could not be located, in which case the list is returned
 unfiltered. `locate` defaults to `false`.
 
-### Extracting from document files (.docx, .pdf) and standalone images (.png, .jpg, .webp)
+### Extracting from document files (.docx, .pdf), standalone images (.png, .jpg, .webp), and audio recordings (.mp3, .m4a, .wav, .ogg, .webm)
 
-Instead of raw text or a URL, you can extract verifiable claims directly from Word documents, PDFs, or standalone images using `extractFile`:
+Instead of raw text or a URL, you can extract verifiable claims directly from Word documents, PDFs, standalone images, or audio recordings using `extractFile`:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -1443,13 +1435,13 @@ for (const c of out.claims ?? []) {
 }
 ```
 
-Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File` (up to 10 MB). `filename` is required unless passing a `File` with a name. Supported formats are `.docx`, `.pdf`, `.png`, `.jpg`, `.jpeg`, and `.webp`. With `locate: true`, each position carries the matched passage in `text` (`start` and `end` are `null`, as with URL extraction).
+Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File` (up to 10 MB). `filename` is required unless passing a `File` with a name. Supported formats are `.docx`, `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.mp3`, `.m4a`, `.wav`, `.ogg`, and `.webm`. With `locate: true`, each position carries the matched passage in `text` (`start` and `end` are `null`, as with URL extraction).
 
 ## Multi-language output
 
 The Lenz API returns prose fields (atomic claim, executive summary, debate, panel
-reasoning) in any of 13 languages. Pass `language:` on `verify`, `verifyAndWait`,
-`verifyBatch`, `assess`, `extract`, or `ask.send`. Verdict labels stay English
+reasoning) in any of 39 languages. Pass `language:` on `verify`, `verifyAndWait`,
+`verifyBatch`, `assess`, or `extract`. Verdict labels stay English
 regardless of language. Serbian (`sr`) is answered in the Latin script. On `extract`, `language` and `focus` are independent —
 a focus written in any language selects claims emitted in `language`.
 
@@ -1469,11 +1461,10 @@ https://lenz.io/contact.
 ### Answer in the language of the text
 
 Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait`, `review`,
-`reviewAndWait`, `extract` or `ask.send` and the answer comes back in the
+`reviewAndWait`, or `extract` and the answer comes back in the
 language of the text you submitted (for a review, one language for the whole
 draft). A concrete code such as `"es"` always wins, and omitting `language`
-still means English. On `ask.send`, `"auto"` uses the language of the claim
-being discussed. On `extract`, the claims are written in the language of the
+still means English. On `extract`, the claims are written in the language of the
 text (of the fetched page when `text` is a single URL); a short or undetectable
 text gives English, and the result's `language` is the code that was used. Pass
 it on to `assess` or `verify` to keep a chain in one language, rather than
@@ -1555,8 +1546,7 @@ Environment variables:
 Every method takes request options for one call: in its options argument
 (`verify(input, options)`, `getStatus(taskId, options)`, `usage(options)`, …),
 or merged into the options object it already takes (the waits' options,
-`getReview`'s `{ view }`, `verifications.list`'s `{ page, pageSize }`,
-`verifications.related`'s `{ limit }`):
+`getReview`'s `{ view }`, `verifications.list`'s `{ page, pageSize }`):
 
 ```ts
 await client.assess({ claim }, { timeoutMs: 120_000, maxRetries: 0 });
@@ -1573,13 +1563,13 @@ await client.getReview(reviewId, { view: "issues", signal });
 
 What the options bound, per method:
 
-| Methods                                                                                                                                                                          | `timeoutMs`                                                                                                                         | `maxRetries`                                                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `usage`, `verifications.*`, `ask.*`, `library.list`) | each attempt (default: the client's, 30 s)                                                                                          | each request's retries                                                                                                                          |
-| `extract`, `assess`                                                                                                                                                              | each attempt; used as given (so is a copy's), even below the 150 s / 100 s these wait at least when the timeout is the client's own | each request's retries                                                                                                                          |
-| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                       | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left                        | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
-| `verifications.listAll`, `library.listAll`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                                        | each page request's retries                                                                                                                     |
-| `withOptions`                                                                                                                                                                    | every call made through the copy                                                                                                    | every call made through the copy                                                                                                                |
+| Methods                                                                                                                                                                | `timeoutMs`                                                                                                                         | `maxRetries`                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `listReviews`, `usage`, `verifications.*`) | each attempt (default: the client's, 30 s)                                                                                          | each request's retries                                                                                                                          |
+| `extract`, `assess`                                                                                                                                                    | each attempt; used as given (so is a copy's), even below the 150 s / 100 s these wait at least when the timeout is the client's own | each request's retries                                                                                                                          |
+| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                             | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left                        | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
+| `verifications.listAll`, `listAllReviews`                                                                                                                              | each page request (options checked when `listAll` is called)                                                                        | each page request's retries                                                                                                                     |
+| `withOptions`                                                                                                                                                          | every call made through the copy                                                                                                    | every call made through the copy                                                                                                                |
 
 The waits also take `cancelOnAbort: true`: when the `signal` fires after the
 run was accepted, the run is cancelled on the server too (see
@@ -1666,16 +1656,16 @@ the body the API sent. The default is `true`, so 3.x behaviour is unchanged.
 It is set on the client; a `withOptions` copy keeps it (and throws if given
 it). The result types are unchanged; with `false`, these are not added:
 
-| Result                                                                                                                                                                         | Not added with `legacyAliases: false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A verification (`verifications.get`, `list` / `listAll` items, `library.list` items, `wait` / `verifyAndWait`, a batch result's `verification`, a review row's `verification`) | `modified_at`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `getStatus` (also a batch result's `status_detail` and a needs-input error's `payload`)                                                                                        | on a pause, each option's `text` (options carry `claim` only); on `failed`, the flat `error`, `failure_reason`, `failure_class`, `retryable`, `docs_url`, `hint` and `failure.failure_reason`; on `cancelled`, the same flat fields and the `failure` block built when the API sent none                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `assess`                                                                                                                                                                       | on a failed row, `verdict: "Error"` and `confidence: "low"` (both stay `null`), and on every row `error_code`, `hint`, `identified_claims`, `candidate_claims`, `failure.failure_reason`; at the top, `error`, `error_code`, `candidate_claims`, `status`, `failure.failure_reason`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `extract`                                                                                                                                                                      | `claim`, `identified_claims`, `candidate_claims`, `locations`, and `status` stays `no_checkable_claim` (not `not_a_claim`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `verifyBatch` / `select` receipts, `verifyBatchAndWait` results                                                                                                                | each item's `claim_text`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `usage`                                                                                                                                                                        | `credits.bonus`, `quota_resets_at` and the `verify` / `ask` / `assess` blocks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `getReview`, `reviewAndWait`, `cancelReview`                                                                                                                                   | `failure_reason` in every failure block (the review's, `failures`, `issues`, each claim row's assessment and verification, each citation row's check, `citation_issues`, `citation_failures`); on an assessment, `identified_claims`, `error_code`, `hint`; in `summary`, `claim_limit_reached` and the second name of `citation_limit_reached` / `citation_limit_exceeded`; and the defaults for keys the body lacks (`[]` for `citations`, `citation_issues`, `citation_failures`; `null` for `more_claims`, `more_claim_locations`, `more_citations`, rows' `positions`, `suggested_edits`, `suggested_rewrite`, `missing_quote`, the summary's citation counts and `policy.max_citations`; `0` for `summary.citation_issues`; `false` for `policy.suggest_edits`) |
-| `getCitecheck`, `citecheckAndWait`, `cancelCitecheck`                                                                                                                          | `failure_reason` in every failure block, the second name of the citation limit, and the `[]` / `null` defaults for `citations`, `citation_issues`, `citation_failures`, `more_citations`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Result                                                                                                                                                   | Not added with `legacyAliases: false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A verification (`verifications.get`, `list` / `listAll` items, `wait` / `verifyAndWait`, a batch result's `verification`, a review row's `verification`) | `modified_at`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `getStatus` (also a batch result's `status_detail` and a needs-input error's `payload`)                                                                  | on a pause, each option's `text` (options carry `claim` only); on `failed`, the flat `error`, `failure_reason`, `failure_class`, `retryable`, `docs_url`, `hint` and `failure.failure_reason`; on `cancelled`, the same flat fields and the `failure` block built when the API sent none                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `assess`                                                                                                                                                 | on a failed row, `verdict: "Error"` and `confidence: "low"` (both stay `null`), and on every row `error_code`, `hint`, `identified_claims`, `candidate_claims`, `failure.failure_reason`; at the top, `error`, `error_code`, `candidate_claims`, `status`, `failure.failure_reason`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `extract`                                                                                                                                                | `claim`, `identified_claims`, `candidate_claims`, `locations`, and `status` stays `no_checkable_claim` (not `not_a_claim`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `verifyBatch` / `select` receipts, `verifyBatchAndWait` results                                                                                          | each item's `claim_text`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `usage`                                                                                                                                                  | `credits.bonus`, `quota_resets_at` and the `verify` / `ask` / `assess` blocks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `getReview`, `reviewAndWait`, `cancelReview`                                                                                                             | `failure_reason` in every failure block (the review's, `failures`, `issues`, each claim row's assessment and verification, each citation row's check, `citation_issues`, `citation_failures`); on an assessment, `identified_claims`, `error_code`, `hint`; in `summary`, `claim_limit_reached` and the second name of `citation_limit_reached` / `citation_limit_exceeded`; and the defaults for keys the body lacks (`[]` for `citations`, `citation_issues`, `citation_failures`; `null` for `more_claims`, `more_claim_locations`, `more_citations`, rows' `positions`, `suggested_edits`, `suggested_rewrite`, `missing_quote`, the summary's citation counts and `policy.max_citations`; `0` for `summary.citation_issues`; `false` for `policy.suggest_edits`) |
+| `getCitecheck`, `citecheckAndWait`, `cancelCitecheck`                                                                                                    | `failure_reason` in every failure block, the second name of the citation limit, and the `[]` / `null` defaults for `citations`, `citation_issues`, `citation_failures`, `more_citations`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 Errors (their classes and fields, `ReviewFailedError` / `CitecheckFailedError`
 included), webhook events and the requests sent are the same either way, with
@@ -1686,13 +1676,13 @@ see [Errors](#errors)).
 
 **A field sent as `null`** (since 3.2). A few fields keep a 3.x type without
 `null` (an assess row's `verdict` / `confidence`, the assess `error_code`, a
-pause option's `text`, an entity's `name`, a status's `reason` / `hint` /
+pause option's `text`, a status's `reason` / `hint` /
 `progress` / `claims` / `docs_url` / `error` / `failure_class` /
 `failure_reason`, and the `usage` blocks `verify` / `ask` / `assess`), and the
 API may send them as `null` (a stored replay, a value it has none of). By
 default that is read as if the field were not sent: absent, or the 2.x value
-the client fills there (an option's `text` is its `claim`, an entity's `name`
-is `""`). With `legacyAliases: false` the `null` stays, as sent, and `raw`
+the client fills there (an option's `text` is its `claim`). With
+`legacyAliases: false` the `null` stays, as sent, and `raw`
 always holds it. Webhook events keep a `null` as 2.21 delivered it. One more
 field can be `null` and is typed `string`: a review failure block's
 `docs_url`; check it before use.
@@ -1720,8 +1710,7 @@ status.result?.raw; // the verification's object
 
 Covered: every result that is one answer's body (`verify`, `verifyBatch`,
 `select`, `getStatus`, `cancel`, `extract`, `assess`, `usage`,
-`verifications.get` / `list` / `getCertificate` / `related`, `ask.history` /
-`ask.send`, `library.list`, `review`, `citecheck`, `getReview`,
+`verifications.get` / `list` / `getCertificate`, `review`, `citecheck`, `getReview`,
 `getCitecheck`, `cancelReview`, `cancelCitecheck`, and what `reviewAndWait` /
 `citecheckAndWait` return: the final poll's body), and every object nested in
 one that the body holds at the same place (assess rows and their `failure`,

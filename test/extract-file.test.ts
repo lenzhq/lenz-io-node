@@ -40,7 +40,6 @@ const SAMPLE_CLAIMS = {
     },
   ],
   identified_claims: ["Revenue grew 20% in 2025."],
-  domain: "Business",
   original_input: "",
 };
 
@@ -118,7 +117,7 @@ describe("extractFile()", () => {
       expect(err.code).toBe("invalid_argument");
       expect(err.param).toBe("filename");
       expect(err.message).toBe(
-        "Unsupported file format for extraction: notes.txt. Only Word (.docx), PDF (.pdf), and image (.png, .jpg, .webp) files are supported.",
+        "Unsupported file format for extraction: notes.txt. Only Word (.docx), PDF (.pdf), image (.png, .jpg, .webp), and audio (.mp3, .m4a, .wav, .ogg, .webm) files are supported.",
       );
     });
 
@@ -153,6 +152,16 @@ describe("extractFile()", () => {
       { filename: "PHOTO.JPEG", mime: "image/jpeg" },
       { filename: "graphic.webp", mime: "image/webp" },
       { filename: "GRAPHIC.WEBP", mime: "image/webp" },
+      { filename: "podcast.mp3", mime: "audio/mpeg" },
+      { filename: "PODCAST.MP3", mime: "audio/mpeg" },
+      { filename: "voice.m4a", mime: "audio/mp4" },
+      { filename: "VOICE.M4A", mime: "audio/mp4" },
+      { filename: "audio.wav", mime: "audio/wav" },
+      { filename: "AUDIO.WAV", mime: "audio/wav" },
+      { filename: "recording.ogg", mime: "audio/ogg" },
+      { filename: "RECORDING.OGG", mime: "audio/ogg" },
+      { filename: "clip.webm", mime: "audio/webm" },
+      { filename: "CLIP.WEBM", mime: "audio/webm" },
     ];
 
     for (const { filename, mime } of cases) {
@@ -365,7 +374,6 @@ describe("extractFile()", () => {
           },
         ],
         identified_claims: ["Revenue grew 20%."],
-        domain: "Business",
         locations: [
           {
             claim: "Revenue grew 20%.",

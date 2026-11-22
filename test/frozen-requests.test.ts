@@ -377,64 +377,6 @@ const FORMS: Form[] = [
     run: (c) => c.verifications.delete("v1"),
   },
   {
-    name: "verifications.related",
-    replies: [{ body: { items: [] } }],
-    run: (c) => c.verifications.related("v1"),
-  },
-  {
-    name: "verifications.related limit 3",
-    replies: [{ body: { items: [] } }],
-    run: (c) => c.verifications.related("v1", { limit: 3 }),
-  },
-  {
-    name: "ask.history",
-    replies: [{ body: { messages: [] } }],
-    run: (c) => c.ask.history("v1"),
-  },
-  {
-    name: "ask.send",
-    replies: [{ body: { content: "x" } }],
-    run: (c) => c.ask.send("v1", { message: "why?", language: "de", idempotencyKey: "frozen-q" }),
-  },
-  {
-    name: "ask.send, random key",
-    replies: [{ body: { content: "x" } }],
-    run: (c) => c.ask.send("v1", { message: "why?" }),
-  },
-  {
-    name: "ask.reset",
-    replies: [{ status: 200, body: { ok: true } }],
-    run: (c) => c.ask.reset("v1"),
-  },
-  {
-    name: "library.list",
-    replies: [{ body: LIST(1, 1, 1) }],
-    run: (c) => c.library.list(),
-  },
-  {
-    name: "library.list, every filter",
-    replies: [{ body: LIST(2, 1, 1) }],
-    run: (c) =>
-      c.library.list({
-        page: 2,
-        sort: "most_true",
-        search: "a b",
-        domain: "health",
-        entity: "WHO",
-        curated: ["x", "y"],
-        verdict: "False",
-      }),
-  },
-  {
-    name: "library.listAll",
-    replies: [{ body: LIST(1, 2, 3) }, { body: LIST(2, 1, 3) }],
-    run: async (c) => {
-      const out: unknown[] = [];
-      for await (const v of c.library.listAll({ search: "s" })) out.push(v);
-      return out;
-    },
-  },
-  {
     name: "wait",
     replies: [{ body: COMPLETED }],
     run: (c) => c.wait("t1"),

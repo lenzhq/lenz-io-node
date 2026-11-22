@@ -113,32 +113,6 @@ export interface CandidateClaim extends RawBody {
   claim?: string;
   /** @deprecated Read `claim`; the same text. */
   text?: string;
-  domain?: string;
-}
-
-/**
- * An entity (person, place, organization, concept) referenced in the
- * claim. `qid` is the Wikidata Q identifier (e.g. `Q42`) when the entity
- * was resolved against Lenz's internal catalog; `null` otherwise.
- */
-export interface EntityRef extends RawBody {
-  name: string;
-  qid: string | null;
-}
-
-/**
- * An existing public verification that semantically resembles another one,
- * as returned by `related`. Same vocabulary as `Verification` — flat
- * `verdict` / `confidence` / `lenz_score`, no nested object.
- */
-export interface SimilarVerification extends RawBody {
-  verification_id?: string;
-  claim?: string;
-  verdict?: Verdict | (string & NonNullable<unknown>);
-  confidence?: Confidence | (string & NonNullable<unknown>);
-  lenz_score?: number | null;
-  url?: string;
-  distance?: number;
 }
 
 /**
@@ -225,8 +199,6 @@ export interface Verification extends RawBody, ResponseMeta {
    * Absent on servers that predate the field.
    */
   depth?: string;
-  domain?: string;
-  entities?: EntityRef[];
   presumed_intent?: string;
   // Verdict block (flat)
   /**
@@ -263,7 +235,7 @@ export interface Verification extends RawBody, ResponseMeta {
   /**
    * Output language (ISO 639-1). Always populated when the SDK is
    * current; `?` is kept for resilience against older / mocked payloads
-   * that may omit the field. Verdict / domain / status enums stay
+   * that may omit the field. Verdict / status enums stay
    * English regardless of language.
    */
   language?: string;
@@ -398,8 +370,6 @@ export interface Certificate extends RawBody, ResponseMeta {
 export interface VerificationListItem extends RawBody {
   verification_id?: string;
   claim?: string;
-  domain?: string;
-  entities?: EntityRef[];
   /** The five labels, or `"No Public Record"` (`lenz_score` is then `null`). */
   verdict?: VerificationVerdict | Verdict | (string & NonNullable<unknown>);
   confidence?: Confidence | (string & NonNullable<unknown>);
@@ -426,28 +396,6 @@ export interface VerificationList extends RawBody, ResponseMeta {
   total: number;
   page: number;
   page_size: number;
-}
-
-/** Same shape as `VerificationListItem` on the public Library list. */
-export type LibraryItem = VerificationListItem;
-
-/** Wrapper for `GET /verifications/{id}/related`. */
-export interface RelatedVerifications extends RawBody, ResponseMeta {
-  items: SimilarVerification[];
-}
-
-export interface LibraryList extends RawBody, ResponseMeta {
-  items: LibraryItem[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface ExtractedEntity extends RawBody {
-  /** Full formal entity name as identified by framing. */
-  name: string;
-  /** One of: `person` | `org` | `place` | `topic`. */
-  type: string;
 }
 
 /**
@@ -529,8 +477,6 @@ export interface ExtractedClaims extends RawBody, ResponseMeta {
    * sends the key.
    */
   candidate_claims?: string[];
-  domain?: string;
-  key_entities?: ExtractedEntity[];
   presumed_intent?: string;
   original_input?: string;
   /**
@@ -823,11 +769,6 @@ export interface TaskStatus extends RawBody, ResponseMeta {
    */
   candidates?: string[];
   /**
-   * @deprecated Always empty: the API never raised `duplicate_found` for API
-   * tasks and no longer sends it. No replacement.
-   */
-  similar_claims?: SimilarVerification[];
-  /**
    * On a `failed` status, why: `code` (`no_checkable_claim` |
    * `upstream_unavailable` | `internal` | `cancelled`), `detail` (one sentence), `hint`, `failure_class`,
    * `retryable`, `docs_url`.
@@ -983,7 +924,7 @@ export interface UsageCredits extends RawBody {
  *   divided by this capability's cost.
  * - `quota_used`: derived as `quota_total - quota_remaining`, so
  *   `used + remaining === total` always holds. It is therefore a ceiling —
- *   one `/ask` credit moves the verify block's `quota_used` from 0 to 1.
+ *   one `/assess` credit moves the verify block's `quota_used` from 0 to 1.
  * - `bonus`: {@link UsageCredits.extra} in this capability's unit. A user
  *   holding 5 extra credits sees `verify.bonus === 0` and `assess.bonus === 5`
  *   — 5 credits doesn't buy a verification.
@@ -1062,8 +1003,8 @@ export interface Usage extends RawBody, ResponseMeta {
    */
   credits: UsageCredits;
   /**
-   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`,
-   * `extract`), at that capability's default price. Keys are the server's
+   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`
+   * (legacy), `extract`), at that capability's default price. Keys are the server's
    * own, verbatim — never rewritten by the SDK — and a zero cost means the
    * capability is free at the pool and bounded by a daily cap instead. New
    * keys appear here without an SDK release.
@@ -1137,45 +1078,6 @@ export interface Usage extends RawBody, ResponseMeta {
   has_webhook_secret?: boolean;
 }
 
-/** One message in an `/ask` conversation thread. */
-export interface AskMessage extends RawBody {
-  role?: string; // "user" | "expert"
-  content?: string;
-  created_at?: string;
-}
-
-/** Returned by `GET /ask/{verification_id}`. */
-export interface AskHistory extends RawBody, ResponseMeta {
-  messages: AskMessage[];
-  exchanges_used: number;
-  exchange_limit: number;
-  can_send: boolean;
-}
-
-/**
- * Returned by `POST /ask/{verification_id}`.
- *
- * `content` is the assistant's reply text in a small markdown subset:
- *
- * - `**bold**` and `*italic*`
- * - `- ` or `* ` bullet lists
- * - Blank-line paragraph breaks; single newlines inside a paragraph
- *   mean line break
- *
- * The model only produces these — no headings, no tables, no code
- * blocks. Pass it through any markdown library or display it
- * verbatim. See https://lenz.io/docs/quickstart#ask-reply-format.
- *
- * Pre-1.0.2 this interface declared a single `reply: string` field
- * that never matched the wire — the server has always returned
- * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
- */
-export interface AskReply extends RawBody, ResponseMeta {
-  role?: string; // 'expert' on every reply (the assistant turn)
-  content?: string; // markdown-subset prose (see interface docstring)
-  created_at?: string;
-}
-
 // ── Input shapes ──
 
 export interface VerifyInput {
@@ -1187,9 +1089,8 @@ export interface VerifyInput {
   webhookUrl?: string;
   /**
    * "private" (default, owner-only) or "unlisted" (readable by
-   * verification_id and at the /c/ URL, but never listed in the Library
-   * or search). Omitted from the request body when unset — the server
-   * applies its "private" default.
+   * verification_id and at the /c/ URL, but never listed in search).
+   * Omitted from the request body when unset — the server applies its "private" default.
    */
   visibility?: "private" | "unlisted";
   /**
@@ -1315,7 +1216,7 @@ export type VerifyBatchOptions = VerifyBatchInput;
 export interface ExtractInput {
   /**
    * The text to pull verifiable claims out of, or a single public `http(s)`
-   * URL to a web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp).
+   * URL to a web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm).
    */
   text: string;
   /**
@@ -1379,10 +1280,10 @@ export interface ExtractInput {
   idempotencyKey?: string;
 }
 
-/** Options for extracting claims from a document or image via `POST /api/v1/extract/file`. */
+/** Options for extracting claims from a document, image, or audio file via `POST /api/v1/extract/file`. */
 export interface ExtractFileOptions extends RequestOptions {
   /**
-   * The filename of the document or image (e.g. `"report.docx"`, `"paper.pdf"`, or `"chart.png"`).
+   * The filename of the document, image, or audio file (e.g. `"report.docx"`, `"paper.pdf"`, `"chart.png"`, or `"recording.mp3"`).
    * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
    * defaults to `(blob as File).name` if present.
    */
@@ -1468,32 +1369,6 @@ export interface AssessInput {
   timeoutMs?: number;
 }
 
-export interface AskSendInput {
-  message: string;
-  /**
-   * Optional language override (ISO 639-1). When omitted, the server
-   * uses the claim's stored language as the default. `"auto"` answers in
-   * the language of the claim being discussed.
-   */
-  language?: string;
-  /**
-   * Send an `Idempotency-Key` so a retry of a question that already got a
-   * reply replays that reply instead of spending a second credit and leaving
-   * the question plus a second answer in the conversation. Defaults to
-   * `true`, generating a random key per call that is reused across this
-   * client's own retries only: asking the same question again in a new call
-   * is a new turn. Set `false` to send none.
-   */
-  idempotency?: boolean;
-  /**
-   * Pin the `Idempotency-Key` yourself, so a retry from a different process
-   * replays too. Wins over `idempotency`. A retry sent while the first call
-   * is still running gets a 409: there is no reply to replay yet. Never
-   * derived from the message.
-   */
-  idempotencyKey?: string;
-}
-
 export interface SelectInput {
   /**
    * One or more claims chosen from a multi_claim interrupt.
@@ -1515,18 +1390,6 @@ export interface SelectInput {
    * replays too. Wins over `idempotency`.
    */
   idempotencyKey?: string;
-}
-
-export interface LibraryListInput {
-  page?: number;
-  sort?: "recent" | "most_true" | "most_untrue" | "relevance" | "random";
-  search?: string;
-  domain?: string;
-  entity?: string;
-  /** Restrict to one or more named curated collections, e.g. `["trivia"]`. */
-  curated?: string[];
-  /** Comma-separated verdict labels, e.g. "True,False". Others: "Mostly True", "Mixed", "Mostly False". */
-  verdict?: string;
 }
 
 /**
@@ -1937,13 +1800,6 @@ export interface ReviewAssessment extends RawBody {
   failure: ReviewFailureBlock | null;
 }
 
-/** An entity a deep check named. Either field may be `null`. */
-export interface ReviewEntity extends RawBody {
-  name: string | null;
-  /** The Wikidata id, when one was matched. */
-  qid: string | null;
-}
-
 /** The deep check (`/verify`) on one claim. */
 export interface ReviewVerification extends RawBody {
   status: "processing" | "completed" | "failed";
@@ -1961,8 +1817,6 @@ export interface ReviewVerification extends RawBody {
   visibility: string | null;
   /** EFFECTIVE: a cache hit may serve `standard` for a `low` request. */
   depth: string | null;
-  domain: string | null;
-  entities: ReviewEntity[];
   /** `"No Public Record"` when the deep check found no public record; `lenz_score` is then `null`. */
   verdict: VerificationVerdict | null;
   confidence: ConfidenceBand | null;
@@ -2322,6 +2176,36 @@ export interface ReviewIssues extends ReviewEnvelope {
   view: "issues";
 }
 
+/** One item in `GET /reviews` (`listReviews` / `listAllReviews`). */
+export interface ReviewListItem extends RawBody {
+  review_id: string;
+  status: ReviewStatus;
+  outcome: ReviewOutcome | null;
+  created_at: string;
+  completed_at: string | null;
+  language: string;
+  policy: EscalationPolicy;
+  summary: ReviewSummary;
+  credits: ReviewCredits;
+  failure: ReviewFailureBlock | null;
+}
+
+/** Paginated response from `GET /reviews`. */
+export interface ReviewList extends RawBody, ResponseMeta {
+  items: ReviewListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Options for `listReviews` and `listAllReviews`. */
+export interface ListReviewsOptions extends RequestOptions {
+  /** 1-indexed page number (default 1). */
+  page?: number;
+  /** Results per page, 1 to 100 (default 20). */
+  pageSize?: number;
+}
+
 /** The `POST /review` receipt. `status` is always `queued`, not the current state. */
 export interface ReviewStarted extends RawBody, ResponseMeta {
   review_id: string;
@@ -2343,7 +2227,7 @@ export interface ReviewStarted extends RawBody, ResponseMeta {
 export interface ReviewInput {
   /**
    * The draft, up to 50,000 characters (longer text is cut), or one public
-   * http(s) URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, or direct image (.png, .jpg, .webp)).
+   * http(s) URL (web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube video, direct image (.png, .jpg, .webp), or direct audio (.mp3, .m4a, .wav, .ogg, .webm)).
    */
   text: string;
   /**
@@ -2672,10 +2556,10 @@ export interface ReviewEscalateOption {
   suggestEdits?: boolean;
 }
 
-/** Options for submitting a document or image for review via `POST /api/v1/review/file`. */
+/** Options for submitting a document, image, or audio file for review via `POST /api/v1/review/file`. */
 export interface ReviewFileOptions extends RequestOptions {
   /**
-   * The filename of the document or image (e.g. `"report.docx"`, `"paper.pdf"`, or `"chart.png"`).
+   * The filename of the document, image, or audio file (e.g. `"report.docx"`, `"paper.pdf"`, `"chart.png"`, or `"recording.mp3"`).
    * Required when passing an `ArrayBuffer` or `Uint8Array`. For `Blob`,
    * defaults to `(blob as File).name` if present.
    */

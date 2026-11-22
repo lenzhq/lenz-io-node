@@ -74,13 +74,6 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name.startsWith("account__me_usage_") || name.startsWith("account__api_version_header_")) {
     return [["Usage", (c) => c.usage()]];
   }
-  if (name.startsWith("account__library_")) return [["LibraryList", (c) => c.library.list()]];
-  if (name.startsWith("account__ask_history_")) {
-    return [["AskHistory", (c) => c.ask.history("v")]];
-  }
-  if (name.startsWith("account__ask_send")) {
-    return [["AskReply", (c) => c.ask.send("v", { message: "x" })]];
-  }
   if (
     name.startsWith("review__receipt_") ||
     name === "review__idempotent_replay_202" ||
@@ -90,6 +83,9 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   }
   if (name.startsWith("review__cancel_200")) {
     return [["ReviewFull", (c) => c.cancelReview(String(body["review_id"]))]];
+  }
+  if (name.startsWith("review__list_")) {
+    return [["ReviewList", (c) => c.listReviews()]];
   }
   if (name.startsWith("review__get_") || name.startsWith("failure_codes__review_")) {
     return body["view"] === "issues"

@@ -10,8 +10,7 @@
       "reason": "multi_claim",
       "claims": [
         {
-          "text": "The Eiffel Tower is in Berlin.",
-          "domain": ""
+          "text": "The Eiffel Tower is in Berlin."
         }
       ],
       "hint": null

@@ -1,14 +1,13 @@
 /**
- * Lenz quickstart — the canonical four-primitive integration.
+ * Lenz quickstart — the canonical three-primitive integration.
  *
  *   export LENZ_API_KEY=lenz_...
  *   npx tsx examples/core/quickstart.ts
  *
  * The pattern: `extract` pulls claims out of any text, ONE `assess` call
  * returns a fast 3-model verdict on each of them (up to 20 per call, one
- * row per claim), `verify` escalates the low-confidence rows to the full
- * multi-model panel with citations, and `ask` lets you follow up on a
- * verification.
+ * row per claim), and `verify` escalates the low-confidence rows to the full
+ * multi-model panel with citations.
  *
  * The demo claim is cached for an hour after anyone verifies it, so the
  * verify call can come back in seconds; otherwise it runs the full
@@ -49,7 +48,7 @@ async function main(): Promise<void> {
 
   // 3. verify — escalate the low-confidence rows to the full multi-model panel
   //    for citations + audit. The demo claim stands in when nothing came
-  //    back low-confidence, so the walkthrough always reaches steps 3 and 4.
+  //    back low-confidence, so the walkthrough always reaches step 3.
   // verifyBatchAndWait takes up to 20 claims a call: the first 20 here
   const doubtful = quick
     .filter((c) => c.status !== "failed" && c.confidence === "low" && c.claim)
@@ -58,14 +57,12 @@ async function main(): Promise<void> {
   const results = await client.verifyBatchAndWait({
     claims: doubtful.length ? doubtful : [{ claim: "Sharks don't get cancer" }],
   });
-  let deepId: string | null = null;
   for (const r of results) {
     if (r.status !== "completed") {
       console.log(`${r.claim} → ${r.status}`); // needs_input | failed | timeout
       continue;
     }
     const v = r.verification!;
-    deepId ??= v.verification_id ?? null;
     console.log(`Verdict: ${v.verdict} (lenz_score ${v.lenz_score}, confidence ${v.confidence})`);
     console.log(`Summary: ${v.executive_summary}`);
     console.log("");
@@ -74,16 +71,6 @@ async function main(): Promise<void> {
       console.log(`  - ${source.title}`);
       console.log(`    ${source.url}`);
     }
-  }
-
-  // 4. ask — follow-up question on a verification
-  if (deepId) {
-    const reply = await client.ask.send(deepId, {
-      message: "Which source is strongest?",
-    });
-    console.log("");
-    console.log("Q: Which source is strongest?");
-    console.log(`A: ${reply.content}`);
   }
 }
 

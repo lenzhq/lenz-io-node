@@ -3,8 +3,6 @@
   "claim": "The Eiffel Tower is in Paris.",
   "visibility": "private",
   "depth": "standard",
-  "domain": "General",
-  "entities": [],
   "presumed_intent": "verify",
   "verdict": "Mixed",
   "confidence": "high",

@@ -2,27 +2,6 @@
 
 exports[`the parity map > is the table the Python SDK mirrors 1`] = `
 {
-  "ask.history": [
-    "ask.history",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
-  "ask.reset": [
-    "ask.reset",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
-  "ask.send": [
-    "ask.send",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
   "assess": [
     "assess",
     "signal",
@@ -106,15 +85,15 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
     "maxRetries",
     "headers",
   ],
-  "library.list": [
-    "library.list",
+  "listAllReviews": [
+    "iter_reviews",
     "signal",
     "timeoutMs",
     "maxRetries",
     "headers",
   ],
-  "library.listAll": [
-    "library.iter",
+  "listReviews": [
+    "list_reviews",
     "signal",
     "timeoutMs",
     "maxRetries",
@@ -190,13 +169,6 @@ exports[`the parity map > is the table the Python SDK mirrors 1`] = `
   ],
   "verifications.listAll": [
     "verifications.iter",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
-  "verifications.related": [
-    "verifications.related",
     "signal",
     "timeoutMs",
     "maxRetries",

@@ -49,7 +49,7 @@ describe("the version header is the SDK's, on every request", () => {
   it("is set on a call that sends other headers and uses a caller-supplied fetch", async () => {
     const { fetch, sent } = recorder(() => json({ items: [], total: 0, page: 1, page_size: 20 }));
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.library.list();
+    await client.usage();
     await client.verifications.list();
     expect(sent).toHaveLength(2);
     for (const headers of sent) expect(headers["x-lenz-api-version"]).toBe(API_VERSION);

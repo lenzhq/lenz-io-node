@@ -2,8 +2,8 @@
  * Multi-language SDK behavior — request-body wire format, response
  * parsing, error surfacing, and the byte-identical English regression.
  *
- * Six methods gain an optional `language` field:
- *   verify, verifyAndWait, verifyBatch, assess, extract, ask.send.
+ * Five methods gain an optional `language` field:
+ *   verify, verifyAndWait, verifyBatch, assess, extract.
  *
  * The convention (see `src/client.ts` module docstring):
  *   - `language` omitted (or empty) MUST omit the field from the
@@ -127,19 +127,11 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
     await client.extract({ text: "The earth is flat" });
-    expect(bodyOf(calls)).not.toHaveProperty("language");
-  });
-
-  it("ask.send: no language key when omitted", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "ok" } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("v1", { message: "why?" });
     expect(bodyOf(calls)).not.toHaveProperty("language");
   });
 
@@ -150,7 +142,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -166,7 +157,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -182,7 +172,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -199,7 +188,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -334,7 +322,6 @@ describe("explicit language wire format", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -385,13 +372,6 @@ describe("explicit language wire format", () => {
     const out = await client.extract({ text: "x" });
     expect(out.language).toBe("fr");
   });
-
-  it("ask.send: sends language", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "ok" } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("v1", { message: "why?", language: "en" });
-    expect(bodyOf(calls).language).toBe("en");
-  });
 });
 
 describe('language: "auto" wire format', () => {
@@ -438,13 +418,6 @@ describe('language: "auto" wire format', () => {
     await client.assess({ claims: ["Die Erde ist flach", "Wasser ist nass"], language: "auto" });
     expect(bodyOf(calls, 0).language).toBe("auto");
     expect(bodyOf(calls, 1).language).toBe("auto");
-  });
-
-  it("ask.send: sends auto unchanged", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "ok" } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("v1", { message: "warum?", language: "auto" });
-    expect(bodyOf(calls).language).toBe("auto");
   });
 });
 

@@ -8,13 +8,6 @@
       "claim": "The Earth is round.",
       "visibility": "private",
       "depth": "standard",
-      "domain": "Science",
-      "entities": [
-        {
-          "name": "Earth",
-          "qid": null
-        }
-      ],
       "presumed_intent": "Verify a basic scientific fact",
       "verdict": "True",
       "confidence": "high",

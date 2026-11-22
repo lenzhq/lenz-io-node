@@ -138,11 +138,9 @@ describe("httpStatus and headers on a result read from an answer", () => {
       if (u.endsWith("/extract")) return { body: { claims: [], status: "ok" } };
       if (u.endsWith("/assess")) return { body: { claims: [], more_claims: [] } };
       if (u.endsWith("/me/usage")) return { body: { tier: "free" } };
-      if (u.includes("/library")) return { body: { items: [], total: 0, page: 1, page_size: 20 } };
       if (u.includes("/verifications?") || u.endsWith("/verifications")) {
         return { body: { items: [], total: 0, page: 1, page_size: 20 } };
       }
-      if (u.includes("/ask")) return { body: { messages: [], reply: "x" } };
       if (u.includes("/verifications/")) return { body: { verification_id: "abcd1234" } };
       return { status: 202, body: accepted };
     });
@@ -156,9 +154,6 @@ describe("httpStatus and headers on a result read from an answer", () => {
       ["usage", (c) => c.usage(), 200],
       ["verifications.get", (c) => c.verifications.get("abcd1234"), 200],
       ["verifications.list", (c) => c.verifications.list(), 200],
-      ["library.list", (c) => c.library.list(), 200],
-      ["ask.history", (c) => c.ask.history("abcd1234"), 200],
-      ["ask.send", (c) => c.ask.send("abcd1234", { message: "x" }), 200],
       ["review", (c) => c.review({ text: "Draft." }), 202],
       ["getReview", (c) => c.getReview("r1"), 200],
       ["cancelReview", (c) => c.cancelReview("r1"), 200],
@@ -350,12 +345,6 @@ describe("local argument errors carry a specific code and param", () => {
       "pageSize",
     ],
     ["listAll start page", () => client.verifications.listAll({ page: 0 }), "invalid_page", "page"],
-    [
-      "library listAll random",
-      () => client.library.listAll({ sort: "random" }),
-      "invalid_argument",
-      "sort",
-    ],
     ["an empty task id", () => client.getStatus(""), "invalid_id", "taskId"],
     ["a review id", () => client.getReview(".."), "invalid_id", "reviewId"],
     ["a citecheck id", () => client.getCitecheck("."), "invalid_id", "citecheckId"],
@@ -794,12 +783,6 @@ describe("an argument of the wrong shape is a LenzValidationError, never a TypeE
       "invalid_argument",
       "input",
     ],
-    [
-      "ask.send(id)",
-      () => (client.ask.send as (v: string) => unknown)("abcd1234"),
-      "invalid_argument",
-      "input",
-    ],
     ["verifyBatch({})", () => client.verifyBatch({} as never), "invalid_argument", "claims"],
     [
       "verifyBatch null item",
@@ -835,7 +818,6 @@ describe("an argument of the wrong shape is a LenzValidationError, never a TypeE
       "invalid_argument",
       "input",
     ],
-    ["library.list(null)", () => client.library.list(null as never), "invalid_argument", "input"],
     ["a non-string id", () => client.getStatus(5 as never), "invalid_id", "taskId"],
     [
       "a non-string verification id",

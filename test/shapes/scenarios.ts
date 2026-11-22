@@ -37,6 +37,14 @@ export function hasScenario(name: string): boolean {
     name.startsWith("account__oauth_") ||
     name.startsWith("errors__oauth_") ||
     name.startsWith("errors__web_") ||
+    name.startsWith("account__library_") ||
+    name.startsWith("errors__http_error_library_") ||
+    name.startsWith("account__ask_") ||
+    name.startsWith("errors__ask_") ||
+    name.startsWith("errors__payment_required_ask") ||
+    name.startsWith("errors__not_found_ask") ||
+    name.startsWith("errors__service_unavailable_ask") ||
+    name.startsWith("errors__auth_private_claim_ask_") ||
     name === "account__api_root" ||
     name === "account__webhook_secret_oauth" ||
     // Routes no method calls, answered in HTML by the original shape.
@@ -163,12 +171,6 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
   if (name.startsWith("account__me_usage_") || name.startsWith("account__api_version_header_")) {
     return outcome(() => client.usage());
   }
-  if (name.startsWith("account__library_")) return outcome(() => client.library.list());
-  if (name.startsWith("account__ask_history_")) return outcome(() => client.ask.history("v"));
-  if (name.startsWith("account__ask_send")) {
-    return outcome(() => client.ask.send("v", { message: "x" }));
-  }
-  if (name === "account__ask_reset") return outcome(() => client.ask.reset("v"));
   if (
     name.startsWith("review__receipt_") ||
     name === "review__idempotent_replay_202" ||
@@ -205,14 +207,6 @@ export async function runScenario(sdk: SdkUnderTest, name: string, r: Recorded):
 /** The call whose endpoint answered an error recording. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function errorCall(client: any, name: string): Promise<unknown> {
-  const ask =
-    /^errors__(ask_|auth_private_claim_ask_|payment_required_ask|service_unavailable_ask|not_found_ask)/;
-  if (ask.test(name)) {
-    if (name.includes("reset")) return client.ask.reset("v");
-    if (name.includes("history") || name === "errors__not_found_ask")
-      return client.ask.history("v");
-    return client.ask.send("v", { message: "x" });
-  }
   if (name.startsWith("errors__payment_required_assess")) return client.assess({ claim: "x" });
   if (name === "errors__payment_required_verify_batch_short" || name.startsWith("verify__batch_")) {
     return client.verifyBatch({ claims: [{ claim: "a" }, { claim: "b" }] });
@@ -221,7 +215,6 @@ function errorCall(client: any, name: string): Promise<unknown> {
   if (name.startsWith("verify__delete_")) return client.verifications.delete("v");
   if (name === "errors__not_found_verification") return client.verifications.get("v");
   if (name === "errors__not_found_verify_status") return client.getStatus("t");
-  if (name.startsWith("errors__http_error_library_")) return client.library.list();
   if (name.startsWith("review__") || /^errors__older_(review|invalid_verdict)/.test(name)) {
     return client.review({ text: "x" });
   }

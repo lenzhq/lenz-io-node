@@ -127,7 +127,7 @@ describe("LenzWebhooks", () => {
 
   it("parses verification.needs_input", () => {
     const body = payload("verification.needs_input", {
-      needs_input: { reason: "multi_claim", claims: [{ text: "A", domain: "X" }] },
+      needs_input: { reason: "multi_claim", claims: [{ text: "A" }] },
     });
     const wh = new LenzWebhooks({ secret: SECRET });
     const event = wh.parse(body, { "X-Lenz-Signature": sign(body) }) as VerificationNeedsInput;
@@ -142,10 +142,7 @@ describe("LenzWebhooks", () => {
     const body = payload("verification.needs_input", {
       needs_input: {
         reason: "multi_claim",
-        claims: [
-          { text: "A", domain: "X" },
-          { text: "B", domain: "X" },
-        ],
+        claims: [{ text: "A" }, { text: "B" }],
         hint,
       },
     });

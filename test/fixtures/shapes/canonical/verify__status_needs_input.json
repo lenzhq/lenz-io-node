@@ -6,12 +6,10 @@
     "reason": "multi_claim",
     "claims": [
       {
-        "claim": "The Earth is round.",
-        "domain": "Science"
+        "claim": "The Earth is round."
       },
       {
-        "claim": "Water boils at 100C at sea level.",
-        "domain": "Science"
+        "claim": "Water boils at 100C at sea level."
       }
     ],
     "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."

@@ -87,11 +87,11 @@ afterEach(() => {
 });
 
 describe("Construction", () => {
-  it("no api key permits library", async () => {
-    const { fetch } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+  it("no api key permits verifications.get", async () => {
+    const { fetch } = makeFetch([{ body: { verification_id: "vid_1", claim: "Earth is round" } }]);
     const client = new Lenz({ fetch });
-    const page = await client.library.list();
-    expect(page.total).toBe(0);
+    const item = await client.verifications.get("vid_1");
+    expect(item.verification_id).toBe("vid_1");
   });
 
   it("auth-required method without key raises with link", async () => {
@@ -107,10 +107,12 @@ describe("Construction", () => {
   });
 
   it("base url override routes through alternate base", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
+    const { fetch, calls } = makeFetch([
+      { body: { verification_id: "vid_1", claim: "Earth is round" } },
+    ]);
     const client = new Lenz({ baseUrl: "http://localhost:8001/api/v1", fetch });
-    await client.library.list();
-    expect(calls[0]!.url).toContain("http://localhost:8001/api/v1/library");
+    await client.verifications.get("vid_1");
+    expect(calls[0]!.url).toContain("http://localhost:8001/api/v1/verifications/vid_1");
   });
 
   it("X-Lenz-API-Version header sent on every request", async () => {
@@ -154,7 +156,7 @@ describe("Construction", () => {
     expect((captured as LenzAuthError).message).toContain("API key required");
     expect(calls).toHaveLength(0);
     // A keyless read still works, and sends no Authorization header.
-    await client.library.list();
+    await client.verifications.get("vid_1");
     expect(new Headers(calls[0]!.init.headers).has("Authorization")).toBe(false);
   });
 
@@ -290,7 +292,6 @@ describe("Marquee verbs", () => {
         body: {
           status: "multi_claim",
           identified_claims: ["A", "B"],
-          domain: "Science",
           original_input: "...",
         },
       },
@@ -307,7 +308,6 @@ describe("Marquee verbs", () => {
           status: "ready",
           claim: "Sharks don't get cancer.",
           identified_claims: [],
-          domain: "Science",
           original_input: "Sharks don't get cancer.",
         },
       },
@@ -325,8 +325,6 @@ describe("Marquee verbs", () => {
           claim: "",
           identified_claims: [],
           candidate_claims: [],
-          domain: "",
-          key_entities: [],
           presumed_intent: "Raise a Series A round from investors.",
           original_input: "...",
         },
@@ -884,15 +882,6 @@ describe("Automatic idempotency keys (extract, select, verify)", () => {
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ text: "a" });
     expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ texts: ["a"] });
   });
-
-  it("ask.send generates a key too (3.0); idempotency: false sends none", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }, { body: { reply: "r" } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("vid_1", { message: "Why?" });
-    await client.ask.send("vid_1", { message: "Why?", idempotency: false });
-    expect(key(calls[0]!)).toMatch(/^[0-9a-f]{32}$/);
-    expect(key(calls[1]!)).toBeNull();
-  });
 });
 
 describe("verifyAndWait", () => {
@@ -1090,10 +1079,7 @@ describe("verifyAndWait", () => {
         body: {
           status: "needs_input",
           reason: "multi_claim",
-          claims: [
-            { text: "A", domain: "X" },
-            { text: "B", domain: "Y" },
-          ],
+          claims: [{ text: "A" }, { text: "B" }],
         },
       },
     ]);
@@ -1670,165 +1656,6 @@ describe("Resource namespaces", () => {
       (client.verifications as unknown as { setVisibility?: unknown }).setVisibility,
     ).toBeUndefined();
   });
-
-  it("verifications.related returns typed items with flat verdict + lenz_score", async () => {
-    const { fetch, calls } = makeFetch([
-      {
-        body: {
-          items: [
-            {
-              verification_id: "rel00001",
-              claim: "A related claim",
-              verdict: "False",
-              confidence: "medium",
-              lenz_score: 2,
-              url: "https://lenz.io/c/foo-rel00001",
-              distance: 0.31,
-            },
-          ],
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const related = await client.verifications.related("vid_1", { limit: 5 });
-    expect(calls[0]!.url).toContain("limit=5");
-    expect(related.items).toHaveLength(1);
-    expect(related.items[0]!.verification_id).toBe("rel00001");
-    expect(related.items[0]!.verdict).toBe("False");
-    expect(related.items[0]!.lenz_score).toBe(2);
-    expect(related.items[0]!.distance).toBe(0.31);
-  });
-
-  it("verifications.related empty list", async () => {
-    const { fetch } = makeFetch([{ body: { items: [] } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const related = await client.verifications.related("vid_2");
-    expect(related.items).toEqual([]);
-  });
-
-  it("ask.history hits /ask/{id} and returns typed messages", async () => {
-    const { fetch, calls } = makeFetch([
-      {
-        body: {
-          messages: [
-            {
-              role: "user",
-              content: "Which source is strongest?",
-              created_at: "2026-05-22T12:00:00Z",
-            },
-            {
-              role: "expert",
-              content: "The Nobel committee citation.",
-              created_at: "2026-05-22T12:00:05Z",
-            },
-          ],
-          exchanges_used: 1,
-          exchange_limit: 10,
-          can_send: true,
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const h = await client.ask.history("vid_1");
-    expect(calls[0]!.url).toContain("/ask/vid_1");
-    expect(h.can_send).toBe(true);
-    expect(h.messages).toHaveLength(2);
-    expect(h.messages[0]!.role).toBe("user");
-  });
-
-  it("ask.send hits POST /ask/{id} and surfaces the server's {role, content, created_at}", async () => {
-    // Server returns {role, content, created_at} — see
-    // lenz/api/public_authed.py:1804. Pre-1.0.2 the mock used `{reply: ...}`
-    // and the interface declared `.reply`; both were drift away from the
-    // wire format. Test passed because mock + interface matched (each
-    // other, not the server).
-    const { fetch, calls } = makeFetch([
-      {
-        body: {
-          role: "expert",
-          content: "Because the Nobel citation says so.",
-          created_at: "2026-05-27T12:00:05Z",
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const reply = await client.ask.send("vid_1", { message: "Why?" });
-    expect(calls[0]!.url).toContain("/ask/vid_1");
-    expect(calls[0]!.init.method).toBe("POST");
-    expect(reply.role).toBe("expert");
-    expect(reply.content).toContain("Nobel");
-    expect(reply.created_at).toBe("2026-05-27T12:00:05Z");
-  });
-
-  it("ask.send sends the Idempotency-Key it is given, and a fresh one per call when it is not", async () => {
-    // With a key, a retry of a question that already got a reply replays that
-    // reply instead of spending a second credit and appending the question
-    // plus a second answer to the conversation. A generated key is random per
-    // call, so asking the same question again is a new turn.
-    const { fetch, calls } = makeFetch([
-      { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:05Z" } },
-      { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:09Z" } },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("vid_1", { message: "Why?", idempotencyKey: "ask-key-1" });
-    await client.ask.send("vid_1", { message: "Why?" });
-    expect(new Headers(calls[0]!.init.headers).get("Idempotency-Key")).toBe("ask-key-1");
-    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f]{32}$/);
-  });
-
-  it("ask.reset hits DELETE /ask/{id}", async () => {
-    const { fetch, calls } = makeFetch([{ status: 200, body: { ok: true } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const ok = await client.ask.reset("vid_1");
-    expect(ok).toBe(true);
-    expect(calls[0]!.url).toContain("/ask/vid_1");
-    expect(calls[0]!.init.method).toBe("DELETE");
-  });
-
-  it("library.list works without api_key", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
-    const client = new Lenz({ fetch });
-    await client.library.list({ page: 1, sort: "recent" });
-    const headers = new Headers(calls[0]!.init.headers);
-    expect(headers.get("Authorization")).toBeNull();
-  });
-
-  it("library.list stays anonymous even when keyed (public content, no authOptional)", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.library.list({ page: 1, sort: "recent" });
-    const headers = new Headers(calls[0]!.init.headers);
-    expect(headers.get("Authorization")).toBeNull();
-  });
-
-  it("library.get is removed (TypeScript surface)", () => {
-    const client = new Lenz();
-    // @ts-expect-error -- library.get was merged into verifications.get
-    const _ref = client.library.get;
-    expect(_ref).toBeUndefined();
-  });
-
-  it("library.list forwards curated / verdict / sort=random as query params", async () => {
-    const { fetch, calls } = makeFetch([{ body: { items: [], total: 0, page: 1, page_size: 20 } }]);
-    const client = new Lenz({ fetch });
-    await client.library.list({ curated: ["trivia"], sort: "random", verdict: "True,False" });
-    const url = new URL(calls[0]!.url);
-    expect(url.searchParams.get("curated")).toBe("trivia");
-    expect(url.searchParams.get("sort")).toBe("random");
-    expect(url.searchParams.get("verdict")).toBe("True,False");
-  });
-
-  it("library.list joins multiple curated lists and omits when empty", async () => {
-    const { fetch, calls } = makeFetch([
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-      { body: { items: [], total: 0, page: 1, page_size: 20 } },
-    ]);
-    const client = new Lenz({ fetch });
-    await client.library.list({ curated: ["trivia", "featured"] });
-    expect(new URL(calls[0]!.url).searchParams.get("curated")).toBe("trivia,featured");
-    await client.library.list({ curated: [] });
-    expect(new URL(calls[1]!.url).searchParams.has("curated")).toBe(false);
-  });
 });
 
 describe("Auto-retry", () => {
@@ -2208,9 +2035,9 @@ describe("suggested_rewrite", () => {
       page: 1,
       page_size: 20,
     };
-    const { fetch } = makeFetch([{ body }, { body }]);
+    const { fetch } = makeFetch([{ body }]);
     const client = new Lenz({ apiKey: "lenz_t", fetch });
-    for (const page of [await client.verifications.list(), await client.library.list()]) {
+    for (const page of [await client.verifications.list()]) {
       const [withRewrite, trueRow, olderRow] = page.items;
       expect(withRewrite!.suggested_rewrite).toBe(REWRITE);
       expect(trueRow!.suggested_rewrite).toBeNull();

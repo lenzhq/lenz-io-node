@@ -107,7 +107,6 @@ describe("before the call", () => {
         () => c.verifyBatchAndWait({ claims: [{ claim: "a" }] }, { signal }),
         () => c.wait("t1", { signal }),
         () => c.getReview("r1", { signal }),
-        () => c.ask.send("v1", { message: "m" }, { signal }),
       ]) {
         const err = await settle(run());
         expectAbort(err);
@@ -620,19 +619,6 @@ describe("copies and listeners", () => {
     const controller = new AbortController();
     const it = c.verifications.listAll({ signal: controller.signal })[Symbol.asyncIterator]();
     expect((await it.next()).value).toEqual({ verification_id: "a" });
-    controller.abort();
-    expectAbort(await settle(it.next()));
-    expect(sent).toHaveLength(1);
-  });
-
-  it("library.listAll: an abort between pages ends before the next page", async () => {
-    const { fetch, sent } = recorder([
-      { body: { items: [{ verification_id: "a" }], total: 4, page: 1, page_size: 1 } },
-    ]);
-    const c = new Lenz({ apiKey: "lenz_t", fetch });
-    const controller = new AbortController();
-    const it = c.library.listAll({}, { signal: controller.signal })[Symbol.asyncIterator]();
-    await it.next();
     controller.abort();
     expectAbort(await settle(it.next()));
     expect(sent).toHaveLength(1);
