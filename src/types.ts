@@ -948,7 +948,7 @@ export interface UsageCredits extends RawBody {
  *   divided by this capability's cost.
  * - `quota_used`: derived as `quota_total - quota_remaining`, so
  *   `used + remaining === total` always holds. It is therefore a ceiling —
- *   one `/ask` credit moves the verify block's `quota_used` from 0 to 1.
+ *   one `/assess` credit moves the verify block's `quota_used` from 0 to 1.
  * - `bonus`: {@link UsageCredits.extra} in this capability's unit. A user
  *   holding 5 extra credits sees `verify.bonus === 0` and `assess.bonus === 5`
  *   — 5 credits doesn't buy a verification.
@@ -1027,8 +1027,8 @@ export interface Usage extends RawBody, ResponseMeta {
    */
   credits: UsageCredits;
   /**
-   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`,
-   * `extract`), at that capability's default price. Keys are the server's
+   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`
+   * (legacy), `extract`), at that capability's default price. Keys are the server's
    * own, verbatim — never rewritten by the SDK — and a zero cost means the
    * capability is free at the pool and bounded by a daily cap instead. New
    * keys appear here without an SDK release.
@@ -1100,45 +1100,6 @@ export interface Usage extends RawBody, ResponseMeta {
    * as `undefined` (treat that as "unknown", not `false`).
    */
   has_webhook_secret?: boolean;
-}
-
-/** One message in an `/ask` conversation thread. */
-export interface AskMessage extends RawBody {
-  role?: string; // "user" | "expert"
-  content?: string;
-  created_at?: string;
-}
-
-/** Returned by `GET /ask/{verification_id}`. */
-export interface AskHistory extends RawBody, ResponseMeta {
-  messages: AskMessage[];
-  exchanges_used: number;
-  exchange_limit: number;
-  can_send: boolean;
-}
-
-/**
- * Returned by `POST /ask/{verification_id}`.
- *
- * `content` is the assistant's reply text in a small markdown subset:
- *
- * - `**bold**` and `*italic*`
- * - `- ` or `* ` bullet lists
- * - Blank-line paragraph breaks; single newlines inside a paragraph
- *   mean line break
- *
- * The model only produces these — no headings, no tables, no code
- * blocks. Pass it through any markdown library or display it
- * verbatim. See https://lenz.io/docs/quickstart#ask-reply-format.
- *
- * Pre-1.0.2 this interface declared a single `reply: string` field
- * that never matched the wire — the server has always returned
- * `{role, content, created_at}`. 1.0.2 aligned the typed surface.
- */
-export interface AskReply extends RawBody, ResponseMeta {
-  role?: string; // 'expert' on every reply (the assistant turn)
-  content?: string; // markdown-subset prose (see interface docstring)
-  created_at?: string;
 }
 
 // ── Input shapes ──
@@ -1430,32 +1391,6 @@ export interface AssessInput {
    * Still honoured; the options argument wins when both are given.
    */
   timeoutMs?: number;
-}
-
-export interface AskSendInput {
-  message: string;
-  /**
-   * Optional language override (ISO 639-1). When omitted, the server
-   * uses the claim's stored language as the default. `"auto"` answers in
-   * the language of the claim being discussed.
-   */
-  language?: string;
-  /**
-   * Send an `Idempotency-Key` so a retry of a question that already got a
-   * reply replays that reply instead of spending a second credit and leaving
-   * the question plus a second answer in the conversation. Defaults to
-   * `true`, generating a random key per call that is reused across this
-   * client's own retries only: asking the same question again in a new call
-   * is a new turn. Set `false` to send none.
-   */
-  idempotency?: boolean;
-  /**
-   * Pin the `Idempotency-Key` yourself, so a retry from a different process
-   * replays too. Wins over `idempotency`. A retry sent while the first call
-   * is still running gets a 409: there is no reply to replay yet. Never
-   * derived from the message.
-   */
-  idempotencyKey?: string;
 }
 
 export interface SelectInput {

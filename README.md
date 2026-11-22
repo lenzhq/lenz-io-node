@@ -2,13 +2,12 @@
 
 Official Node SDK for the [Lenz Accuracy Verification API](https://lenz.io/developers) — check the facts, figures, and citations in your work.
 
-**Six API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
+**Five API calls: one research-depth ladder, one call that runs it on a whole draft, and the citation check on its own.**
 
 - `extract` — pull verifiable claims out of any text or a public web page, Google Doc, direct PDF URL (.pdf and arxiv.org/pdf/<id>), YouTube URL, or direct image (.png, .jpg, .webp), optionally narrowed with a `focus`. Free, 1000 calls/account/day (shared across your API keys).
 - `assess` — fast 3-model panel verdict in ~15s; one claim, or up to 20 claims in one call. Sync, paid.
 - `verify` — full multi-model pipeline with citations in ~90s. Async, paid.
 - `citecheck` — the citation check on its own: does each source a draft cites say what the draft says? Async.
-- `ask` — follow-up questions grounded on a verification. Sync, paid.
 - `review` — the ladder on a draft (text, document, or URL) in one async call, its citations too if asked: its claims, a quick verdict on each, a deep check on the doubtful ones, issues, with rewrites.
 
 Built for teams whose AI output is async or document-shaped: legal-memo
@@ -306,15 +305,6 @@ for (const r of results) {
     console.log(v.verdict, v.lenz_score, v.executive_summary);
   }
 }
-
-// 4. ask — a follow-up question on a completed deep check, when there is one
-const deep = results.find((r) => r.status === "completed")?.verification;
-if (deep?.verification_id) {
-  const reply = await client.ask.send(deep.verification_id, {
-    message: "Which source is strongest?",
-  });
-  console.log(reply.content);
-}
 ```
 
 `assess({ claims })` takes up to 20 claims per call and answers with exactly
@@ -408,9 +398,8 @@ throws the local argument error (`LenzValidationError`) naming both before anyth
 - **`client.wait(task)`** → `Verification`. Block on a `task_id` (or a `TaskAccepted`) until it terminates. The polling counterpart to a webhook.
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
-- **`client.ask.{history,send,reset}(verificationId, ...)`** → Q&A on a verification. `reply.content` uses a small markdown subset (`**bold**`, `*italic*`, `- ` or `* ` bullets, blank-line paragraphs) — render with a minimal markdown library or display verbatim. See [docs/quickstart#ask-reply-format](https://lenz.io/docs/quickstart#ask-reply-format).
 - **`client.verifications.{list,get,delete}(...)`** → manage past verifications. `verifications.list({ page, pageSize })` reads one page; `pageSize` is a whole number from 1 to 100 (anything else throws before a request) and, when omitted, the server's default of 20 applies. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll({ pageSize: 100 })) …`), one request a page, each asking for the same `pageSize`. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
-- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
+- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
 
@@ -853,7 +842,6 @@ One balance per account, spent by every billable call:
 | `verify` (and `verifyBatch`, `select`) | **10** per claim                         |
 | `verify` with `depth: "low"`           | **5** per claim                          |
 | `assess`                               | 1 per claim; `Error` rows are free       |
-| `ask`                                  | 1                                        |
 | `extract`                              | 0 — free, bounded by a daily cap instead |
 
 ```ts
@@ -1197,8 +1185,6 @@ as the Python SDK):
 | `select`                            | `claims` empty, or every item blank                | `empty_list`  | `"claims"`    | `claims is required.`                                      |
 | `select` given `texts`              | `texts` empty, or every item blank                 | `empty_list`  | `"texts"`     | `claims is required.`                                      |
 | `select`                            | neither `claims` nor `texts`                       | `empty_list`  | `"claims"`    | `claims: Field required`                                   |
-| `ask.send`                          | `message` only whitespace                          | `blank_input` | `"message"`   | `Message cannot be empty.`                                 |
-| `ask.send`                          | no `message`                                       | `blank_input` | `"message"`   | `message: Field required`                                  |
 | `review`, `reviewAndWait`           | `text` only whitespace                             | `blank_input` | `"text"`      | `text: send the draft, or one public http(s) URL.`         |
 | `review`, `reviewAndWait`           | no `text`                                          | `blank_input` | `"text"`      | `text: Field required`                                     |
 | `citecheck`, `citecheckAndWait`     | neither `text` nor `pairs`                         | `blank_input` | `"text"`      | `payload: Value error, send exactly one of text and pairs` |
@@ -1224,7 +1210,7 @@ camelCase). It is still an `Error`, and a wait stops on it at once.
 
 | `code`              | When                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `param`                                                                                                              |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `ask.send` with no `message`; `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                  | `"claim"`; `"message"`; `"text"`                                                                                     |
+| `blank_input`       | `verify` / `assess` with no `claim` (or only whitespace); `review` / `reviewAndWait` with no `text` (or only whitespace); `citecheck` with neither `text` nor `pairs`                                                                                                                                                                                                                                                                                | `"claim"`; `"text"`                                                                                                  |
 | `blank_item`        | a blank `assess` item                                                                                                                                                                                                                                                                                                                                                                                                                                | `"claims[1]"`                                                                                                        |
 | `empty_list`        | `select` without claims; `assess` with an empty `claims` list (and no `claim`)                                                                                                                                                                                                                                                                                                                                                                       | `"claims"`                                                                                                           |
 | `invalid_page_size` | `pageSize` on `verifications.list` / `listAll`, `listReviews` / `listAllReviews` that is not a whole number from 1 to 100                                                                                                                                                                                                                                                                                                                            | `"pageSize"`                                                                                                         |
@@ -1315,7 +1301,7 @@ covered verification is kept and can still be downloaded.
 
 Every call that runs or charges for work sends an `Idempotency-Key` by
 default: `verify`, `verifyAndWait`, `verifyBatch`, `verifyBatchAndWait`,
-`select`, `assess`, `extract`, `ask.send`, `review` and `citecheck`. The key
+`select`, `assess`, `extract`, `review` and `citecheck`. The key
 is random per call and reused across that call's own retries, so a network
 drop or a client timeout doesn't start a duplicate verification or charge a
 second credit. It is never derived from the request: the same text sent again
@@ -1327,9 +1313,9 @@ since 3.2; they always sent one before). A non-empty `idempotencyKey` wins over
 twice: opt out only when your caller already dedupes, or with `maxRetries: 0`.
 
 ```ts
-const reply = await client.ask.send(verificationId, {
-  message: "Which source says that?",
-  idempotencyKey: `${conversationId}:turn-4`,
+const accepted = await client.verify({
+  claim: "Sharks don't get cancer",
+  idempotencyKey: `${docId}:claim-1`,
 });
 ```
 
@@ -1358,13 +1344,7 @@ returns the run as it stands, so a repeat is harmless.
 
 Every error of a call that sent a key carries it as `err.idempotencyKey`,
 including the timeout of a `*AndWait` (resending it with that key returns the
-work already started). A plain new call mints a new key and can run twice. On
-`ask.send`, the default key is per call: it protects that call's own retries
-(a network drop does not ask twice or charge twice), and asking the same
-question again in a new call is a new turn with a new key, answered and
-charged again. Pin `idempotencyKey` (one per turn, say
-`${conversationId}:turn-4`) to make a resend from another process replay the
-first answer.
+work already started). A plain new call mints a new key and can run twice.
 
 ## Steering extract
 
@@ -1461,7 +1441,7 @@ Like `reviewFile`, pass a `Uint8Array`, `ArrayBuffer`, or `Blob`/`File` (up to 1
 
 The Lenz API returns prose fields (atomic claim, executive summary, debate, panel
 reasoning) in any of 39 languages. Pass `language:` on `verify`, `verifyAndWait`,
-`verifyBatch`, `assess`, `extract`, or `ask.send`. Verdict labels stay English
+`verifyBatch`, `assess`, or `extract`. Verdict labels stay English
 regardless of language. Serbian (`sr`) is answered in the Latin script. On `extract`, `language` and `focus` are independent —
 a focus written in any language selects claims emitted in `language`.
 
@@ -1481,11 +1461,10 @@ https://lenz.io/contact.
 ### Answer in the language of the text
 
 Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait`, `review`,
-`reviewAndWait`, `extract` or `ask.send` and the answer comes back in the
+`reviewAndWait`, or `extract` and the answer comes back in the
 language of the text you submitted (for a review, one language for the whole
 draft). A concrete code such as `"es"` always wins, and omitting `language`
-still means English. On `ask.send`, `"auto"` uses the language of the claim
-being discussed. On `extract`, the claims are written in the language of the
+still means English. On `extract`, the claims are written in the language of the
 text (of the fetched page when `text` is a single URL); a short or undetectable
 text gives English, and the result's `language` is the code that was used. Pass
 it on to `assess` or `verify` to keep a chain in one language, rather than
@@ -1584,13 +1563,13 @@ await client.getReview(reviewId, { view: "issues", signal });
 
 What the options bound, per method:
 
-| Methods                                                                                                                                                                         | `timeoutMs`                                                                                                                         | `maxRetries`                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `listReviews`, `usage`, `verifications.*`, `ask.*`) | each attempt (default: the client's, 30 s)                                                                                          | each request's retries                                                                                                                          |
-| `extract`, `assess`                                                                                                                                                             | each attempt; used as given (so is a copy's), even below the 150 s / 100 s these wait at least when the timeout is the client's own | each request's retries                                                                                                                          |
-| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                                      | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left                        | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
-| `verifications.listAll`, `listAllReviews`                                                                                                                                       | each page request (options checked when `listAll` is called)                                                                        | each page request's retries                                                                                                                     |
-| `withOptions`                                                                                                                                                                   | every call made through the copy                                                                                                    | every call made through the copy                                                                                                                |
+| Methods                                                                                                                                                                | `timeoutMs`                                                                                                                         | `maxRetries`                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain calls (`verify`, `verifyBatch`, `select`, `getStatus`, `cancel*`, `review`, `citecheck`, `getReview`, `getCitecheck`, `listReviews`, `usage`, `verifications.*`) | each attempt (default: the client's, 30 s)                                                                                          | each request's retries                                                                                                                          |
+| `extract`, `assess`                                                                                                                                                    | each attempt; used as given (so is a copy's), even below the 150 s / 100 s these wait at least when the timeout is the client's own | each request's retries                                                                                                                          |
+| Waits (`wait`, `verifyAndWait`, `verifyBatchAndWait`, `reviewAndWait`, `citecheckAndWait`)                                                                             | stays the wait's whole budget; a poll's attempt timeout is the client's (or the copy's), cut at what is left                        | the submit's; `wait` takes none (it throws). Verification polls keep the client's retries; review and citation-check polls are one attempt each |
+| `verifications.listAll`, `listAllReviews`                                                                                                                              | each page request (options checked when `listAll` is called)                                                                        | each page request's retries                                                                                                                     |
+| `withOptions`                                                                                                                                                          | every call made through the copy                                                                                                    | every call made through the copy                                                                                                                |
 
 The waits also take `cancelOnAbort: true`: when the `signal` fires after the
 run was accepted, the run is cancelled on the server too (see
@@ -1731,8 +1710,7 @@ status.result?.raw; // the verification's object
 
 Covered: every result that is one answer's body (`verify`, `verifyBatch`,
 `select`, `getStatus`, `cancel`, `extract`, `assess`, `usage`,
-`verifications.get` / `list` / `getCertificate`, `ask.history` /
-`ask.send`, `review`, `citecheck`, `getReview`,
+`verifications.get` / `list` / `getCertificate`, `review`, `citecheck`, `getReview`,
 `getCitecheck`, `cancelReview`, `cancelCitecheck`, and what `reviewAndWait` /
 `citecheckAndWait` return: the final poll's body), and every object nested in
 one that the body holds at the same place (assess rows and their `failure`,

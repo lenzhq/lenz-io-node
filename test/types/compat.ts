@@ -227,12 +227,6 @@ export const old_ReviewVerificationCounts: Old.ReviewVerificationCounts =
   value<New.ReviewVerificationCounts>();
 export const new_VerdictLabel: New.VerdictLabel = value<Old.VerdictLabel>();
 export const old_VerdictLabel: Old.VerdictLabel = value<New.VerdictLabel>();
-export const new_AskHistory: New.AskHistory = value<Old.AskHistory>();
-export const old_AskHistory: Old.AskHistory = value<New.AskHistory>();
-export const new_AskMessage: New.AskMessage = value<Old.AskMessage>();
-export const old_AskMessage: Old.AskMessage = value<New.AskMessage>();
-export const new_AskReply: New.AskReply = value<Old.AskReply>();
-export const old_AskReply: Old.AskReply = value<New.AskReply>();
 export const new_AssessClaim: New.AssessClaim = value<Old.AssessClaim>();
 export const old_AssessClaim: Old.AssessClaim = value<New.AssessClaim>();
 export const new_AssessInput: New.AssessInput = value<Old.AssessInput>();
@@ -393,9 +387,6 @@ export const verifications_getCertificate: Old.Lenz["verifications"]["getCertifi
   value<New.Lenz["verifications"]["getCertificate"]>();
 export const verifications_delete: Old.Lenz["verifications"]["delete"] =
   value<New.Lenz["verifications"]["delete"]>();
-export const ask_history: Old.Lenz["ask"]["history"] = value<New.Lenz["ask"]["history"]>();
-export const ask_send: Old.Lenz["ask"]["send"] = value<New.Lenz["ask"]["send"]>();
-export const ask_reset: Old.Lenz["ask"]["reset"] = value<New.Lenz["ask"]["reset"]>();
 
 // Literal event mocks written against the old types still type-check.
 export const failedMock: New.VerificationFailed = {

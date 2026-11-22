@@ -705,11 +705,8 @@ export function legacyErrorBody(status: number, body: unknown, req: RequestConte
     }
     return legacy;
   }
-  // `/assess` sent `too_many_items`; `/ask` sent no code for an unfinished
-  // verification (GET /verifications/{id} still sends `verification_not_ready`).
-  const codeless =
-    (CODELESS.has(code) && !(code === "too_many_items" && path === "/assess")) ||
-    (code === "verification_not_ready" && path.startsWith("/ask/"));
+  // `/assess` sent `too_many_items`.
+  const codeless = CODELESS.has(code) && !(code === "too_many_items" && path === "/assess");
   if (codeless) {
     delete out["code"];
   }

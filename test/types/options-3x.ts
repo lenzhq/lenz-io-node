@@ -58,9 +58,6 @@ export async function everyForm(client: Lenz): Promise<void> {
   await client.verifications.get("v", o);
   await client.verifications.getCertificate("v", o);
   await client.verifications.delete("v", o);
-  await client.ask.history("v", o);
-  await client.ask.send("v", { message: "m" }, o);
-  await client.ask.reset("v", o);
 
   // withOptions keeps the type it was called on.
   class Mine extends Lenz {}

@@ -5,10 +5,9 @@
  *   npx tsx examples/core/verify-auto.ts
  *
  * Pass `language: "auto"` on `assess`, `verify`, `verifyAndWait`,
- * `extract` or `ask.send` and the answer comes back in the language of the
- * submitted text (for `ask.send`, the language of the claim being discussed;
- * for `extract`, the claims are written in it, and the result's `language`
- * is the code that was used). A
+ * or `extract` and the answer comes back in the language of the
+ * submitted text (for `extract`, the claims are written in it, and
+ * the result's `language` is the code that was used). A
  * concrete code such as "es" always wins; omit `language` for English.
  * `verifyBatch`, `citecheck` and `review` do not accept "auto".
  */

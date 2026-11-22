@@ -186,7 +186,7 @@ describe("S2: every error of a keyed call carries its key", () => {
       throw new TypeError("fetch failed");
     }) as unknown as typeof globalThis.fetch;
     const client = new Lenz({ apiKey: "lenz_t", fetch, maxRetries: 0 });
-    const err = (await settle(client.ask.send("v", { message: "why?" }))) as LenzError;
+    const err = (await settle(client.verifyBatch({ claims: [{ claim: "a" }] }))) as LenzError;
     expect(err).toBeInstanceOf(LenzConnectionError);
     expect(err.idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
   });
@@ -294,11 +294,11 @@ describe("a body that breaks off after the headers keeps the key", () => {
   it("a 2xx: LenzConnectionError since 3.2 (was the runtime's error), carrying the key", async () => {
     const client = new Lenz({ apiKey: "lenz_t", fetch: brokenBody(200) });
     const err = (await settle(
-      client.ask.send("v", { message: "why?", idempotencyKey: "ask-1" }),
+      client.verifyBatch({ claims: [{ claim: "a" }], idempotencyKey: "batch-1" }),
     )) as Error & { idempotencyKey?: string };
     expect(err).toBeInstanceOf(LenzConnectionError);
     expect(err.cause).toBeInstanceOf(TypeError);
-    expect(err.idempotencyKey).toBe("ask-1");
+    expect(err.idempotencyKey).toBe("batch-1");
   });
 
   it("an error status: the status stands, the body is lost, carrying the key", async () => {
