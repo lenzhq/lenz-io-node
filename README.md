@@ -399,7 +399,7 @@ throws the local argument error (`LenzValidationError`) naming both before anyth
 - **`client.verifyBatch({ claims })`** → `BatchAccepted`. Fan-out for multi-claim LLM outputs.
 - **`client.verifyBatchAndWait({ claims })`** → `BatchItemResult[]`. Fan out a batch and poll every item to completion; one result per claim, in input order, never throws on a per-item failure.
 - **`client.verifications.{list,get,delete}(...)`** → manage past verifications. `verifications.list({ page, pageSize })` reads one page; `pageSize` is a whole number from 1 to 100 (anything else throws before a request) and, when omitted, the server's default of 20 applies. `verifications.listAll()` iterates every page (`for await (const v of client.verifications.listAll({ pageSize: 100 })) …`), one request a page, each asking for the same `pageSize`. All API claims are private; reference them by `verification_id`. Cache-hit on another customer's claim is transparent — you always see your own `verification_id`, never another customer's.
-- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `ask` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `ask` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
+- **`client.usage()`** → your credit balance (`credits`), the price list (`costs` — `verify` 10, `assess` 1, `extract` 0 — plus `cost_options` for parameter-dependent prices such as `depth`), and that balance projected into each capability's unit (`verify` / `assess`), plus the daily `extract` rate limit. Also reports `has_webhook_secret` — whether this key can receive signed webhook callbacks (`verify` with a `webhook_url` needs one); the secret value itself is never exposed. See [Credits](#credits).
 
 ## Polling without webhooks
 
@@ -842,7 +842,6 @@ One balance per account, spent by every billable call:
 | `verify` (and `verifyBatch`, `select`) | **10** per claim                         |
 | `verify` with `depth: "low"`           | **5** per claim                          |
 | `assess`                               | 1 per claim; `Error` rows are free       |
-| `ask`                                  | 1                                        |
 | `extract`                              | 0 — free, bounded by a daily cap instead |
 
 ```ts

@@ -948,7 +948,7 @@ export interface UsageCredits extends RawBody {
  *   divided by this capability's cost.
  * - `quota_used`: derived as `quota_total - quota_remaining`, so
  *   `used + remaining === total` always holds. It is therefore a ceiling —
- *   one `/ask` credit moves the verify block's `quota_used` from 0 to 1.
+ *   one `/assess` credit moves the verify block's `quota_used` from 0 to 1.
  * - `bonus`: {@link UsageCredits.extra} in this capability's unit. A user
  *   holding 5 extra credits sees `verify.bonus === 0` and `assess.bonus === 5`
  *   — 5 credits doesn't buy a verification.
@@ -1027,8 +1027,8 @@ export interface Usage extends RawBody, ResponseMeta {
    */
   credits: UsageCredits;
   /**
-   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`,
-   * `extract`), at that capability's default price. Keys are the server's
+   * Credits per call, keyed by CAPABILITY name (`verify`, `assess`, `ask`
+   * (legacy), `extract`), at that capability's default price. Keys are the server's
    * own, verbatim — never rewritten by the SDK — and a zero cost means the
    * capability is free at the pool and bounded by a daily cap instead. New
    * keys appear here without an SDK release.
