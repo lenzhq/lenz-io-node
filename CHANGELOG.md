@@ -17,6 +17,7 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Removed
 
+- `client.ask` (`ask.send`, `ask.history`, `ask.reset`) and types `AskHistory`, `AskMessage`, `AskReply`, and `AskSendInput`, following the retirement of `GET|POST|DELETE /api/v1/ask/{verification_id}`.
 - `client.library` (`library.list`, `library.paginate`, `library.iter`) and `client.verifications.related` (plus `LibraryItem`, `LibraryList`, `LibraryListOptions`, `RelatedVerification`, `RelatedVerifications`, and `RelatedOptions`), following the retirement of `GET /api/v1/library` and `GET /api/v1/verifications/{id}/related`.
 
 ## [3.6.0] - 2026-10-31

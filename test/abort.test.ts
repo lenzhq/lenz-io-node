@@ -107,7 +107,6 @@ describe("before the call", () => {
         () => c.verifyBatchAndWait({ claims: [{ claim: "a" }] }, { signal }),
         () => c.wait("t1", { signal }),
         () => c.getReview("r1", { signal }),
-        () => c.ask.send("v1", { message: "m" }, { signal }),
       ]) {
         const err = await settle(run());
         expectAbort(err);

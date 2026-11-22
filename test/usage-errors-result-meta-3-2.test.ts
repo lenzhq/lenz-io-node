@@ -1,7 +1,7 @@
 /**
  * 3.2, mirrored in the Python SDK: a blank input refused before sending says
  * the API's own 422 sentence for that operation, whatever `legacyAliases`
- * says; a blank `select` item and a blank `ask.send` message are refused
+ * says; a blank `select` item is refused
  * too; a wait reading a failure block of the wrong type throws
  * `LenzInvalidResponseError`; top-level results carry `httpStatus` and
  * `headers`; and a call made without a key throws `LenzMissingKeyError`.
@@ -138,20 +138,6 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       "empty_list",
       "texts",
     ],
-    [
-      "ask.send blank",
-      (c) => c.ask.send("abcd1234", { message: "  " }),
-      "Message cannot be empty.",
-      "blank_input",
-      "message",
-    ],
-    [
-      "ask.send none",
-      (c) => c.ask.send("abcd1234", {} as { message: string }),
-      "message: Field required",
-      "blank_input",
-      "message",
-    ],
     ["review", (c) => c.review({ text: " " }), REVIEW, "blank_input", "text"],
     [
       "review {}",
@@ -257,15 +243,6 @@ describe("a blank input refused locally says the API's canonical 422 sentence", 
       claims: "a claim" as unknown as string[],
     });
     expect(sent[0]!.body).toBe('{"texts":"a claim"}');
-  });
-
-  it("an ask.send with a message sends the same request as before", async () => {
-    const { fetch, sent } = server(() => ({ body: { reply: "x" } }));
-    await new Lenz({ apiKey: "lenz_t", fetch }).ask.send("abcd1234", {
-      message: " why? ",
-      idempotency: false,
-    });
-    expect(sent[0]!.body).toBe('{"message":" why? "}');
   });
 });
 

@@ -2,17 +2,16 @@
  * Public Lenz client — the ergonomic top-level surface.
  *
  * Multi-language SDK convention (39 languages):
- * - Request methods (verify, assess, extract, ask.send, …) take
+ * - Request methods (verify, assess, extract, …) take
  *   `language?: string`. Omit the field (or pass empty string) for
  *   English (default) — the SDK then omits the key from the request
  *   body, preserving byte-identical wire format for existing English
  *   callers. Set `language: "es"` (or any of the 39 supported codes)
  *   to receive prose fields in that language. `assess`, `verify`,
- *   `verifyAndWait`, `review`, `reviewAndWait`, `extract` and `ask.send` also take
+ *   `verifyAndWait`, `review`, `reviewAndWait` and `extract` also take
  *   `language: "auto"`: the answer comes back in the language of the submitted
- *   text (for `ask.send`, the language of the claim being discussed; for a
- *   review, one language for the whole draft; for `extract`, the claims are
- *   written in it). `verifyBatch` and `citecheck` do not take `"auto"`.
+ *   text (for a review, one language for the whole draft; for `extract`,
+ *   the claims are written in it). `verifyBatch` and `citecheck` do not take `"auto"`.
  * - Response shapes (Verification, VerificationListItem, AssessClaim)
  *   expose `language?: string` populated by the server. Verdict /
  *   domain / status enums stay English regardless of language; only
@@ -22,10 +21,9 @@
  *   byte-identical English path. The omit-when-empty convention exists
  *   precisely to avoid that.
  *
- * Six API calls: `extract`, `assess`, `verify` and `ask` form a
- * research-depth ladder (find claims, judge them fast, prove them deep,
- * follow up); `review` runs it on a whole draft and `citecheck` checks a
- * draft's citations on their own.
+ * Five API calls: `extract`, `assess` and `verify` form a research-depth
+ * ladder (find claims, judge them fast, prove them deep); `review` runs
+ * it on a whole draft and `citecheck` checks a draft's citations on their own.
  *
  * ```ts
  * import { Lenz, type AssessClaim } from 'lenz-io';
@@ -49,15 +47,6 @@
  *   .map((c) => ({ claim: c.claim! }))
  *   .slice(0, 20);
  * const results = doubtful.length ? await client.verifyBatchAndWait({ claims: doubtful }) : [];
- *
- * // 4. ask — a follow-up question on a completed deep check, when there is one
- * const deep = results.find((r) => r.status === 'completed')?.verification;
- * if (deep?.verification_id) {
- *   const reply = await client.ask.send(deep.verification_id, {
- *     message: 'Which source is strongest?',
- *   });
- *   console.log(reply.content);
- * }
  *
  * // Async verify: submit, then wait (or receive the webhook)
  * const task = await client.verify({ claim: '...' }); // returns task_id
@@ -94,9 +83,6 @@ import {
 } from "./errors.js";
 import type {
   Result,
-  AskHistory,
-  AskReply,
-  AskSendInput,
   AssessInput,
   AssessResponse,
   BatchAccepted,
@@ -2040,8 +2026,6 @@ const BLANK_SENTENCES = {
   list: "claims is required.",
   /** `POST /assess`: a blank item. */
   item: (i: number) => `claims[${i}] is blank.`,
-  /** `POST /ask/{verification_id}`: a blank `message`. */
-  message: "Message cannot be empty.",
   /** `POST /review`: a blank `text`. */
   review: "text: send the draft, or one public http(s) URL.",
   /** `POST /citecheck` with neither `text` nor `pairs`. */
@@ -2476,81 +2460,6 @@ class VerificationsNamespace {
   }
 }
 
-class AskNamespace {
-  constructor(private readonly client: Lenz) {}
-
-  /**
-   * The follow-up conversation on a verification.
-   *
-   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
-   */
-  async history(verificationId: string, options?: RequestOptions): Promise<Result<AskHistory>> {
-    const id = requirePathId("ask.history", "verification_id", verificationId);
-    const call = resolveCall(this.client, options, "ask.history");
-    return asResult(
-      await this.client.request<AskHistory>({
-        method: "GET",
-        path: `/ask/${id}`,
-        ...transportOf(call),
-      }),
-    );
-  }
-
-  /**
-   * Ask a follow-up question about a verification. Paid, one credit per turn.
-   *
-   * Sends a random `Idempotency-Key` per call, reused across this client's
-   * own retries, so a retried question replays its reply rather than asking
-   * (and charging) again. Pin one with `idempotencyKey`, or send none with
-   * `idempotency: false`. See {@link AskSendInput.idempotencyKey}.
-   *
-   * Throws {@link LenzGoneError} (HTTP 410) when the account's retention period has removed the verification.
-   */
-  async send(
-    verificationId: string,
-    input: AskSendInput,
-    options?: RequestOptions,
-  ): Promise<Result<AskReply>> {
-    const id = requirePathId("ask.send", "verification_id", verificationId);
-    requireObject(input, "ask.send", "input");
-    const message: unknown = input.message;
-    if (message === undefined || (typeof message === "string" && !hasText(message))) {
-      throw blankInput(
-        message === undefined ? BLANK_SENTENCES.absent("message") : BLANK_SENTENCES.message,
-        "blank_input",
-        "Pass the follow-up question as `message`.",
-        "message",
-      );
-    }
-    const call = resolveCall(this.client, options, "ask.send");
-    const body: Record<string, unknown> = { message: input.message };
-    if (input.language) body.language = input.language;
-    const idempotencyKey = await callIdempotencyKey(input);
-    const headers: Record<string, string> = {};
-    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-    return asResult(
-      await this.client.request<AskReply>({
-        method: "POST",
-        path: `/ask/${id}`,
-        json: body,
-        headers,
-        ...transportOf(call),
-      }),
-    );
-  }
-
-  async reset(verificationId: string, options?: RequestOptions): Promise<boolean> {
-    const id = requirePathId("ask.reset", "verification_id", verificationId);
-    const call = resolveCall(this.client, options, "ask.reset");
-    await this.client.request<unknown>({
-      method: "DELETE",
-      path: `/ask/${id}`,
-      ...transportOf(call),
-    });
-    return true;
-  }
-}
-
 /**
  * A batch's `claims`: a list of objects, refused before anything is sent
  * otherwise (`invalid_argument`, `param` `"claims"` or `"claims[i]"`). An
@@ -2691,7 +2600,6 @@ export class Lenz {
   private copyTimeoutMs: number | undefined;
 
   readonly verifications: VerificationsNamespace;
-  readonly ask: AskNamespace;
 
   constructor(opts: LenzOptions = {}) {
     requireObject(opts, "new Lenz()", "options");
@@ -2720,7 +2628,6 @@ export class Lenz {
     this.logger = opts.logger;
 
     this.verifications = new VerificationsNamespace(this);
-    this.ask = new AskNamespace(this);
   }
 
   /**
@@ -2794,8 +2701,8 @@ export class Lenz {
     });
     // Each namespace is copied from the one it replaces (its class and any
     // method set on it kept) and bound to the copy.
-    const namespaces = copy as unknown as Record<"verifications" | "ask", object>;
-    for (const name of ["verifications", "ask"] as const) {
+    const namespaces = copy as unknown as Record<"verifications", object>;
+    for (const name of ["verifications"] as const) {
       const from = namespaces[name];
       namespaces[name] = Object.assign(
         Object.create(Object.getPrototypeOf(from) as object) as object,

@@ -377,26 +377,6 @@ const FORMS: Form[] = [
     run: (c) => c.verifications.delete("v1"),
   },
   {
-    name: "ask.history",
-    replies: [{ body: { messages: [] } }],
-    run: (c) => c.ask.history("v1"),
-  },
-  {
-    name: "ask.send",
-    replies: [{ body: { content: "x" } }],
-    run: (c) => c.ask.send("v1", { message: "why?", language: "de", idempotencyKey: "frozen-q" }),
-  },
-  {
-    name: "ask.send, random key",
-    replies: [{ body: { content: "x" } }],
-    run: (c) => c.ask.send("v1", { message: "why?" }),
-  },
-  {
-    name: "ask.reset",
-    replies: [{ status: 200, body: { ok: true } }],
-    run: (c) => c.ask.reset("v1"),
-  },
-  {
     name: "wait",
     replies: [{ body: COMPLETED }],
     run: (c) => c.wait("t1"),

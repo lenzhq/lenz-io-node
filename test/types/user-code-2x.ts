@@ -109,7 +109,6 @@ export async function twoTwentyOneFlow(client: Lenz, hooks: LenzWebhooks): Promi
   const review = await client.reviewAndWait({ text: "x" });
   const found: number | null | undefined = review.summary.claims_found;
   const exceeded: boolean | null | undefined = review.summary.claim_limit_exceeded;
-  const reply = await client.ask.send("v", { message: "why?", language: "auto" });
   const event = hooks.parse("", { "X-Lenz-Signature": "" });
   if (event.event === "verification.failed" && "failure" in event) void event.failure?.code;
   if (event.event === "verification.completed" && "verification" in event) {
@@ -118,6 +117,5 @@ export async function twoTwentyOneFlow(client: Lenz, hooks: LenzWebhooks): Promi
   void failures;
   void found;
   void exceeded;
-  void reply;
   return [...claims.map((c) => c.claim), ...more, code ?? "", claimOf ?? "", done ?? ""];
 }

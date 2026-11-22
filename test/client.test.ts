@@ -886,15 +886,6 @@ describe("Automatic idempotency keys (extract, select, verify)", () => {
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ text: "a" });
     expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ texts: ["a"] });
   });
-
-  it("ask.send generates a key too (3.0); idempotency: false sends none", async () => {
-    const { fetch, calls } = makeFetch([{ body: { reply: "r" } }, { body: { reply: "r" } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("vid_1", { message: "Why?" });
-    await client.ask.send("vid_1", { message: "Why?", idempotency: false });
-    expect(key(calls[0]!)).toMatch(/^[0-9a-f]{32}$/);
-    expect(key(calls[1]!)).toBeNull();
-  });
 });
 
 describe("verifyAndWait", () => {
@@ -1671,85 +1662,6 @@ describe("Resource namespaces", () => {
     expect(
       (client.verifications as unknown as { setVisibility?: unknown }).setVisibility,
     ).toBeUndefined();
-  });
-
-  it("ask.history hits /ask/{id} and returns typed messages", async () => {
-    const { fetch, calls } = makeFetch([
-      {
-        body: {
-          messages: [
-            {
-              role: "user",
-              content: "Which source is strongest?",
-              created_at: "2026-05-22T12:00:00Z",
-            },
-            {
-              role: "expert",
-              content: "The Nobel committee citation.",
-              created_at: "2026-05-22T12:00:05Z",
-            },
-          ],
-          exchanges_used: 1,
-          exchange_limit: 10,
-          can_send: true,
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const h = await client.ask.history("vid_1");
-    expect(calls[0]!.url).toContain("/ask/vid_1");
-    expect(h.can_send).toBe(true);
-    expect(h.messages).toHaveLength(2);
-    expect(h.messages[0]!.role).toBe("user");
-  });
-
-  it("ask.send hits POST /ask/{id} and surfaces the server's {role, content, created_at}", async () => {
-    // Server returns {role, content, created_at} — see
-    // lenz/api/public_authed.py:1804. Pre-1.0.2 the mock used `{reply: ...}`
-    // and the interface declared `.reply`; both were drift away from the
-    // wire format. Test passed because mock + interface matched (each
-    // other, not the server).
-    const { fetch, calls } = makeFetch([
-      {
-        body: {
-          role: "expert",
-          content: "Because the Nobel citation says so.",
-          created_at: "2026-05-27T12:00:05Z",
-        },
-      },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const reply = await client.ask.send("vid_1", { message: "Why?" });
-    expect(calls[0]!.url).toContain("/ask/vid_1");
-    expect(calls[0]!.init.method).toBe("POST");
-    expect(reply.role).toBe("expert");
-    expect(reply.content).toContain("Nobel");
-    expect(reply.created_at).toBe("2026-05-27T12:00:05Z");
-  });
-
-  it("ask.send sends the Idempotency-Key it is given, and a fresh one per call when it is not", async () => {
-    // With a key, a retry of a question that already got a reply replays that
-    // reply instead of spending a second credit and appending the question
-    // plus a second answer to the conversation. A generated key is random per
-    // call, so asking the same question again is a new turn.
-    const { fetch, calls } = makeFetch([
-      { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:05Z" } },
-      { body: { role: "expert", content: "Because.", created_at: "2026-05-27T12:00:09Z" } },
-    ]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    await client.ask.send("vid_1", { message: "Why?", idempotencyKey: "ask-key-1" });
-    await client.ask.send("vid_1", { message: "Why?" });
-    expect(new Headers(calls[0]!.init.headers).get("Idempotency-Key")).toBe("ask-key-1");
-    expect(new Headers(calls[1]!.init.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f]{32}$/);
-  });
-
-  it("ask.reset hits DELETE /ask/{id}", async () => {
-    const { fetch, calls } = makeFetch([{ status: 200, body: { ok: true } }]);
-    const client = new Lenz({ apiKey: "lenz_t", fetch });
-    const ok = await client.ask.reset("vid_1");
-    expect(ok).toBe(true);
-    expect(calls[0]!.url).toContain("/ask/vid_1");
-    expect(calls[0]!.init.method).toBe("DELETE");
   });
 });
 

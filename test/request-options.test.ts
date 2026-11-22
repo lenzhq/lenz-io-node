@@ -272,27 +272,6 @@ const METHODS: Method[] = [
     run: (c, o) => c.verifications.delete("v1", o),
   },
   {
-    name: "ask.history",
-    python: "ask.history",
-    takes: "all",
-    replies: [{ body: { messages: [] } }],
-    run: (c, o) => c.ask.history("v1", o),
-  },
-  {
-    name: "ask.send",
-    python: "ask.send",
-    takes: "all",
-    replies: [{ body: { content: "x" } }],
-    run: (c, o) => c.ask.send("v1", { message: "why?" }, o),
-  },
-  {
-    name: "ask.reset",
-    python: "ask.reset",
-    takes: "all",
-    replies: [{ status: 200, body: { ok: true } }],
-    run: (c, o) => c.ask.reset("v1", o),
-  },
-  {
     name: "wait",
     python: "wait",
     takes: "wait",
@@ -407,7 +386,6 @@ describe("the parity map", () => {
     };
     own(Lenz.prototype, "");
     own(Object.getPrototypeOf(client.verifications) as object, "verifications.");
-    own(Object.getPrototypeOf(client.ask) as object, "ask.");
     // Private helpers TypeScript leaves on the prototype.
     for (const internal of ["submit", "log"]) names.delete(internal);
     const mapped = new Set([...METHODS.map((m) => m.name), ...Object.keys(NOT_A_CALL)]);
@@ -1149,31 +1127,31 @@ describe("withOptions()", () => {
   it("keeps a namespace's own overrides and class, bound to the copy", async () => {
     const { fetch, sent } = recorder([{ body: LIST(1, 1, 1) }]);
     const root = new Lenz({ apiKey: "lenz_t", fetch });
-    class MyAsk
-      extends (Object.getPrototypeOf(root.ask) as { constructor: new (c: Lenz) => object })
-        .constructor
+    class MyVerifications
+      extends (
+        Object.getPrototypeOf(root.verifications) as { constructor: new (c: Lenz) => object }
+      ).constructor
     {
       tag = "mine";
     }
-    (root as unknown as { ask: object }).ask = new MyAsk(root);
+    (root as unknown as { verifications: object }).verifications = new MyVerifications(root);
     root.verifications.get = (async () => ({
       verification_id: "stub",
     })) as unknown as typeof root.verifications.get;
     const copy = root.withOptions({ headers: { "X-A": "1" } });
-    expect(copy.ask).toBeInstanceOf(MyAsk);
-    expect((copy.ask as unknown as { tag: string }).tag).toBe("mine");
+    expect(copy.verifications).toBeInstanceOf(MyVerifications);
+    expect((copy.verifications as unknown as { tag: string }).tag).toBe("mine");
     expect((await copy.verifications.get("v1")).verification_id).toBe("stub");
     await copy.verifications.list();
     expect(header(sent[0]!, "X-A")).toBe("1");
   });
 
   it("binds the namespaces to the copy", async () => {
-    const { fetch, sent } = recorder([{ body: LIST(1, 1, 1) }, { body: { messages: [] } }]);
+    const { fetch, sent } = recorder([{ body: LIST(1, 1, 1) }]);
     const root = new Lenz({ apiKey: "lenz_t", fetch });
     const copy = root.withOptions({ headers: { "X-A": "1" } });
     expect(copy.verifications).not.toBe(root.verifications);
     await copy.verifications.list();
-    await copy.ask.history("v1");
-    expect(sent.map((s) => header(s, "X-A"))).toEqual(["1", "1"]);
+    expect(sent.map((s) => header(s, "X-A"))).toEqual(["1"]);
   });
 });

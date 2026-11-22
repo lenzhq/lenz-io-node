@@ -2,27 +2,6 @@
 
 exports[`the parity map > is the table the Python SDK mirrors 1`] = `
 {
-  "ask.history": [
-    "ask.history",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
-  "ask.reset": [
-    "ask.reset",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
-  "ask.send": [
-    "ask.send",
-    "signal",
-    "timeoutMs",
-    "maxRetries",
-    "headers",
-  ],
   "assess": [
     "assess",
     "signal",
