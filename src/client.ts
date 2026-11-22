@@ -5333,7 +5333,7 @@ export class Lenz {
         let rawBody = "";
         try {
           rawBody = await response.text();
-        } catch (exc) {
+        } catch {
           rethrowIfCallerAbort(signals);
           // A body that stalled until the timer fired, broke off or did not
           // decode: the status stands, the body is lost.

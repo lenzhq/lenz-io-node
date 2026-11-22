@@ -63,7 +63,7 @@ export interface Source extends RawBody {
  * An evidence item supporting or refuting a claim.
  * Alias for {@link Source}.
  */
-export interface Evidence extends Source {}
+export type Evidence = Source;
 
 export interface DebateSide extends RawBody {
   role?: string;
