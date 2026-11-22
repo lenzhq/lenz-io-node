@@ -17,7 +17,12 @@
     "extract": 0
   },
   "cost_options": {
-    "verify": { "depth": { "standard": 10, "low": 5 } }
+    "verify": {
+      "depth": {
+        "standard": 10,
+        "low": 5
+      }
+    }
   },
   "verify": {
     "quota_used": 13,

@@ -236,23 +236,9 @@ function isNewVerification(v: unknown): v is Obj {
 }
 
 /** A verification (detail, list item, a review's deep check, a webhook result). */
-export function normalizeVerification(v: unknown, unsent = false): unknown {
-  // An entity's null `name` reads as `""` only on a call's verification,
-  // where `EntityRef.name` is a string; a review row's and a webhook's keep it.
-  const named = unsent ? entityNames(v) : v;
-  if (!isNewVerification(named)) return named;
-  return { ...named, modified_at: legacyModifiedAt(named["created_at"], named["completed_at"]) };
-}
-
-/** `v` with an entity's `name` sent as `null` read as `""`, its 3.x default (Python's too). */
-function entityNames(v: unknown): unknown {
-  if (!isObj(v) || !Array.isArray(v["entities"])) return v;
-  const entities = v["entities"] as unknown[];
-  if (!entities.some((e) => isObj(e) && e["name"] === null)) return v;
-  return {
-    ...v,
-    entities: entities.map((e) => (isObj(e) && e["name"] === null ? { ...e, name: "" } : e)),
-  };
+export function normalizeVerification(v: unknown, _unsent = false): unknown {
+  if (!isNewVerification(v)) return v;
+  return { ...v, modified_at: legacyModifiedAt(v["created_at"], v["completed_at"]) };
 }
 
 /** `o` with every missing key of `defaults` (each a fresh copy). */
@@ -301,8 +287,6 @@ const AUDIT = {
 const VERIFICATION = {
   visibility: "private",
   depth: "standard",
-  domain: "",
-  entities: [],
   presumed_intent: "",
   verdict: "",
   confidence: "low",
@@ -330,7 +314,6 @@ export function webhookResultDefaults(result: unknown): unknown {
   const normalized = normalizeVerification(result);
   if (!isObj(normalized)) return normalized;
   const out = withDefaults(normalized, { ...VERIFICATION, modified_at: null });
-  out["entities"] = eachObj(out["entities"], (e) => withDefaults(e, { qid: null }));
   out["sources"] = eachObj(out["sources"], (src) => withDefaults(src, SOURCE));
   if (isObj(out["audit"])) {
     const audit = withDefaults(out["audit"], AUDIT);
@@ -345,13 +328,13 @@ export function webhookResultDefaults(result: unknown): unknown {
 }
 
 /** A page of verifications (`verifications.list`). */
-export function normalizeVerificationList(body: unknown, unsent = false): unknown {
+export function normalizeVerificationList(body: unknown, _unsent = false): unknown {
   if (!isObj(body) || !Array.isArray(body["items"])) return body;
   const items = body["items"] as unknown[];
-  if (!items.some(isNewVerification) && !(unsent && items.some((v) => entityNames(v) !== v))) {
+  if (!items.some(isNewVerification)) {
     return body;
   }
-  return { ...body, items: items.map((v) => normalizeVerification(v, unsent)) };
+  return { ...body, items: items.map((v) => normalizeVerification(v)) };
 }
 
 // ── /verify/status ──

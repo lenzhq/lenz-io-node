@@ -42,6 +42,8 @@ function load(dir: string, file: string): unknown {
 
 /** Keys this release adds beside the ones the previous release returned. */
 const NEW_NAMES = new Set([
+  "origin", // sources
+  "snippet_language", // sources
   "claims", // extract
   "claim", // receipt items, needs_input options, batch results
   "status", // assess rows
@@ -61,6 +63,9 @@ const NEW_NAMES = new Set([
   "headers", // every error from an HTTP answer (3.2): its response headers
   "searched_pages", // assess rows and review quick checks: the pages the reviewers looked at
 ]);
+
+/** Keys retired from response shapes. */
+const RETIRED_NAMES = new Set(["domain", "entities", "key_entities"]);
 
 /**
  * Per recording, the paths (dotted, `*` for an index) the server sends
@@ -332,6 +337,7 @@ function differences(
     const o = oracle as Record<string, unknown>;
     const out: string[] = [];
     for (const key of Object.keys(o)) {
+      if (RETIRED_NAMES.has(key)) continue;
       if (!(key in a) && !(canonical && differs(name, here(key))))
         out.push(`${here(key)}: missing (was ${JSON.stringify(o[key])})`);
       else if (key in a) out.push(...differences(a[key], o[key], name, canonical, here(key)));

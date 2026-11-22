@@ -40,7 +40,6 @@ const SAMPLE_CLAIMS = {
     },
   ],
   identified_claims: ["Revenue grew 20% in 2025."],
-  domain: "Business",
   original_input: "",
 };
 
@@ -375,7 +374,6 @@ describe("extractFile()", () => {
           },
         ],
         identified_claims: ["Revenue grew 20%."],
-        domain: "Business",
         locations: [
           {
             claim: "Revenue grew 20%.",

@@ -56,7 +56,9 @@ type WithoutNewValues<T> = T extends string | number | boolean | bigint | null |
                   : K extends "verdicts"
                     ? WithoutNoPublicRecord<T[K]>
                     : WithoutNewValues<T[K]>;
-          }
+          } & (T extends { content_status: "available" | "purged" }
+            ? { domain: string | null; entities: Old.ReviewEntity[] }
+            : unknown)
         : T;
 
 /** `WithoutNewValues` of a returned value, for the call-form checks. */
@@ -192,8 +194,6 @@ export const new_ReviewClaim: New.ReviewClaim = value<Old.ReviewClaim>();
 export const old_ReviewClaim: Old.ReviewClaim = value<WithoutNewValues<New.ReviewClaim>>();
 export const new_ReviewCredits: New.ReviewCredits = value<Old.ReviewCredits>();
 export const old_ReviewCredits: Old.ReviewCredits = value<New.ReviewCredits>();
-export const new_ReviewEntity: New.ReviewEntity = value<Old.ReviewEntity>();
-export const old_ReviewEntity: Old.ReviewEntity = value<New.ReviewEntity>();
 export const new_ReviewEnvelope: New.ReviewEnvelope = value<Old.ReviewEnvelope>();
 export const old_ReviewEnvelope: Old.ReviewEnvelope = value<WithoutNewValues<New.ReviewEnvelope>>();
 export const new_ReviewFailure: New.ReviewFailure = value<Old.ReviewFailure>();
@@ -262,8 +262,6 @@ export const new_CoverageStatus: New.CoverageStatus = value<Old.CoverageStatus>(
 export const old_CoverageStatus: Old.CoverageStatus = value<New.CoverageStatus>();
 export const new_DebateSide: New.DebateSide = value<Old.DebateSide>();
 export const old_DebateSide: Old.DebateSide = value<New.DebateSide>();
-export const new_EntityRef: New.EntityRef = value<Old.EntityRef>();
-export const old_EntityRef: Old.EntityRef = value<New.EntityRef>();
 export const new_ExtractInput: New.ExtractInput = value<Old.ExtractInput>();
 export const old_ExtractInput: Old.ExtractInput = value<New.ExtractInput>();
 export const new_ExtractStatus: New.ExtractStatus = value<Old.ExtractStatus>();
@@ -272,8 +270,6 @@ export const new_ExtractedClaims: New.ExtractedClaims = value<Old.ExtractedClaim
 export const old_ExtractedClaims: Old.ExtractedClaims = value<New.ExtractedClaims>();
 export const new_ExtractedClaim: New.ExtractedClaim = value<Old.ExtractedClaim>();
 export const old_ExtractedClaim: Old.ExtractedClaim = value<New.ExtractedClaim>();
-export const new_ExtractedEntity: New.ExtractedEntity = value<Old.ExtractedEntity>();
-export const old_ExtractedEntity: Old.ExtractedEntity = value<New.ExtractedEntity>();
 export const new_FailureClass: New.FailureClass = value<Old.FailureClass>();
 export const old_FailureClass: Old.FailureClass = value<New.FailureClass>();
 export const new_OnProgress: New.OnProgress = value<Old.OnProgress>();
