@@ -5,8 +5,6 @@
       {
         "verification_id": "8ae290d4",
         "claim": "The Earth is round.",
-        "domain": "Science",
-        "entities": [],
         "verdict": "True",
         "confidence": "high",
         "lenz_score": 9,

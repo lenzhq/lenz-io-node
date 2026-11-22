@@ -5,8 +5,6 @@
       {
         "verification_id": "6a14108d",
         "claim": "A library claim.",
-        "domain": "",
-        "entities": [],
         "verdict": "True",
         "confidence": "low",
         "lenz_score": 10,

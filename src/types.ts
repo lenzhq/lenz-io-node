@@ -113,17 +113,6 @@ export interface CandidateClaim extends RawBody {
   claim?: string;
   /** @deprecated Read `claim`; the same text. */
   text?: string;
-  domain?: string;
-}
-
-/**
- * An entity (person, place, organization, concept) referenced in the
- * claim. `qid` is the Wikidata Q identifier (e.g. `Q42`) when the entity
- * was resolved against Lenz's internal catalog; `null` otherwise.
- */
-export interface EntityRef extends RawBody {
-  name: string;
-  qid: string | null;
 }
 
 /**
@@ -210,8 +199,6 @@ export interface Verification extends RawBody, ResponseMeta {
    * Absent on servers that predate the field.
    */
   depth?: string;
-  domain?: string;
-  entities?: EntityRef[];
   presumed_intent?: string;
   // Verdict block (flat)
   /**
@@ -248,7 +235,7 @@ export interface Verification extends RawBody, ResponseMeta {
   /**
    * Output language (ISO 639-1). Always populated when the SDK is
    * current; `?` is kept for resilience against older / mocked payloads
-   * that may omit the field. Verdict / domain / status enums stay
+   * that may omit the field. Verdict / status enums stay
    * English regardless of language.
    */
   language?: string;
@@ -383,8 +370,6 @@ export interface Certificate extends RawBody, ResponseMeta {
 export interface VerificationListItem extends RawBody {
   verification_id?: string;
   claim?: string;
-  domain?: string;
-  entities?: EntityRef[];
   /** The five labels, or `"No Public Record"` (`lenz_score` is then `null`). */
   verdict?: VerificationVerdict | Verdict | (string & NonNullable<unknown>);
   confidence?: Confidence | (string & NonNullable<unknown>);
@@ -411,13 +396,6 @@ export interface VerificationList extends RawBody, ResponseMeta {
   total: number;
   page: number;
   page_size: number;
-}
-
-export interface ExtractedEntity extends RawBody {
-  /** Full formal entity name as identified by framing. */
-  name: string;
-  /** One of: `person` | `org` | `place` | `topic`. */
-  type: string;
 }
 
 /**
@@ -499,8 +477,6 @@ export interface ExtractedClaims extends RawBody, ResponseMeta {
    * sends the key.
    */
   candidate_claims?: string[];
-  domain?: string;
-  key_entities?: ExtractedEntity[];
   presumed_intent?: string;
   original_input?: string;
   /**
@@ -1824,13 +1800,6 @@ export interface ReviewAssessment extends RawBody {
   failure: ReviewFailureBlock | null;
 }
 
-/** An entity a deep check named. Either field may be `null`. */
-export interface ReviewEntity extends RawBody {
-  name: string | null;
-  /** The Wikidata id, when one was matched. */
-  qid: string | null;
-}
-
 /** The deep check (`/verify`) on one claim. */
 export interface ReviewVerification extends RawBody {
   status: "processing" | "completed" | "failed";
@@ -1848,8 +1817,6 @@ export interface ReviewVerification extends RawBody {
   visibility: string | null;
   /** EFFECTIVE: a cache hit may serve `standard` for a `low` request. */
   depth: string | null;
-  domain: string | null;
-  entities: ReviewEntity[];
   /** `"No Public Record"` when the deep check found no public record; `lenz_score` is then `null`. */
   verdict: VerificationVerdict | null;
   confidence: ConfidenceBand | null;

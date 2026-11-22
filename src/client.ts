@@ -14,7 +14,7 @@
  *   the claims are written in it). `verifyBatch` and `citecheck` do not take `"auto"`.
  * - Response shapes (Verification, VerificationListItem, AssessClaim)
  *   expose `language?: string` populated by the server. Verdict /
- *   domain / status enums stay English regardless of language; only
+ *   status enums stay English regardless of language; only
  *   free-form prose follows the request.
  * - Mixing the two (e.g. `language: "en"` on a request) would send
  *   an extra `"language": "en"` key on every English call — breaks the

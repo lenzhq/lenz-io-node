@@ -84,6 +84,9 @@ export function callsFor(name: string, body: Record<string, unknown>): Call[] | 
   if (name.startsWith("review__cancel_200")) {
     return [["ReviewFull", (c) => c.cancelReview(String(body["review_id"]))]];
   }
+  if (name.startsWith("review__list_")) {
+    return [["ReviewList", (c) => c.listReviews()]];
+  }
   if (name.startsWith("review__get_") || name.startsWith("failure_codes__review_")) {
     return body["view"] === "issues"
       ? [["ReviewIssues", (c) => c.getReview("r", { view: "issues" })]]

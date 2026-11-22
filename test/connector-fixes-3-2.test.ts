@@ -990,7 +990,7 @@ describe("a null where the 3.x type has none reads as not sent (default reading 
     ask: null,
     assess: null,
   };
-  const verification = { verification_id: "abcd1234", entities: [{ name: null, qid: null }] };
+  const verification = { verification_id: "abcd1234" };
   const { fetch } = server((s) => {
     if (s.url.includes("/verify/status/")) return { body: status };
     if (s.url.endsWith("/assess")) return { body: assess };
@@ -1020,8 +1020,6 @@ describe("a null where the 3.x type has none reads as not sent (default reading 
     expect(row["confidence"]).toBeUndefined();
     const u = (await c.usage()) as unknown as Record<string, unknown>;
     expect([u["verify"], u["ask"], u["assess"]]).toEqual([undefined, undefined, undefined]);
-    const v = await c.verifications.get("abcd1234");
-    expect(v.entities![0]!.name).toBe("");
     // raw keeps the null as sent.
     expect((st as { raw?: Record<string, unknown> }).raw!["hint"]).toBeNull();
   });
@@ -1032,42 +1030,6 @@ describe("a null where the 3.x type has none reads as not sent (default reading 
     expect(await c.assess({ claim: "a" })).toEqual(assess);
     expect(await c.usage()).toEqual(usage);
     expect(await c.verifications.get("abcd1234")).toEqual(verification);
-  });
-});
-
-describe("an entity's null name: \"\" only on a call's verification", () => {
-  it("a review row's verification and a webhook keep it null", async () => {
-    const entities = [{ name: null, qid: null }];
-    const review = {
-      review_id: "r1",
-      status: "completed",
-      claims: [
-        { index: 0, statement: "s", verification: { verification_id: "abcd1234", entities } },
-      ],
-      summary: {},
-    };
-    const { fetch } = server(() => ({ body: review }));
-    const out = await new Lenz({ apiKey: "lenz_t", fetch }).getReview("r1");
-    const v = out.claims[0]!.verification as unknown as { entities: Array<{ name: unknown }> };
-    expect(v.entities[0]!.name).toBeNull();
-
-    const payload = {
-      event: "verification.completed",
-      task_id: "t",
-      status: "completed",
-      result: { verification_id: "abcd1234", entities, completed_at: null },
-      attempt: 1,
-      delivered_at: new Date().toISOString(),
-    };
-    const raw = JSON.stringify(payload);
-    const { createHmac } = await import("node:crypto");
-    const sig = "sha256=" + createHmac("sha256", "whsec_x").update(raw).digest("hex");
-    const event = new LenzWebhooks({ secret: "whsec_x" }).parse(raw, {
-      "X-Lenz-Signature": sig,
-    }) as unknown as {
-      verification: { result: { entities: Array<{ name: unknown }> } };
-    };
-    expect(event.verification.result.entities[0]!.name).toBeNull();
   });
 });
 

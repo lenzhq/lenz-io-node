@@ -10,8 +10,6 @@
       "claim": "The Eiffel Tower is in Berlin.",
       "visibility": "private",
       "depth": "standard",
-      "domain": "",
-      "entities": [],
       "presumed_intent": "",
       "verdict": "",
       "confidence": "low",

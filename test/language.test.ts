@@ -127,7 +127,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -143,7 +142,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -159,7 +157,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -175,7 +172,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -192,7 +188,6 @@ describe("omit-language wire-format regression (CRITICAL)", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);
@@ -327,7 +322,6 @@ describe("explicit language wire format", () => {
           status: "ready",
           claim: "x",
           identified_claims: ["x"],
-          domain: "Science",
         },
       },
     ]);

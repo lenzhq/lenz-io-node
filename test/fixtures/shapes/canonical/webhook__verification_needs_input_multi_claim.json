@@ -10,12 +10,10 @@
       "reason": "multi_claim",
       "claims": [
         {
-          "claim": "The Earth is round.",
-          "domain": ""
+          "claim": "The Earth is round."
         },
         {
-          "claim": "The Moon is made of cheese.",
-          "domain": "Science"
+          "claim": "The Moon is made of cheese."
         }
       ],
       "hint": "The text holds several distinct claims. Send the ones to check to POST /verify/{task_id}/select."

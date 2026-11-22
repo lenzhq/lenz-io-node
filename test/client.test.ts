@@ -292,7 +292,6 @@ describe("Marquee verbs", () => {
         body: {
           status: "multi_claim",
           identified_claims: ["A", "B"],
-          domain: "Science",
           original_input: "...",
         },
       },
@@ -309,7 +308,6 @@ describe("Marquee verbs", () => {
           status: "ready",
           claim: "Sharks don't get cancer.",
           identified_claims: [],
-          domain: "Science",
           original_input: "Sharks don't get cancer.",
         },
       },
@@ -327,8 +325,6 @@ describe("Marquee verbs", () => {
           claim: "",
           identified_claims: [],
           candidate_claims: [],
-          domain: "",
-          key_entities: [],
           presumed_intent: "Raise a Series A round from investors.",
           original_input: "...",
         },
@@ -1083,10 +1079,7 @@ describe("verifyAndWait", () => {
         body: {
           status: "needs_input",
           reason: "multi_claim",
-          claims: [
-            { text: "A", domain: "X" },
-            { text: "B", domain: "Y" },
-          ],
+          claims: [{ text: "A" }, { text: "B" }],
         },
       },
     ]);
