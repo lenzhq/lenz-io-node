@@ -39,7 +39,7 @@ import type {
   VerificationListItem,
 } from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
-import type { VerificationFailed } from "../src/webhooks.js";
+import type { VerificationCompleted, VerificationFailed } from "../src/webhooks.js";
 import { createHmac } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -848,6 +848,9 @@ describe("contract", () => {
       "https://lenz.io/c/albert-einstein-won-the-1921-nobel-prize-in-physics-a1b2c3d4",
     );
 
+    const nprStatus = loadFixture("verify_status_no_public_record.json")["result"] as Verification;
+    expect(nprStatus.url).toBe("https://lenz.io/c/acme-corps-founder-gave-a-keynote-a1b2c3d4");
+
     const page = loadFixture("verifications_list.json");
     const items = page["items"] as Record<string, unknown>[];
     expect(items[0]?.["url"]).toBe(
@@ -855,20 +858,33 @@ describe("contract", () => {
     );
     expect(items[1]?.["url"]).toBe("https://lenz.io/c/water-boils-at-100c-at-sea-level-e5f6a7b8");
 
-    // Responses omitting url still fit
-    const withoutUrl: Verification = {
-      verification_id: "v_123",
-      claim: "Some claim",
-      verdict: "True",
-    };
-    expect(withoutUrl.url).toBeUndefined();
+    const webhookPayload = loadFixture("webhook_payload_completed.json");
+    webhookPayload["delivered_at"] = new Date().toISOString();
+    const secret = "whsec_test";
+    const body = JSON.stringify(webhookPayload);
+    const signature = "sha256=" + createHmac("sha256", secret).update(body, "utf8").digest("hex");
+    const webhook = new LenzWebhooks({ secret }).parse(body, {
+      "X-Lenz-Signature": signature,
+    }) as VerificationCompleted;
+    expect(webhook.event).toBe("verification.completed");
+    expect(webhook.result["url"]).toBe("https://lenz.io/c/sample-claim-text-a1b2c3d4");
 
-    const withoutUrlItem: VerificationListItem = {
-      verification_id: "v_123",
-      claim: "Some claim",
-      verdict: "True",
-    };
-    expect(withoutUrlItem.url).toBeUndefined();
+    // Explicit null url and omitted url both pass contract validation
+    const detailNull = { ...loadFixture("verifications_detail.json"), url: null };
+    expect(walk(detailNull, "Verification", "")).toEqual([]);
+    expect((detailNull as Verification).url).toBeNull();
+
+    const detailWithoutUrl = { ...loadFixture("verifications_detail.json") };
+    delete detailWithoutUrl["url"];
+    expect(walk(detailWithoutUrl, "Verification", "")).toEqual([]);
+
+    const itemNull = { ...(items[0] as Record<string, unknown>), url: null };
+    expect(walk(itemNull, "VerificationListItem", "")).toEqual([]);
+    expect((itemNull as VerificationListItem).url).toBeNull();
+
+    const itemWithoutUrl = { ...(items[0] as Record<string, unknown>) };
+    delete itemWithoutUrl["url"];
+    expect(walk(itemWithoutUrl, "VerificationListItem", "")).toEqual([]);
   });
 
   it("assess lists the claims past the ones checked in more_claims", () => {

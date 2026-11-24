@@ -186,9 +186,9 @@ export type Result<T> = T & ResultMeta;
  *
  * Later: `visibility` returns — "private" | "unlisted" | "public". It
  * echoes what you set on submit ("private"/"unlisted" are settable;
- * "public" can only be read, for listed claims). On the `2026-10-11`
- * shape, `url` returns as the address of the verification's page on
- * lenz.io (`null` when there is no page).
+ * "public" can only be read, for listed claims). `url` returns as the
+ * address of the verification's page on lenz.io (`null` when there is no
+ * page).
  */
 export interface Verification extends RawBody, ResponseMeta {
   verification_id?: string;
@@ -235,10 +235,12 @@ export interface Verification extends RawBody, ResponseMeta {
    */
   modified_at?: string | null;
   /**
-   * The address of the verification's page on lenz.io. Opens for the
-   * account that ran the check, signed in; anyone with the link can open
-   * it when `visibility` is `"unlisted"`. `null` when there is no page;
-   * absent on a response from an API version that predates the field.
+   * The address of the verification's page on lenz.io (as distinct from
+   * `AssessClaim.verification_url`, which is the API endpoint, and
+   * `Source.url`, which is a cited source). Opens for the account that ran
+   * the check, signed in; anyone with the link can open it when `visibility`
+   * is `"unlisted"`. `null` when there is no page; absent on a response from
+   * a server that predates the field.
    */
   url?: string | null;
   /**
@@ -391,7 +393,7 @@ export interface VerificationListItem extends RawBody {
   completed_at?: string | null;
   /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
   modified_at?: string | null;
-  /** The address of the verification's page on lenz.io. See `Verification.url`. */
+  /** The address of the verification's page on lenz.io, or `null` when there is no page. See `Verification.url`. */
   url?: string | null;
   /** Output language (ISO 639-1). See `Verification.language`. */
   language?: string;
