@@ -36,6 +36,7 @@ import type {
   ReviewFull,
   ReviewIssues,
   Verification,
+  VerificationListItem,
 } from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
 import type { VerificationFailed } from "../src/webhooks.js";
@@ -128,6 +129,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "completed_at",
     "modified_at",
+    "url",
     "language",
     "visibility",
     "depth",
@@ -169,6 +171,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "completed_at",
     "modified_at",
+    "url",
     "language",
     "suggested_rewrite",
   ]),
@@ -834,6 +837,38 @@ describe("contract", () => {
     );
     expect(typeof byVerdict["False"]).toBe("string");
     expect(byVerdict["True"]).toBeNull();
+  });
+
+  it("url: finished verifications and list items expose the claim page address, and older rows omit it", () => {
+    const detail = loadFixture("verifications_detail.json") as Verification;
+    expect(detail.url).toBe("https://lenz.io/c/water-boils-at-100c-at-sea-level-a1b2c3d4");
+
+    const status = loadFixture("verify_status_completed.json")["result"] as Verification;
+    expect(status.url).toBe(
+      "https://lenz.io/c/albert-einstein-won-the-1921-nobel-prize-in-physics-a1b2c3d4",
+    );
+
+    const page = loadFixture("verifications_list.json");
+    const items = page["items"] as Record<string, unknown>[];
+    expect(items[0]?.["url"]).toBe(
+      "https://lenz.io/c/albert-einstein-won-the-1921-nobel-prize-in-physics-a1b2c3d4",
+    );
+    expect(items[1]?.["url"]).toBe("https://lenz.io/c/water-boils-at-100c-at-sea-level-e5f6a7b8");
+
+    // Responses omitting url still fit
+    const withoutUrl: Verification = {
+      verification_id: "v_123",
+      claim: "Some claim",
+      verdict: "True",
+    };
+    expect(withoutUrl.url).toBeUndefined();
+
+    const withoutUrlItem: VerificationListItem = {
+      verification_id: "v_123",
+      claim: "Some claim",
+      verdict: "True",
+    };
+    expect(withoutUrlItem.url).toBeUndefined();
   });
 
   it("assess lists the claims past the ones checked in more_claims", () => {

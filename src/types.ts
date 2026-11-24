@@ -186,7 +186,9 @@ export type Result<T> = T & ResultMeta;
  *
  * Later: `visibility` returns — "private" | "unlisted" | "public". It
  * echoes what you set on submit ("private"/"unlisted" are settable;
- * "public" can only be read, for listed claims). `url` stays dropped.
+ * "public" can only be read, for listed claims). On the `2026-10-11`
+ * shape, `url` returns as the address of the verification's page on
+ * lenz.io (`null` when there is no page).
  */
 export interface Verification extends RawBody, ResponseMeta {
   verification_id?: string;
@@ -232,6 +234,13 @@ export interface Verification extends RawBody, ResponseMeta {
    * server sends only those.
    */
   modified_at?: string | null;
+  /**
+   * The address of the verification's page on lenz.io. Opens for the
+   * account that ran the check, signed in; anyone with the link can open
+   * it when `visibility` is `"unlisted"`. `null` when there is no page;
+   * absent on a response from an API version that predates the field.
+   */
+  url?: string | null;
   /**
    * Output language (ISO 639-1). Always populated when the SDK is
    * current; `?` is kept for resilience against older / mocked payloads
@@ -364,8 +373,8 @@ export interface Certificate extends RawBody, ResponseMeta {
 
 /**
  * Compact item for the verifications list endpoint and the public
- * library list. Slim shape — no `url` (reference by `verification_id`),
- * no `visibility` (1.1.0).
+ * library list. Slim shape — no `visibility` (the detail has it)
+ * (1.1.0).
  */
 export interface VerificationListItem extends RawBody {
   verification_id?: string;
@@ -382,6 +391,8 @@ export interface VerificationListItem extends RawBody {
   completed_at?: string | null;
   /** @deprecated Read `completed_at`. See `Verification.modified_at`. */
   modified_at?: string | null;
+  /** The address of the verification's page on lenz.io. See `Verification.url`. */
+  url?: string | null;
   /** Output language (ISO 639-1). See `Verification.language`. */
   language?: string;
   /**

@@ -56,6 +56,7 @@ const NEW_NAMES = new Set([
   "citation_limit_exceeded", // review and citation check summary
   "verification", // verification.* webhook events
   "completed_at", // verifications from the newer shape
+  "url", // finished verifications and verification list items: claim page address
   "retryable", // every error (3.0); a failed run's keeps its 2.x value
   "eventId", // every webhook event that carries an event_id (3.0)
   "idempotencyKey", // every error of a call that sent one (3.0)
