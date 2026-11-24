@@ -620,12 +620,13 @@ export async function POST(request: Request): Promise<Response> {
 
 Every claim-shaped response shares these fields at top level:
 
-| Field        | Type             | Notes                                                                                                                          |
-| ------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `claim`      | `string`         | The framed claim text.                                                                                                         |
-| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Mixed"` \| `"Mostly False"` \| `"False"`; a check can also read `"No Public Record"` (below). |
-| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                                                                |
-| `lenz_score` | `number \| null` | Integer 1–10 (deep verdicts and list endpoints; `assess` omits it); `null` on `"No Public Record"`.                            |
+| Field        | Type             | Notes                                                                                                                                     |
+| ------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `claim`      | `string`         | The framed claim text.                                                                                                                    |
+| `verdict`    | `string`         | `"True"` \| `"Mostly True"` \| `"Mixed"` \| `"Mostly False"` \| `"False"`; a check can also read `"No Public Record"` (below).            |
+| `confidence` | `string`         | Categorical: `"high"` \| `"medium"` \| `"low"`.                                                                                           |
+| `lenz_score` | `number \| null` | Integer 1–10 (deep verdicts and list endpoints; `assess` omits it); `null` on `"No Public Record"`.                                       |
+| `url`        | `string \| null` | The address of the verification's page on lenz.io (deep verdicts and list endpoints; `assess` omits it), or `null` when there is no page. |
 
 `"Error"` is not a verification verdict. It is the placeholder a failed `assess`
 row carries for 2.x code (read the row's `status` and `failure`; see the

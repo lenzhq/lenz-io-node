@@ -8,6 +8,7 @@ All notable changes to this SDK are documented here. Format follows
 
 ### Added
 
+- `Verification.url` and `VerificationListItem.url` (`string | null | undefined`): the address of the verification's page on lenz.io (`https://lenz.io/c/<slug>`), or `null` when there is no page (absent on responses from a server that predates the field).
 - `listReviews(options?) -> Promise<Result<ReviewList>>` and `listAllReviews(options?) -> AsyncIterable<ReviewListItem>`: list the account's API reviews (`GET /api/v1/reviews`, newest first, `pageSize` 1 to 100). Exports `ReviewList`, `ReviewListItem`, and `ListReviewsOptions` from both entry points.
 - Support for audio file uploads (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.webm`) and direct audio URLs across `extractFile`, `reviewFile`, and `reviewFileAndWait`.
 

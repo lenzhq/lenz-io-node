@@ -36,9 +36,10 @@ import type {
   ReviewFull,
   ReviewIssues,
   Verification,
+  VerificationListItem,
 } from "../src/types.js";
 import { LenzWebhooks } from "../src/webhooks.js";
-import type { VerificationFailed } from "../src/webhooks.js";
+import type { VerificationCompleted, VerificationFailed } from "../src/webhooks.js";
 import { createHmac } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -128,6 +129,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "completed_at",
     "modified_at",
+    "url",
     "language",
     "visibility",
     "depth",
@@ -169,6 +171,7 @@ const KEYSETS: Record<string, ReadonlySet<string>> = {
     "created_at",
     "completed_at",
     "modified_at",
+    "url",
     "language",
     "suggested_rewrite",
   ]),
@@ -834,6 +837,54 @@ describe("contract", () => {
     );
     expect(typeof byVerdict["False"]).toBe("string");
     expect(byVerdict["True"]).toBeNull();
+  });
+
+  it("url: finished verifications and list items expose the claim page address, and older rows omit it", () => {
+    const detail = loadFixture("verifications_detail.json") as Verification;
+    expect(detail.url).toBe("https://lenz.io/c/water-boils-at-100c-at-sea-level-a1b2c3d4");
+
+    const status = loadFixture("verify_status_completed.json")["result"] as Verification;
+    expect(status.url).toBe(
+      "https://lenz.io/c/albert-einstein-won-the-1921-nobel-prize-in-physics-a1b2c3d4",
+    );
+
+    const nprStatus = loadFixture("verify_status_no_public_record.json")["result"] as Verification;
+    expect(nprStatus.url).toBe("https://lenz.io/c/acme-corps-founder-gave-a-keynote-a1b2c3d4");
+
+    const page = loadFixture("verifications_list.json");
+    const items = page["items"] as Record<string, unknown>[];
+    expect(items[0]?.["url"]).toBe(
+      "https://lenz.io/c/albert-einstein-won-the-1921-nobel-prize-in-physics-a1b2c3d4",
+    );
+    expect(items[1]?.["url"]).toBe("https://lenz.io/c/water-boils-at-100c-at-sea-level-e5f6a7b8");
+
+    const webhookPayload = loadFixture("webhook_payload_completed.json");
+    webhookPayload["delivered_at"] = new Date().toISOString();
+    const secret = "whsec_test";
+    const body = JSON.stringify(webhookPayload);
+    const signature = "sha256=" + createHmac("sha256", secret).update(body, "utf8").digest("hex");
+    const webhook = new LenzWebhooks({ secret }).parse(body, {
+      "X-Lenz-Signature": signature,
+    }) as VerificationCompleted;
+    expect(webhook.event).toBe("verification.completed");
+    expect(webhook.result["url"]).toBe("https://lenz.io/c/sample-claim-text-a1b2c3d4");
+
+    // Explicit null url and omitted url both pass contract validation
+    const detailNull = { ...loadFixture("verifications_detail.json"), url: null };
+    expect(walk(detailNull, "Verification", "")).toEqual([]);
+    expect((detailNull as Verification).url).toBeNull();
+
+    const detailWithoutUrl = { ...loadFixture("verifications_detail.json") };
+    delete detailWithoutUrl["url"];
+    expect(walk(detailWithoutUrl, "Verification", "")).toEqual([]);
+
+    const itemNull = { ...(items[0] as Record<string, unknown>), url: null };
+    expect(walk(itemNull, "VerificationListItem", "")).toEqual([]);
+    expect((itemNull as VerificationListItem).url).toBeNull();
+
+    const itemWithoutUrl = { ...(items[0] as Record<string, unknown>) };
+    delete itemWithoutUrl["url"];
+    expect(walk(itemWithoutUrl, "VerificationListItem", "")).toEqual([]);
   });
 
   it("assess lists the claims past the ones checked in more_claims", () => {
