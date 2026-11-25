@@ -69,7 +69,7 @@ const capped = review.claims
 const results = capped.length ? await client.verifyBatchAndWait({ claims: capped }) : [];
 ```
 
-`review` reads the draft's claims (up to 20, most check-worthy first), gives
+`review` reads the draft's claims (up to 30, most check-worthy first), gives
 each a quick `assess` verdict, and sends the ones whose quick verdict is
 `False`, `Mostly False`, `Mixed` or `No Public Record`, or whose confidence is
 `low`, through the full `verify` pipeline, up to five. Change the rule with the flat options:
@@ -79,7 +79,7 @@ await client.review({
   text: draft,
   verdicts: ["False", "Mostly False"], // quick labels that get a deep check ([] = none)
   confidence: ["low", "medium"], // quick confidence bands that do ([] = none)
-  maxAssessments: 10, // how many claims get a quick verdict (1-20)
+  maxAssessments: 10, // how many claims get a quick verdict (0-50, default 30)
   maxVerifications: 3, // the deep-check cap (0 = quick verdicts only)
   depth: "low", // depth of every deep check
 });

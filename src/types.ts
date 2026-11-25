@@ -1639,7 +1639,11 @@ export interface EscalationPolicy extends RawBody {
 
 /** Why a claim did or did not get a deep check. */
 export interface Escalation extends RawBody {
-  /** Which rules matched: `verdict`, `confidence`, both, or none. */
+  /**
+   * Which rules matched: `verdict`, `confidence`, both, or none. When
+   * `suppliedSources` are provided, claims contradicted by a supplied source
+   * also include `"verdict"`.
+   */
   matched_rules: Array<"verdict" | "confidence">;
   disposition: EscalationDisposition;
 }
@@ -2253,7 +2257,7 @@ export interface ReviewInput {
   confidence?: ConfidenceBand[];
   /**
    * How many of the draft's claims, most check-worthy first, get a quick
-   * verdict (0-20). Default 20; `0` checks no claim (with `maxCitations`:
+   * verdict (0-50). Default 30; `0` checks no claim (with `maxCitations`:
    * a review of the draft's citations only).
    */
   maxAssessments?: number;
@@ -2585,7 +2589,7 @@ export interface ReviewFileOptions extends RequestOptions {
   verdicts?: VerificationVerdict[];
   /** Quick-check confidence bands that get a deep check. */
   confidence?: ConfidenceBand[];
-  /** How many of the document's claims get a quick verdict (0-20). */
+  /** How many of the document's claims get a quick verdict (0-50, default 30). */
   maxAssessments?: number;
   /** The deep-check cap (0-20). */
   maxVerifications?: number;
