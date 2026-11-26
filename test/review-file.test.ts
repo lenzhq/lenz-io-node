@@ -259,6 +259,41 @@ describe("reviewFile()", () => {
       vi.useRealTimers();
     }
   });
+
+  it("sends start_page and end_page on reviewFile and reviewFileAndWait for PDFs and rejects invalid ranges", async () => {
+    const { fetch, calls } = makeFetch([
+      { status: 202, body: { review_id: "442b6aa9", status: "queued" } },
+      { status: 200, body: COMPLETED },
+    ]);
+    const client = new Lenz({ apiKey: "lenz_t", fetch });
+    const res = await client.reviewFileAndWait(new Uint8Array([1, 2, 3]), {
+      filename: "paper.pdf",
+      startPage: 3,
+      endPage: 9,
+    });
+    expect(res.review_id).toBe("442b6aa9");
+    const form = calls[0]!.init.body as FormData;
+    expect(form.get("start_page")).toBe("3");
+    expect(form.get("end_page")).toBe("9");
+
+    const errDocx = await client
+      .reviewFile(new Uint8Array([1, 2, 3]), { filename: "report.docx", startPage: 1 })
+      .catch((e) => e);
+    expect(errDocx).toBeInstanceOf(LenzValidationError);
+    expect(errDocx.param).toBe("startPage");
+
+    const errDocxEnd = await client
+      .reviewFile(new Uint8Array([1, 2, 3]), { filename: "report.docx", endPage: 2 })
+      .catch((e) => e);
+    expect(errDocxEnd).toBeInstanceOf(LenzValidationError);
+    expect(errDocxEnd.param).toBe("endPage");
+
+    const errRange = await client
+      .reviewFile(new Uint8Array([1, 2, 3]), { filename: "paper.pdf", startPage: 9, endPage: 3 })
+      .catch((e) => e);
+    expect(errRange).toBeInstanceOf(LenzValidationError);
+    expect(errRange.param).toBe("startPage");
+  });
 });
 
 describe("reviewFileAndWait()", () => {
