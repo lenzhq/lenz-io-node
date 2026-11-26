@@ -1060,7 +1060,7 @@ function resolveUpload(
   file: Blob | ArrayBuffer | Uint8Array,
   filenameOption: string | undefined,
   methodName: string,
-): { uploadBlob: Blob; filename: string } {
+): { uploadBlob: Blob; filename: string; isPdf: boolean } {
   if (!isBinaryFileSource(file)) {
     throw argumentError(
       "file must be a Blob, ArrayBuffer, or Uint8Array.",
@@ -1152,7 +1152,49 @@ function resolveUpload(
     uploadBlob = new Blob([file as any], { type: mime });
   }
 
-  return { uploadBlob, filename };
+  return { uploadBlob, filename, isPdf };
+}
+
+const MAX_PDF_PAGE = 300;
+
+function checkPdfPageRange(start: unknown, end: unknown, isPdf: boolean, where: string): void {
+  if (start !== undefined) {
+    if (
+      typeof start !== "number" ||
+      !Number.isInteger(start) ||
+      start < 1 ||
+      start > MAX_PDF_PAGE
+    ) {
+      throw argumentError(
+        `${where}: startPage must be an integer between 1 and ${MAX_PDF_PAGE}.`,
+        "invalid_argument",
+        "startPage",
+      );
+    }
+  }
+  if (end !== undefined) {
+    if (typeof end !== "number" || !Number.isInteger(end) || end < 1 || end > MAX_PDF_PAGE) {
+      throw argumentError(
+        `${where}: endPage must be an integer between 1 and ${MAX_PDF_PAGE}.`,
+        "invalid_argument",
+        "endPage",
+      );
+    }
+  }
+  if (typeof start === "number" && typeof end === "number" && start > end) {
+    throw argumentError(
+      `${where}: startPage must be less than or equal to endPage.`,
+      "invalid_argument",
+      "startPage",
+    );
+  }
+  if ((start !== undefined || end !== undefined) && !isPdf) {
+    throw argumentError(
+      `${where}: startPage and endPage are only supported for PDF (.pdf) files.`,
+      "invalid_argument",
+      start !== undefined ? "startPage" : "endPage",
+    );
+  }
 }
 
 /** THIS citation check: its id, a known status, its three lists, its summary and credits. */
@@ -2880,7 +2922,8 @@ export class Lenz {
   ): Promise<Result<ExtractedClaims>> {
     requireObject(options, "extractFile()", "options");
     const call = resolveCall(this, options, "extractFile()");
-    const { uploadBlob, filename } = resolveUpload(file, options.filename, "extractFile()");
+    const { uploadBlob, filename, isPdf } = resolveUpload(file, options.filename, "extractFile()");
+    checkPdfPageRange(options.startPage, options.endPage, isPdf, "extractFile()");
 
     const form = new FormData();
     form.append("file", uploadBlob, filename);
@@ -2892,6 +2935,12 @@ export class Lenz {
     }
     if (typeof options.locate === "boolean") {
       form.append("locate", options.locate ? "true" : "false");
+    }
+    if (options.startPage !== undefined) {
+      form.append("start_page", String(options.startPage));
+    }
+    if (options.endPage !== undefined) {
+      form.append("end_page", String(options.endPage));
     }
 
     const idempotencyKey = await callIdempotencyKey(options);
@@ -3711,7 +3760,8 @@ export class Lenz {
     options: ReviewFileOptions = {},
   ): Promise<Result<ReviewStarted>> {
     requireObject(options, "reviewFile()", "options");
-    const { uploadBlob, filename } = resolveUpload(file, options.filename, "reviewFile()");
+    const { uploadBlob, filename, isPdf } = resolveUpload(file, options.filename, "reviewFile()");
+    checkPdfPageRange(options.startPage, options.endPage, isPdf, "reviewFile()");
 
     const form = new FormData();
     form.append("file", uploadBlob, filename);
@@ -3724,6 +3774,12 @@ export class Lenz {
     }
     if (options.webhookUrl !== undefined && options.webhookUrl !== null) {
       form.append("webhook_url", options.webhookUrl);
+    }
+    if (options.startPage !== undefined) {
+      form.append("start_page", String(options.startPage));
+    }
+    if (options.endPage !== undefined) {
+      form.append("end_page", String(options.endPage));
     }
 
     const wireEsc: Record<string, unknown> = {};
@@ -3843,6 +3899,8 @@ export class Lenz {
           depth: options.depth,
           maxCitations: options.maxCitations,
           suggestEdits: options.suggestEdits,
+          startPage: options.startPage,
+          endPage: options.endPage,
           suppliedSources: options.suppliedSources,
           supplied_sources: options.supplied_sources,
           idempotency: options.idempotency,

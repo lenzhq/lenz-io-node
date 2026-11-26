@@ -131,6 +131,41 @@ describe("extractFile()", () => {
       expect(err.code).toBe("invalid_option");
       expect(err.param).toBe("options");
     });
+
+    it("sends start_page and end_page for PDF files and rejects invalid or non-PDF ranges", async () => {
+      const { fetch, calls } = makeFetch([{ status: 200, body: SAMPLE_CLAIMS }]);
+      const client = new Lenz({ apiKey: "lenz_t", fetch });
+      await client.extractFile(new Uint8Array([1, 2, 3]), {
+        filename: "paper.pdf",
+        startPage: 2,
+        endPage: 8,
+      });
+      const form = calls[0]!.init.body as FormData;
+      expect(form.get("start_page")).toBe("2");
+      expect(form.get("end_page")).toBe("8");
+
+      const errNonPdf = await client
+        .extractFile(new Uint8Array([1, 2, 3]), { filename: "report.docx", startPage: 1 })
+        .catch((e) => e);
+      expect(errNonPdf).toBeInstanceOf(LenzValidationError);
+      expect(errNonPdf.param).toBe("startPage");
+
+      const errOrder = await client
+        .extractFile(new Uint8Array([1, 2, 3]), {
+          filename: "paper.pdf",
+          startPage: 10,
+          endPage: 3,
+        })
+        .catch((e) => e);
+      expect(errOrder).toBeInstanceOf(LenzValidationError);
+      expect(errOrder.param).toBe("startPage");
+
+      const errOut = await client
+        .extractFile(new Uint8Array([1, 2, 3]), { filename: "paper.pdf", endPage: 301 })
+        .catch((e) => e);
+      expect(errOut).toBeInstanceOf(LenzValidationError);
+      expect(errOut.param).toBe("endPage");
+    });
   });
 
   describe("supported file formats and MIME types", () => {

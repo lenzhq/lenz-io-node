@@ -1316,6 +1316,14 @@ export interface ExtractFileOptions extends RequestOptions {
    */
   locate?: boolean;
   /**
+   * First PDF page to read (1-indexed, inclusive, 1-300; PDF files only).
+   */
+  startPage?: number;
+  /**
+   * Last PDF page to read (1-indexed, inclusive, 1-300; PDF files only).
+   */
+  endPage?: number;
+  /**
    * Send an `Idempotency-Key` so a retry after a timeout or network drop replays
    * the first response instead of consuming another unit of the daily cap. Defaults to `true`.
    */
@@ -2599,6 +2607,10 @@ export interface ReviewFileOptions extends RequestOptions {
   maxCitations?: number;
   /** Return suggested edits for claims with rewrites. */
   suggestEdits?: boolean;
+  /** First PDF page to read (1-indexed, inclusive, 1-300; PDF files only). */
+  startPage?: number;
+  /** Last PDF page to read (1-indexed, inclusive, 1-300; PDF files only). */
+  endPage?: number;
   /** Full-text source documents supplied by the caller. */
   suppliedSources?: SuppliedSource[];
   /** Alias for `suppliedSources`. */
